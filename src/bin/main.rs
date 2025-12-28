@@ -11,24 +11,13 @@
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
-use esp_hal::{
-    Config,
-    gpio::AnyPin,
-    rmt::{ChannelCreator, Rmt},
-    time::Rate,
-    timer::timg::TimerGroup,
-};
-use esp_hal_smartled::{SmartLedsAdapterAsync, buffer_size_async};
+use esp_hal::{Config, rmt::Rmt, time::Rate, timer::timg::TimerGroup};
 use esp_radio::ble::controller;
 use panic_rtt_target as _;
 use rtt_target::rtt_init_defmt;
-use smart_leds::{
-    RGB8, SmartLedsWriteAsync, brightness, gamma,
-    hsv::{Hsv, hsv2rgb},
-};
 use trouble_host::prelude::*;
 
-use c6_tester::bas_peripheral::ble_bas_peripheral_run;
+use c6_tester::{bas_peripheral::ble_bas_peripheral_run, led_runner::slide_rbg_colors};
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -67,36 +56,5 @@ async fn main(spawner: Spawner) -> ! {
     loop {
         info!("Bing!");
         Timer::after(Duration::from_millis(1000)).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn slide_rbg_colors(
-    // mut rmt_channel: esp_hal::rmt::Channel<'static, esp_hal::Blocking, esp_hal::rmt::Tx>,
-    rmt_channel: ChannelCreator<'static, esp_hal::Async, 0>,
-    gpio8: AnyPin<'static>,
-) {
-    let mut rmt_buffer = [esp_hal::rmt::PulseCode::default(); buffer_size_async(1)];
-    let mut led = SmartLedsAdapterAsync::new(rmt_channel, gpio8, &mut rmt_buffer);
-
-    let mut color = Hsv {
-        hue: 0,
-        sat: 255,
-        val: 255,
-    };
-    let mut data: RGB8;
-    let level: u8 = 10;
-
-    loop {
-        for hue in 0..=255 {
-            color.hue = hue;
-
-            data = hsv2rgb(color);
-
-            led.write(brightness(gamma([data].into_iter()), level))
-                .await
-                .unwrap();
-            Timer::after(Duration::from_millis(100)).await;
-        }
     }
 }
