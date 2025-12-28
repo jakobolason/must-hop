@@ -8,9 +8,8 @@
 #![deny(clippy::large_stack_frames)]
 
 // use esp_backtrace as _;
-use defmt::{info, warn};
+use defmt::info;
 use embassy_executor::Spawner;
-use embassy_futures::{join::join, select::select};
 use embassy_time::{Duration, Timer};
 use esp_hal::{
     Config,
@@ -27,7 +26,9 @@ use smart_leds::{
     RGB8, SmartLedsWriteAsync, brightness, gamma,
     hsv::{Hsv, hsv2rgb},
 };
-use trouble_host::{advertise, prelude::*};
+use trouble_host::prelude::*;
+
+use c6_tester::bas_peripheral::ble_bas_peripheral_run;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -66,185 +67,6 @@ async fn main(spawner: Spawner) -> ! {
     loop {
         info!("Bing!");
         Timer::after(Duration::from_millis(1000)).await;
-    }
-}
-
-const CONNECTIONS_MAX: usize = 1;
-/// Max number of L2CAP Channels
-const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
-
-#[gatt_server]
-struct Server {
-    battery_service: BatteryService,
-}
-
-/// Battery Service
-#[gatt_service(uuid = service::BATTERY)]
-struct BatteryService {
-    /// Battery level
-    #[descriptor(uuid = descriptors::VALID_RANGE, read, value = [0, 100])]
-    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level")]
-    #[characteristic(uuid = characteristic::BATTERY_LEVEL, read, notify, value = 10)]
-    level: u8,
-    #[characteristic(uuid = "408813df-5dd4-1f87-ec11-cdb001100000", write, read, notify)]
-    status: bool,
-}
-
-/// Run the BLE stack
-pub async fn ble_bas_peripheral_run<C>(controller: C)
-where
-    C: Controller,
-{
-    // Using a fixed random address is useful for testing, in real scenarios
-    // the MAC 6 byte array can be used as the address
-    let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
-    info!("our address = {:?}", address);
-
-    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
-        HostResources::new();
-    let stack = trouble_host::new(controller, &mut resources).set_random_address(address);
-    let Host {
-        mut peripheral,
-        runner,
-        ..
-    } = stack.build();
-    info!("Starting advertising and GATT service");
-    let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
-        name: "TrouBle",
-        appearance: &appearance::power_device::GENERIC_POWER_DEVICE,
-    }))
-    .unwrap();
-    let _ = join(ble_task(runner), async {
-        loop {
-            match advertise("trouBLE example", &mut peripheral, &server).await {
-                Ok(conn) => {
-                    // these tasks only run after a connection has been established
-                    let a = gatt_events_task(&server, &conn);
-                    let b = custom_task(&server, &conn, &stack);
-
-                    select(a, b).await;
-                }
-                Err(e) => {
-                    panic!("[adv] error: {:?}", e);
-                }
-            }
-        }
-    })
-    .await;
-}
-
-async fn ble_task<C, P>(mut runner: Runner<'_, C, P>)
-where
-    C: Controller,
-    P: PacketPool,
-{
-    loop {
-        if let Err(e) = runner.run().await {
-            panic!("[ble_task] error: {:?}", e);
-        }
-    }
-}
-
-/// Stream Events until the connection closes.
-///
-/// This function will handle the GATT events and process them.
-/// This is how we interact with read and write requests.
-async fn gatt_events_task<P: PacketPool>(
-    server: &Server<'_>,
-    conn: &GattConnection<'_, '_, P>,
-) -> Result<(), Error> {
-    let level = server.battery_service.level;
-    let reason = loop {
-        match conn.next().await {
-            GattConnectionEvent::Disconnected { reason } => break reason,
-            GattConnectionEvent::Gatt { event } => {
-                match &event {
-                    GattEvent::Read(event) => {
-                        if event.handle() == level.handle {
-                            let value = server.get(&level);
-                            info!("[gatt] Read Event to Level Characteristic: {:?}", value);
-                        }
-                    }
-                    GattEvent::Write(event) => {
-                        if event.handle() == level.handle {
-                            info!(
-                                "[gatt] Write Event to Level Characteristic: {:?}",
-                                event.data()
-                            );
-                        }
-                    }
-                    _ => {}
-                };
-                // This step is also performed at drop(), but writing it explicitly is necessary
-                // in order to ensure reply is sent.
-                match event.accept() {
-                    Ok(reply) => reply.send().await,
-                    Err(e) => warn!("[gatt] error sending response: {:?}", e),
-                };
-            }
-            _ => {} // ignore other Gatt Connection Events
-        }
-    };
-    info!("[gatt] disconnected: {:?}", reason);
-    Ok(())
-}
-
-/// Create an advertiser to use to connect to a BLE Central, and wait for it to connect.
-async fn advertise<'values, 'server, C: Controller>(
-    name: &'values str,
-    peripheral: &mut Peripheral<'values, C, DefaultPacketPool>,
-    server: &'server Server<'values>,
-) -> Result<GattConnection<'values, 'server, DefaultPacketPool>, BleHostError<C::Error>> {
-    let mut advertiser_data = [0; 31];
-    let len = AdStructure::encode_slice(
-        &[
-            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ServiceUuids16(&[[0x0f, 0x18]]),
-            AdStructure::CompleteLocalName(name.as_bytes()),
-        ],
-        &mut advertiser_data[..],
-    )?;
-    let advertiser = peripheral
-        .advertise(
-            &Default::default(),
-            Advertisement::ConnectableScannableUndirected {
-                adv_data: &advertiser_data[..len],
-                scan_data: &[],
-            },
-        )
-        .await?;
-    info!("[adv] advertising");
-    let conn = advertiser.accept().await?.with_attribute_server(server)?;
-    info!("[adv] connection established");
-    Ok(conn)
-}
-
-/// Example task to use the BLE notifier interface.
-/// This task will notify the connected central of a counter value every 2 seconds.
-/// It will also read the RSSI value every 2 seconds.
-/// and will stop when the connection is closed by the central or an error occurs.
-async fn custom_task<C: Controller, P: PacketPool>(
-    server: &Server<'_>,
-    conn: &GattConnection<'_, '_, P>,
-    stack: &Stack<'_, C, P>,
-) {
-    let mut tick: u8 = 0;
-    let level = server.battery_service.level;
-    loop {
-        tick = tick.wrapping_add(1);
-        info!("[custom_task] notifying connection of tick {}", tick);
-        if level.notify(conn, &tick).await.is_err() {
-            info!("[custom_task] error notifying connection");
-            break;
-        };
-        // read RSSI (Received Signal Strength Indicator) of the connection.
-        if let Ok(rssi) = conn.raw().rssi(stack).await {
-            info!("[custom_task] RSSI: {:?}", rssi);
-        } else {
-            info!("[custom_task] error getting RSSI");
-            break;
-        };
-        Timer::after_secs(2).await;
     }
 }
 
