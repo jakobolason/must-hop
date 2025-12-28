@@ -20,7 +20,7 @@ use esp_hal::{
 };
 use esp_hal_smartled::{SmartLedsAdapterAsync, buffer_size_async};
 use panic_rtt_target as _;
-use rtt_target::rtt_init_default;
+use rtt_target::rtt_init_defmt;
 use smart_leds::{
     RGB8, SmartLedsWriteAsync, brightness, gamma,
     hsv::{Hsv, hsv2rgb},
@@ -36,7 +36,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     let p = esp_hal::init(Config::default());
-    rtt_init_default!();
+    rtt_init_defmt!();
     info!("Setting up peripherals ...");
     // for executor
     let timg0 = TimerGroup::new(p.TIMG0);

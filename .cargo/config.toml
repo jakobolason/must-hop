@@ -10,6 +10,10 @@ rustflags = [
   # NOTE: May negatively impact performance of produced code
   "-C",
   "force-frame-pointers",
+
+  # "-C",
+  # "link-arg=-Tlink.x",
+
   "-C",
   "link-arg=-Tdefmt.x",
 ]
