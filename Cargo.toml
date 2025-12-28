@@ -11,7 +11,16 @@ path = "./src/bin/main.rs"
 [dependencies]
 esp-hal = { version = "~1.0", features = ["defmt", "esp32c6", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.4.0", features = ["defmt", "esp32c6"] }
-esp-rtos = { version = "0.2.0", features = ["embassy", "esp32c6"] }
+esp-rtos = { version = "0.2.0", features = ["embassy", "esp32c6", "esp-radio"] }
+
+# for BLE 
+esp-radio = { version = "0.17.0", features = ["esp32c6", "ble", "unstable"] }
+trouble-host = { version = "0.5.1", features = [
+  "default-packet-pool-mtu-255",
+  "derive",
+  "defmt",
+] }
+esp-alloc = { version = "0.9.0", features = ["esp32c6"] }
 
 
 embassy-executor = "0.9.1"
@@ -27,11 +36,15 @@ rtt-target = { version = "0.6.2", features = ["defmt"] }
 # panic handling
 critical-section = "1.2.0"
 panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
+static_cell = "2.1.1"
+embassy-futures = "0.1.2"
+embassy-sync = "0.7.2"
+
 
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
-opt-level = "s"
+opt-level = 3 # was "s", chose 2 for esp-radio
 
 [profile.release]
 codegen-units = 1        # LLVM can perform better optimizations using a single thread
