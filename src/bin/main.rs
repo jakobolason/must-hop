@@ -11,7 +11,7 @@
 use defmt::info;
 // use embassy_embedded_hal::shared_bus::asynch::spi;
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
+// use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex};
 use embassy_time::{Delay, Duration, Timer};
@@ -32,7 +32,7 @@ use lora_phy::{LoRa, RxMode};
 use panic_rtt_target as _;
 use rtt_target::rtt_init_defmt;
 
-// use c6_tester::{bas_peripheral::ble_bas_peripheral_run, led_runner::slide_rbg_colors};
+use c6_tester::led_runner::slide_rbg_colors;
 use static_cell::StaticCell;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -46,15 +46,15 @@ struct Data {
 static DATA_CHANNEL: channel::Channel<CriticalSectionRawMutex, Data, 4> = channel::Channel::new();
 
 // From lora_p2p_recieve.rs example:
-const LORA_FREQUENCY_IN_HZ: u32 = 903_900_000; // WARNING: Set this appropriately for the region
+const LORA_FREQUENCY_IN_HZ: u32 = 868_000_000; // WARNING: Set this appropriately for the region
 
 static SPI_BUS: StaticCell<
     mutex::Mutex<CriticalSectionRawMutex, esp_hal::spi::master::Spi<'static, Async>>,
 > = StaticCell::new();
 
-// TODO: Check these gpio pins, example shows GPIO8 for below nss
+// TODO: Check these gpio pins, example shows GPIO8 nss
 struct RadioReqs {
-    nss_req: peripherals::GPIO8<'static>,
+    nss_req: peripherals::GPIO7<'static>,
     sclk: peripherals::GPIO9<'static>,
     mosi: peripherals::GPIO10<'static>,
     miso: peripherals::GPIO11<'static>,
@@ -81,16 +81,17 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, sw_interrup.software_interrupt0);
 
     // configure Remote Control Transciever (RCT) peripheral globally
-    // let rmt: Rmt<'_, esp_hal::Async> = Rmt::new(p.RMT, Rate::from_mhz(80))
-    //     .expect("Failed to initialize RMT")
-    //     .into_async();
+    let rmt: Rmt<'_, esp_hal::Async> = Rmt::new(p.RMT, Rate::from_mhz(80))
+        .expect("Failed to initialize RMT")
+        .into_async();
     // To make RGB led slide through colors
-    // spawner
-    //     .spawn(slide_rbg_colors(rmt.channel0, p.GPIO8.into()))
-    //     .expect("TASK slide_rbg_colors failed");
+    spawner
+        .spawn(slide_rbg_colors(rmt.channel0, p.GPIO8.into()))
+        .expect("TASK slide_rbg_colors failed");
 
+    // Takes ownership of peripherals
     let radio_reqs = RadioReqs {
-        nss_req: p.GPIO8,
+        nss_req: p.GPIO7,
         sclk: p.GPIO9,
         mosi: p.GPIO10,
         miso: p.GPIO11,
@@ -117,13 +118,17 @@ pub async fn radio_task(
     receiver: channel::Receiver<'static, CriticalSectionRawMutex, Data, 4>,
     radio_reqs: RadioReqs,
 ) -> ! {
+    // Static size we can receive
     let mut receiving_buffer = [00u8; 100];
+    // Setup radio
     let (mut lora, modulation_params, rx_packet_params) =
         match init_radio(radio_reqs, receiving_buffer.len() as u8).await {
             Ok(tup) => tup,
             Err(err) => {
+                // Because this is a task, we cannot return
                 info!("Radio error: {}", err);
                 loop {
+                    // Therefore this loop should signal to the engineer that something is wrong
                     info!("In error state");
                     embassy_time::Timer::after_secs(30).await;
                 }
@@ -139,30 +144,47 @@ pub async fn radio_task(
             embassy_time::Timer::after_secs(30).await;
         }
     }
-
+    let expected_msg = b"hello";
+    let expected_msg_len = expected_msg.len();
     loop {
-        let race_winner = select(
-            lora.rx(&rx_packet_params, &mut receiving_buffer),
-            receiver.receive(),
-        )
-        .await;
-
-        match race_winner {
-            // A message appears
-            Either::First(rx_result) => {
-                todo!();
-                // Ok((rec_len, _rx_pkt_status)) => {
-                //   // Check for successfull, something like CRC, To/From fields
-                // }
-                // Err(e) info!("Error in recieve: {:?}", err)
+        receiving_buffer = [00u8; 100];
+        match lora.rx(&rx_packet_params, &mut receiving_buffer).await {
+            Ok((received_len, _rx_pkt_status)) => {
+                if (received_len == expected_msg_len as u8)
+                    && (receiving_buffer[..expected_msg_len] == *expected_msg)
+                {
+                    info!(
+                        "rx successfull: {}",
+                        core::str::from_utf8(&receiving_buffer[..received_len as usize]).unwrap()
+                    );
+                } else {
+                    info!("rx unknown packet");
+                }
             }
-
-            // Or a sensor data is ready to be send
-            Either::Second(data_to_be_sent) => {
-                todo!();
-                // lora.tx(...)
-            }
+            Err(err) => info!("rx unsuccessfull: {}", err),
         }
+        // let race_winner = select(
+        //     lora.rx(&rx_packet_params, &mut receiving_buffer),
+        //     receiver.receive(),
+        // )
+        // .await;
+        //
+        // match race_winner {
+        //     // A message appears
+        //     Either::First(rx_result) => {
+        //         todo!();
+        //         // Ok((rec_len, _rx_pkt_status)) => {
+        //         //   // Check for successfull, something like CRC, To/From fields
+        //         // }
+        //         // Err(e) info!("Error in recieve: {:?}", err)
+        //     }
+        //
+        //     // Or a sensor data is ready to be send
+        //     Either::Second(data_to_be_sent) => {
+        //         todo!();
+        //         // lora.tx(...)
+        //     }
+        // }
     }
 }
 
