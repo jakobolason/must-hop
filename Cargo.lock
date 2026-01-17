@@ -107,6 +107,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "defmt 1.0.1",
+ "embassy-embedded-hal",
  "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
@@ -117,6 +118,7 @@ dependencies = [
  "esp-hal-smartled",
  "esp-radio",
  "esp-rtos",
+ "lora-phy",
  "panic-rtt-target",
  "rtt-target",
  "smart-leds",
@@ -1132,6 +1134,25 @@ name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "lora-modulation"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c96c4a41a1f1ad04de765306e1829c7007a37898fe4033204fa82cf2e055624"
+
+[[package]]
+name = "lora-phy"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61471c3b2909789e3332083577f6cf6c41a4fcf37674ef15156bcbb20504ac65"
+dependencies = [
+ "defmt 0.3.100",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "lora-modulation",
+ "num-traits",
+]
 
 [[package]]
 name = "memchr"

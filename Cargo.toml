@@ -39,6 +39,8 @@ panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
 static_cell = "2.1.1"
 embassy-futures = "0.1.2"
 embassy-sync = "0.7.2"
+embassy-embedded-hal = "0.5.0"
+lora-phy = "3.0.1"
 
 
 [profile.dev]
