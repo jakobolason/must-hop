@@ -9,7 +9,7 @@
 
 // use esp_backtrace as _;
 use defmt::info;
-use embassy_embedded_hal::shared_bus::asynch::spi;
+// use embassy_embedded_hal::shared_bus::asynch::spi;
 use embassy_executor::Spawner;
 use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
@@ -24,13 +24,15 @@ use esp_hal::{
     time::Rate,
     timer::timg::TimerGroup,
 };
-use lora_phy::LoRa;
 use lora_phy::iv::GenericSx126xInterfaceVariant;
+use lora_phy::mod_params::{ModulationParams, PacketParams, RadioError};
+use lora_phy::mod_traits::RadioKind;
 use lora_phy::sx126x::{self, Sx126x, Sx1262};
+use lora_phy::{LoRa, RxMode};
 use panic_rtt_target as _;
 use rtt_target::rtt_init_defmt;
 
-use c6_tester::{bas_peripheral::ble_bas_peripheral_run, led_runner::slide_rbg_colors};
+// use c6_tester::{bas_peripheral::ble_bas_peripheral_run, led_runner::slide_rbg_colors};
 use static_cell::StaticCell;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -79,9 +81,9 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, sw_interrup.software_interrupt0);
 
     // configure Remote Control Transciever (RCT) peripheral globally
-    let rmt: Rmt<'_, esp_hal::Async> = Rmt::new(p.RMT, Rate::from_mhz(80))
-        .expect("Failed to initialize RMT")
-        .into_async();
+    // let rmt: Rmt<'_, esp_hal::Async> = Rmt::new(p.RMT, Rate::from_mhz(80))
+    //     .expect("Failed to initialize RMT")
+    //     .into_async();
     // To make RGB led slide through colors
     // spawner
     //     .spawn(slide_rbg_colors(rmt.channel0, p.GPIO8.into()))
@@ -115,6 +117,59 @@ pub async fn radio_task(
     receiver: channel::Receiver<'static, CriticalSectionRawMutex, Data, 4>,
     radio_reqs: RadioReqs,
 ) -> ! {
+    let mut receiving_buffer = [00u8; 100];
+    let (mut lora, modulation_params, rx_packet_params) =
+        match init_radio(radio_reqs, receiving_buffer.len() as u8).await {
+            Ok(tup) => tup,
+            Err(err) => {
+                info!("Radio error: {}", err);
+                loop {
+                    info!("In error state");
+                    embassy_time::Timer::after_secs(30).await;
+                }
+            }
+        };
+    if let Err(err) = lora
+        .prepare_for_rx(RxMode::Continuous, &modulation_params, &rx_packet_params)
+        .await
+    {
+        info!("Radio Error: Preparing for Rx: {}", err);
+        loop {
+            info!("In error state");
+            embassy_time::Timer::after_secs(30).await;
+        }
+    }
+
+    loop {
+        let race_winner = select(
+            lora.rx(&rx_packet_params, &mut receiving_buffer),
+            receiver.receive(),
+        )
+        .await;
+
+        match race_winner {
+            // A message appears
+            Either::First(rx_result) => {
+                todo!();
+                // Ok((rec_len, _rx_pkt_status)) => {
+                //   // Check for successfull, something like CRC, To/From fields
+                // }
+                // Err(e) info!("Error in recieve: {:?}", err)
+            }
+
+            // Or a sensor data is ready to be send
+            Either::Second(data_to_be_sent) => {
+                todo!();
+                // lora.tx(...)
+            }
+        }
+    }
+}
+
+async fn init_radio(
+    radio_reqs: RadioReqs,
+    max_length: u8,
+) -> Result<(LoRa<impl RadioKind, Delay>, ModulationParams, PacketParams), RadioError> {
     // initialize SPI
     let nss = Output::new(radio_reqs.nss_req, Level::High, OutputConfig::default());
 
@@ -153,68 +208,14 @@ pub async fn radio_task(
         .await
         .expect("LoRa radio instance init failed");
 
-    let mut receiving_buffer = [00u8; 100];
+    let modulation_params = lora.create_modulation_params(
+        lora_phy::mod_params::SpreadingFactor::_10,
+        lora_phy::mod_params::Bandwidth::_250KHz,
+        lora_phy::mod_params::CodingRate::_4_8,
+        LORA_FREQUENCY_IN_HZ,
+    )?;
 
-    let modulatio_params = {
-        match lora.create_modulation_params(
-            lora_phy::mod_params::SpreadingFactor::_10,
-            lora_phy::mod_params::Bandwidth::_250KHz,
-            lora_phy::mod_params::CodingRate::_4_8,
-            LORA_FREQUENCY_IN_HZ,
-        ) {
-            Ok(mp) => mp,
-            Err(err) => {
-                info!("Radio error: {}", err);
-                loop {
-                    info!("In error state");
-                    embassy_time::Timer::after_secs(30).await;
-                }
-            }
-        }
-    };
-
-    let rx_packet_params = {
-        match lora.create_rx_packet_params(
-            4,
-            false,
-            receiving_buffer.len() as u8,
-            true,
-            false,
-            &modulatio_params,
-        ) {
-            Ok(pp) => pp,
-            Err(err) => {
-                info!("Radio error: {}", err);
-                loop {
-                    info!("In error state");
-                    embassy_time::Timer::after_secs(30).await;
-                }
-            }
-        }
-    };
-
-    loop {
-        let race_winner = select(
-            lora.rx(&rx_packet_params, &mut receiving_buffer),
-            receiver.receive(),
-        )
-        .await;
-
-        match race_winner {
-            // A message appears
-            Either::First(rx_result) => {
-                todo!();
-                // Ok((rec_len, _rx_pkt_status)) => {
-                //   // Check for successfull, something like CRC, To/From fields
-                // }
-                // Err(e) info!("Error in recieve: {:?}", err)
-            }
-
-            // Or a sensor data is ready to be send
-            Either::Second(data_to_be_sent) => {
-                todo!();
-                // lora.tx(...)
-            }
-        }
-    }
+    let rx_packet_params =
+        lora.create_rx_packet_params(4, false, max_length, true, false, &modulation_params)?;
+    Ok((lora, modulation_params, rx_packet_params))
 }
