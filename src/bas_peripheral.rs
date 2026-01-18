@@ -52,21 +52,27 @@ where
         runner,
         ..
     } = stack.build();
-
+    let target: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
     let config = ConnectConfig {
         connect_params: Default::default(),
-        scan_config: ScanConfig::default(),
+        scan_config: ScanConfig {
+            filter_accept_list: &[(target.kind, &target.addr)],
+            ..Default::default()
+        },
     };
 
     info!("Starting advertising and GATT service");
-    let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
-        name: "TrouBle",
-        appearance: &appearance::power_device::GENERIC_POWER_DEVICE,
-    }))
-    .unwrap();
-    let _ = join(
+    // let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
+    //     name: "TrouBle",
+    //     appearance: &appearance::power_device::GENERIC_POWER_DEVICE,
+    // }))
+    // .unwrap();
+
+    // This runs 3 jobs: runner handles the radio, search and advertise are periodic tasks
+    let _ = join3(
         ble_task(runner),
-        advertise_task(&mut peripheral, server, &stack),
+        search_task(&mut central, config, &stack),
+        advertise_task(&mut peripheral, &stack),
     )
     .await;
 }
@@ -87,9 +93,9 @@ where
 async fn search_task<'a, C>(
     central: &mut Central<'a, C, DefaultPacketPool>,
     config: ConnectConfig<'a>,
-    stack: Stack<'_, C, DefaultPacketPool>,
+    stack: &'a Stack<'a, C, DefaultPacketPool>,
 ) where
-    C: Controller,
+    C: Controller + 'a,
 {
     loop {
         let conn = central
@@ -121,35 +127,96 @@ async fn search_task<'a, C>(
 
         info!("Received successfully!");
 
+        // Should wait some time before doing this again
         Timer::after(Duration::from_secs(60)).await;
     }
 }
 
 async fn advertise_task<'a, C>(
     peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
-    server: Server<'a>,
-    stack: &Stack<'_, C, DefaultPacketPool>,
+    stack: &'a Stack<'a, C, DefaultPacketPool>,
 ) where
-    C: Controller,
+    C: Controller + 'a,
 {
-    // After bootup, wait some time before having sensor data
-    Timer::after_secs(10).await;
-    loop {
-        match advertise("trouBLE example", peripheral, &server).await {
-            Ok(conn) => {
-                // these tasks only run after a connection has been established
-                let a = gatt_events_task(&server, &conn);
-                let b = custom_task(&server, &conn, stack);
+    let mut adv_data = [0; 31];
+    let adv_data_len = AdStructure::encode_slice(
+        &[
+            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            // AdStructure::ServiceUuids16(&[[0x0f, 0x18]]),
+            // AdStructure::CompleteLocalName(name.as_bytes()),
+        ],
+        &mut adv_data[..],
+    )
+    .unwrap();
 
-                select(a, b).await;
-            }
-            Err(e) => {
-                info!("[ERROR] adv error:");
-            }
+    loop {
+        info!("Advertising, waiting for connection ...");
+        let advertiser = peripheral
+            .advertise(
+                &Default::default(),
+                Advertisement::ConnectableScannableUndirected {
+                    adv_data: &adv_data[..adv_data_len],
+                    scan_data: &[],
+                },
+            )
+            .await
+            .unwrap();
+        let conn = advertiser.accept().await.unwrap();
+        info!("COnnected, creating l2cap channel");
+        const PAYLOAD_LEN: usize = 27; // ???
+        let config = L2capChannelConfig {
+            mtu: Some(PAYLOAD_LEN as u16),
+            ..Default::default()
+        };
+        const PSM_L2CAP_EXAMPLES: u16 = 0x0081;
+        let mut ch1 = L2capChannel::create(stack, &conn, PSM_L2CAP_EXAMPLES, &config)
+            .await
+            .expect("channel creation failed");
+
+        info!("New l2cap channel created, receiving some data!");
+        let mut rx = [0; PAYLOAD_LEN];
+        for i in 0..10 {
+            let len = ch1.receive(&stack, &mut rx).await.unwrap();
+            assert_eq!(len, rx.len());
+            assert_eq!(rx, [i; PAYLOAD_LEN]);
         }
-        Timer::after_secs(30);
+        info!("Recieved some data, now echoing back");
+        for i in 0..10 {
+            let tx = [i; PAYLOAD_LEN];
+            ch1.send(&stack, &tx).await.unwrap();
+        }
+
+        info!("Sent successfully!");
+
+        Timer::after(Duration::from_secs(60)).await;
     }
 }
+
+// async fn advertise_task<'a, C>(
+//     peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
+//     server: Server<'a>,
+//     stack: &Stack<'_, C, DefaultPacketPool>,
+// ) where
+//     C: Controller,
+// {
+//     // After bootup, wait some time before having sensor data
+//     Timer::after_secs(10).await;
+//     loop {
+//         match advertise("trouBLE example", peripheral, &server).await {
+//             Ok(conn) => {
+//                 // these tasks only run after a connection has been established
+//                 let a = gatt_events_task(&server, &conn);
+//                 let b = custom_task(&server, &conn, stack);
+//
+//                 select(a, b).await;
+//             }
+//             Err(e) => {
+//                 info!("[ERROR] adv error:");
+//             }
+//         }
+//         Timer::after_secs(30);
+//     }
+// }
 
 /// Create an advertiser to use to connect to a BLE Central, and wait for it to connect.
 async fn advertise<'values, 'server, C>(
@@ -182,38 +249,6 @@ where
     let conn = advertiser.accept().await?.with_attribute_server(server)?;
     info!("[adv] connection established");
     Ok(conn)
-}
-
-async fn l2cap_rec<C, P>(conn: &GattConnection<'_, '_, P>, stack: &Stack<'_, C, DefaultPacketPool>)
-where
-    C: Controller,
-    P: PacketPool,
-{
-    const PAYLOAD_LEN: usize = 27; // ???
-    let config = L2capChannelConfig {
-        mtu: Some(PAYLOAD_LEN as u16),
-        ..Default::default()
-    };
-    const PSM_L2CAP_EXAMPLES: u16 = 0x0081;
-    let mut ch1 = L2capChannel::create(&stack, conn, PSM_L2CAP_EXAMPLES, &config)
-        .await
-        .expect("channel creation failed");
-    info!("New l2cap channel created, sending some data!");
-    for i in 0..10 {
-        let tx = [i; PAYLOAD_LEN];
-        ch1.send(&stack, &tx).await.unwrap();
-    }
-    info!("Sent data, waiting for them to be sent back");
-    let mut rx = [0; PAYLOAD_LEN];
-    for i in 0..10 {
-        let len = ch1.receive(&stack, &mut rx).await.unwrap();
-        assert_eq!(len, rx.len());
-        assert_eq!(rx, [i; PAYLOAD_LEN]);
-    }
-
-    info!("Received successfully!");
-
-    Timer::after(Duration::from_secs(60)).await;
 }
 
 /// Stream Events until the connection closes.
