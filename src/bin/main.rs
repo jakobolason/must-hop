@@ -13,7 +13,7 @@ use defmt::info;
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::{Config, rmt::Rmt, time::Rate, timer::timg::TimerGroup};
-use esp_radio::{Controller, ble::controller::BleConnector};
+use esp_radio::ble::controller::BleConnector;
 use panic_rtt_target as _;
 use rtt_target::rtt_init_defmt;
 

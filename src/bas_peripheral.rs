@@ -1,14 +1,9 @@
 // use esp_backtrace as _;
-use defmt::{info, warn};
-use embassy_futures::{
-    join::{join, join3},
-    select::select,
-};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use defmt::{Debug2Format, error, info, warn};
+use embassy_futures::join::join3;
 use embassy_time::{Duration, Timer};
-
-use panic_rtt_target as _;
-
+use postcard::to_slice;
+use serde::{Deserialize, Serialize};
 use trouble_host::{PacketPool, prelude::*};
 
 const CONNECTIONS_MAX: usize = 1;
@@ -30,6 +25,22 @@ struct BatteryService {
     level: u8,
     #[characteristic(uuid = "408813df-5dd4-1f87-ec11-cdb001100000", write, read, notify)]
     status: bool,
+}
+
+trait LogExt<T, E> {
+    fn log_error(self, msg: &str) -> Option<T>;
+}
+
+impl<T, E: core::fmt::Debug> LogExt<T, E> for Result<T, E> {
+    fn log_error(self, msg: &str) -> Option<T> {
+        match self {
+            Ok(v) => Some(v),
+            Err(e) => {
+                error!("{}: {:?}", msg, Debug2Format(&e));
+                None
+            }
+        }
+    }
 }
 
 /// Run the BLE stack
@@ -85,11 +96,27 @@ where
 {
     loop {
         if let Err(e) = runner.run().await {
-            panic!("[ble_task] error: {:?}", e);
+            error!("[ble_task] error: {:?}", Debug2Format(&e));
         }
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct SensorMessage {
+    temperature: i8,
+    current_voltage: i8,
+}
+fn create_sensor_data(buffer: &mut [u8]) -> Result<&mut [u8], postcard::Error> {
+    let msg = SensorMessage {
+        temperature: 20,
+        current_voltage: 5,
+    };
+
+    to_slice(&msg, buffer)
+}
+
+/// This task searches for sensor data, and afterwards determines if the data Should
+/// be saved here, or sent onwards
 async fn search_task<'a, C>(
     central: &mut Central<'a, C, DefaultPacketPool>,
     config: ConnectConfig<'a>,
@@ -98,10 +125,13 @@ async fn search_task<'a, C>(
     C: Controller + 'a,
 {
     loop {
-        let conn = central
+        let Some(conn) = central
             .connect(&config)
             .await
-            .expect("Connection unsuccessfull");
+            .log_error("Getting connection failed")
+        else {
+            continue;
+        };
         info!("COnnected, creating l2cap channel");
         const PAYLOAD_LEN: usize = 27; // ???
         let config = L2capChannelConfig {
@@ -109,29 +139,45 @@ async fn search_task<'a, C>(
             ..Default::default()
         };
         const PSM_L2CAP_EXAMPLES: u16 = 0x0081;
-        let mut ch1 = L2capChannel::create(&stack, &conn, PSM_L2CAP_EXAMPLES, &config)
-            .await
-            .expect("channel creation failed");
+        let mut ch1 = match L2capChannel::create(stack, &conn, PSM_L2CAP_EXAMPLES, &config).await {
+            Ok(ch) => ch,
+            Err(e) => {
+                error!("Connection error: {:?}", Debug2Format(&e));
+                continue;
+            }
+        };
+
+        // TODO: With a connection now established, the correct thing to do, would be to put the
+        // following into a function. This function should handle receiveng information from the
+        // channel, dropping the channel and thereafter look at whether the message should be sent
+        // onwards
+
         info!("New l2cap channel created, sending some data!");
-        for i in 0..10 {
-            let tx = [i; PAYLOAD_LEN];
-            ch1.send(&stack, &tx).await.unwrap();
-        }
-        info!("Sent data, waiting for them to be sent back");
+        // NOTE: Using this to test that the same created sensor data is received on both ends
+        let mut test_buffer = [0u8; PAYLOAD_LEN];
+        let test_slice =
+            create_sensor_data(&mut test_buffer).expect("Creating sensor data failed?");
         let mut rx = [0; PAYLOAD_LEN];
-        for i in 0..10 {
-            let len = ch1.receive(&stack, &mut rx).await.unwrap();
-            assert_eq!(len, rx.len());
-            assert_eq!(rx, [i; PAYLOAD_LEN]);
-        }
+        let len = match ch1.receive(stack, &mut rx).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!(
+                    "Error in getting length of Rx signal: {:?}",
+                    Debug2Format(&e)
+                );
+                continue;
+            }
+        };
+        assert_eq!(len, rx.len());
+        assert_eq!(rx, test_slice);
 
         info!("Received successfully!");
-
         // Should wait some time before doing this again
         Timer::after(Duration::from_secs(60)).await;
     }
 }
 
+/// This task advertises when there are sensor data available
 async fn advertise_task<'a, C>(
     peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
     stack: &'a Stack<'a, C, DefaultPacketPool>,
@@ -139,19 +185,20 @@ async fn advertise_task<'a, C>(
     C: Controller + 'a,
 {
     let mut adv_data = [0; 31];
+    let name = "trouBLE tester";
     let adv_data_len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            // AdStructure::ServiceUuids16(&[[0x0f, 0x18]]),
-            // AdStructure::CompleteLocalName(name.as_bytes()),
+            AdStructure::ServiceUuids16(&[[0x0f, 0x18]]),
+            AdStructure::CompleteLocalName(name.as_bytes()),
         ],
         &mut adv_data[..],
     )
     .unwrap();
-
+    Timer::after_secs(10).await; // Wait a bit before starting this 
     loop {
         info!("Advertising, waiting for connection ...");
-        let advertiser = peripheral
+        let advertiser = match peripheral
             .advertise(
                 &Default::default(),
                 Advertisement::ConnectableScannableUndirected {
@@ -160,32 +207,47 @@ async fn advertise_task<'a, C>(
                 },
             )
             .await
-            .unwrap();
-        let conn = advertiser.accept().await.unwrap();
-        info!("COnnected, creating l2cap channel");
-        const PAYLOAD_LEN: usize = 27; // ???
+        {
+            Ok(adv) => adv,
+            Err(e) => {
+                error!("Error in advertising: {:?}", Debug2Format(&e));
+                continue;
+            }
+        };
+        let conn = match advertiser.accept().await {
+            Ok(conn) => conn,
+            Err(error) => {
+                error!("Error in accepting connection: {:?}", Debug2Format(&error));
+                continue;
+            }
+        };
+        info!("Connected, creating l2cap channel");
+        const PAYLOAD_LEN: usize = 27; // NOTE: Look into this
         let config = L2capChannelConfig {
             mtu: Some(PAYLOAD_LEN as u16),
             ..Default::default()
         };
-        const PSM_L2CAP_EXAMPLES: u16 = 0x0081;
-        let mut ch1 = L2capChannel::create(stack, &conn, PSM_L2CAP_EXAMPLES, &config)
-            .await
-            .expect("channel creation failed");
-
+        const PSM_L2CAP_EXAMPLES: u16 = 0x0081; // NOTE: Look into this
+        let mut ch1 = match L2capChannel::create(stack, &conn, PSM_L2CAP_EXAMPLES, &config).await {
+            Ok(ch) => ch,
+            Err(e) => {
+                error!("Error in creating adv channel: {:?}", Debug2Format(&e));
+                continue;
+            }
+        };
         info!("New l2cap channel created, receiving some data!");
-        let mut rx = [0; PAYLOAD_LEN];
-        for i in 0..10 {
-            let len = ch1.receive(&stack, &mut rx).await.unwrap();
-            assert_eq!(len, rx.len());
-            assert_eq!(rx, [i; PAYLOAD_LEN]);
+        // TODO: Should receive the custom sensor data constructed above
+        // NOTE: This simply transmits whatever we set into tx
+        // Send some basic sensor data:
+        let mut tx = [0u8; PAYLOAD_LEN];
+        match create_sensor_data(&mut tx) {
+            Ok(slice) => {
+                if let Err(e) = ch1.send(stack, slice).await {
+                    error!("Error in Tx: {:?}", Debug2Format(&e));
+                }
+            }
+            Err(e) => error!("Error in slicing Tx: {:?}", Debug2Format(&e)),
         }
-        info!("Recieved some data, now echoing back");
-        for i in 0..10 {
-            let tx = [i; PAYLOAD_LEN];
-            ch1.send(&stack, &tx).await.unwrap();
-        }
-
         info!("Sent successfully!");
 
         Timer::after(Duration::from_secs(60)).await;
@@ -219,6 +281,7 @@ async fn advertise_task<'a, C>(
 // }
 
 /// Create an advertiser to use to connect to a BLE Central, and wait for it to connect.
+#[allow(unused)]
 async fn advertise<'values, 'server, C>(
     name: &'values str,
     peripheral: &mut Peripheral<'values, C, DefaultPacketPool>,
@@ -255,6 +318,7 @@ where
 ///
 /// This function will handle the GATT events and process them.
 /// This is how we interact with read and write requests.
+#[allow(unused)]
 async fn gatt_events_task<P: PacketPool>(
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, P>,
@@ -299,6 +363,7 @@ async fn gatt_events_task<P: PacketPool>(
 /// This task will notify the connected central of a counter value every 2 seconds.
 /// It will also read the RSSI value every 2 seconds.
 /// and will stop when the connection is closed by the central or an error occurs.
+#[allow(unused)]
 async fn custom_task<C: Controller, P: PacketPool>(
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, P>,
