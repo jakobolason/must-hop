@@ -148,7 +148,7 @@ async fn search_task<'a, C>(
         };
 
         // TODO: With a connection now established, the correct thing to do, would be to put the
-        // following into a function. This function should handle receiveng information from the
+        // following into a function. This function should handle receiving information from the
         // channel, dropping the channel and thereafter look at whether the message should be sent
         // onwards
 
@@ -177,6 +177,27 @@ async fn search_task<'a, C>(
     }
 }
 
+async fn advertise_sensordata<'a, C>(
+    peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
+    adv_data: &[u8],
+    adv_data_len: usize,
+) -> Result<Connection<'a, DefaultPacketPool>, BleHostError<C::Error>>
+where
+    C: Controller,
+{
+    let advertiser = peripheral
+        .advertise(
+            &Default::default(),
+            Advertisement::ConnectableScannableUndirected {
+                adv_data: &adv_data[..adv_data_len],
+                scan_data: &[],
+            },
+        )
+        .await?;
+    let conn = advertiser.accept().await?;
+    Ok(conn)
+}
+
 /// This task advertises when there are sensor data available
 async fn advertise_task<'a, C>(
     peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
@@ -189,7 +210,8 @@ async fn advertise_task<'a, C>(
     let adv_data_len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ServiceUuids16(&[[0x0f, 0x18]]),
+            // AdStructure::ServiceUuids16(&[[0x0f, 0x18]]), // For battery GATT
+            AdStructure::ServiceUuids16(&[[0x00, 0x01]]), // For L2CAP
             AdStructure::CompleteLocalName(name.as_bytes()),
         ],
         &mut adv_data[..],
@@ -198,26 +220,10 @@ async fn advertise_task<'a, C>(
     Timer::after_secs(10).await; // Wait a bit before starting this 
     loop {
         info!("Advertising, waiting for connection ...");
-        let advertiser = match peripheral
-            .advertise(
-                &Default::default(),
-                Advertisement::ConnectableScannableUndirected {
-                    adv_data: &adv_data[..adv_data_len],
-                    scan_data: &[],
-                },
-            )
-            .await
-        {
-            Ok(adv) => adv,
-            Err(e) => {
-                error!("Error in advertising: {:?}", Debug2Format(&e));
-                continue;
-            }
-        };
-        let conn = match advertiser.accept().await {
+        let conn = match advertise_sensordata(peripheral, &adv_data, adv_data_len).await {
             Ok(conn) => conn,
             Err(error) => {
-                error!("Error in accepting connection: {:?}", Debug2Format(&error));
+                error!("Error in getting connection: {:?}", Debug2Format(&error));
                 continue;
             }
         };
@@ -236,11 +242,12 @@ async fn advertise_task<'a, C>(
             }
         };
         info!("New l2cap channel created, receiving some data!");
-        // TODO: Should receive the custom sensor data constructed above
+
         // NOTE: This simply transmits whatever we set into tx
         // Send some basic sensor data:
         let mut tx = [0u8; PAYLOAD_LEN];
         match create_sensor_data(&mut tx) {
+            // NOTE: This should be passed to the function (sensor data)
             Ok(slice) => {
                 if let Err(e) = ch1.send(stack, slice).await {
                     error!("Error in Tx: {:?}", Debug2Format(&e));
