@@ -1,28 +1,15 @@
-#![no_std]
-#![no_main]
-#![deny(
-    clippy::mem_forget,
-    reason = "mem::forget is generally not safe to do with esp_hal types, especially those \
-    holding buffers for the duration of a data transfer."
-)]
-#![deny(clippy::large_stack_frames)]
-
-// use esp_backtrace as _;
 use defmt::info;
 // use embassy_embedded_hal::shared_bus::asynch::spi;
-use embassy_executor::Spawner;
 // use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex};
-use embassy_time::{Delay, Duration, Timer};
-use esp_hal::peripherals;
+use embassy_time::Delay;
 use esp_hal::{
-    Async, Config,
+    Async,
     gpio::{Input, InputConfig, Level, Output, OutputConfig},
-    rmt::Rmt,
+    peripherals,
     spi::{Mode, master},
     time::Rate,
-    timer::timg::TimerGroup,
 };
 use lora_phy::iv::GenericSx126xInterfaceVariant;
 use lora_phy::mod_params::{ModulationParams, PacketParams, RadioError};
@@ -30,20 +17,12 @@ use lora_phy::mod_traits::RadioKind;
 use lora_phy::sx126x::{self, Sx126x, Sx1262};
 use lora_phy::{LoRa, RxMode};
 use panic_rtt_target as _;
-use rtt_target::rtt_init_defmt;
-
-use c6_tester::led_runner::slide_rbg_colors;
 use static_cell::StaticCell;
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
-esp_bootloader_esp_idf::esp_app_desc!();
 
 // Data used inside DATA_CHANNEL
-struct Data {
-    size: u32,
-}
+struct Data {}
 // Statuc channel for communication between data_task and radio_task
-static DATA_CHANNEL: channel::Channel<CriticalSectionRawMutex, Data, 4> = channel::Channel::new();
+// static DATA_CHANNEL: channel::Channel<CriticalSectionRawMutex, Data, 4> = channel::Channel::new();
 
 // From lora_p2p_recieve.rs example:
 const LORA_FREQUENCY_IN_HZ: u32 = 868_000_000; // WARNING: Set this appropriately for the region
@@ -67,52 +46,9 @@ struct RadioReqs {
 
 #[allow(
     clippy::large_stack_frames,
-    reason = "it's not unusual to allocate larger buffers etc. in main"
-)]
-#[esp_rtos::main]
-async fn main(spawner: Spawner) -> ! {
-    let p = esp_hal::init(Config::default());
-    rtt_init_defmt!();
-    info!("Setting up peripherals ...");
-    // for executor
-    let timg0 = TimerGroup::new(p.TIMG0);
-    let sw_interrup = esp_hal::interrupt::software::SoftwareInterruptControl::new(p.SW_INTERRUPT);
-    // Could also use esp_hal_embassy ?
-    esp_rtos::start(timg0.timer0, sw_interrup.software_interrupt0);
-
-    // configure Remote Control Transciever (RCT) peripheral globally
-    let rmt: Rmt<'_, esp_hal::Async> = Rmt::new(p.RMT, Rate::from_mhz(80))
-        .expect("Failed to initialize RMT")
-        .into_async();
-    // To make RGB led slide through colors
-    spawner
-        .spawn(slide_rbg_colors(rmt.channel0, p.GPIO8.into()))
-        .expect("TASK slide_rbg_colors failed");
-
-    // Takes ownership of peripherals
-    let radio_reqs = RadioReqs {
-        nss_req: p.GPIO7,
-        sclk: p.GPIO9,
-        mosi: p.GPIO10,
-        miso: p.GPIO11,
-        reset_req: p.GPIO12,
-        busy_req: p.GPIO13,
-        dio1_req: p.GPIO14,
-        spi2: p.SPI2,
-    };
-    spawner
-        .spawn(radio_task(DATA_CHANNEL.receiver(), radio_reqs))
-        .expect("RADIO TASK failed");
-    loop {
-        info!("Bing!");
-        Timer::after(Duration::from_millis(1000)).await;
-    }
-}
-
-#[allow(
-    clippy::large_stack_frames,
     reason = "This is the main task, so large size is okay"
 )]
+#[allow(unused_variables)]
 #[embassy_executor::task]
 pub async fn radio_task(
     receiver: channel::Receiver<'static, CriticalSectionRawMutex, Data, 4>,

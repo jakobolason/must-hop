@@ -1,75 +1,11 @@
-[package]
-edition = "2024"
-name = "c6-tester"
-rust-version = "1.88"
-version = "0.1.0"
+[workspace]
 
-[[bin]]
-name = "c6-tester"
-path = "./src/bin/main.rs"
-
-[dependencies]
-esp-hal = { version = "~1.0", features = ["defmt", "esp32c6", "unstable"] }
-esp-bootloader-esp-idf = { version = "0.4.0", features = ["defmt", "esp32c6"] }
-esp-rtos = { version = "0.2.0", features = ["embassy", "esp32c6"] }
-
-# for BLE 
-esp-radio = { version = "0.17.0", features = [
-  "esp32c6",
-  "ble",
-  "unstable",
-], optional = true }
-trouble-host = { version = "0.5.1", optional = true, features = [
-  "default-packet-pool-mtu-255",
-  "derive",
-  "defmt",
-] }
-esp-alloc = { version = "0.9.0", features = ["esp32c6"], optional = true }
-
-
-embassy-executor = "0.9.1"
-embassy-time = "0.5.0"
-
-esp-hal-smartled = { version = "0.17.0", features = ["esp32c6"] }
-smart-leds = "0.4.0"
-smart-leds-trait = "0.3.2"
-
-# For logging
-defmt = "1.0.1"
-rtt-target = { version = "0.6.2", features = ["defmt"] }
-# panic handling
-critical-section = "1.2.0"
-panic-rtt-target = { version = "0.2.0", features = ["defmt"] }
-static_cell = "2.1.1"
-embassy-futures = "0.1.2"
-embassy-sync = "0.7.2"
-embassy-embedded-hal = "0.5.0"
-lora-phy = "3.0.1"
+members = ["must-hop"]
+exclude = ["examples/ble/esp32c6", "examples/lora/rak3272s"]
 
 
 [profile.dev]
-# Rust debug is too slow.
-# For debug builds always builds with some optimization
-opt-level = 3 # was "s", chose 2 for esp-radio
+opt-level = "s"
 
 [profile.release]
-codegen-units = 1        # LLVM can perform better optimizations using a single thread
-debug = 2
-debug-assertions = false
-incremental = false
-lto = 'fat'
-opt-level = 's'
-overflow-checks = false
-
-[features]
-
-esp32c6 = [
-  # "esp-backtrace/esp32c6",
-  "esp-hal/esp32c6",
-  # "esp-println/esp32c6",
-  "esp-bootloader-esp-idf/esp32c6",
-  "esp-rtos/esp32c6",
-]
-
-# for BLE
-ble = ["dep:esp-alloc", "dep:trouble-host", "esp-radio", "esp-rtos/esp-radio"]
+debug = true
