@@ -20,6 +20,18 @@ The other example is using the RAK3272s board, which is a board for the RAK3172 
   - [ ] Have a nice dashboard kind of, to see information
 - [ ] central, peripheral, runner abstraction for LoRa
 - [ ] medium-access-control somehow handled
+  - [ ] use lora.cad for channel activity detection
 - [ ] Messages can be passed on to another node
   - [ ] Define how each packet looks (header)
   - [ ] Algorithm to determine what way to send it
+
+### Testing
+
+This project should also be tested, to get some valuable measurements to provide a clear show of what this project has resulted in.
+
+- [ ] Testing functionality
+  - [ ] Unit tests
+  - [ ] Integration tests
+  - [ ] Amount of errors over time
+  - [ ] Durability test, can it run for a week straight?
+  - [ ] How many messages per minute can be transmitted?

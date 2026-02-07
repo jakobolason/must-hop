@@ -1,48 +1,35 @@
-use defmt::info;
+use crate::iv;
+use defmt::{error, info, warn};
 // use embassy_embedded_hal::shared_bus::asynch::spi;
 // use embassy_futures::select::{Either, select};
-use embassy_sync::channel;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex};
-use embassy_time::Delay;
-use esp_hal::{
-    Async,
-    gpio::{Input, InputConfig, Level, Output, OutputConfig},
-    peripherals,
-    spi::{Mode, master},
-    time::Rate,
+use embassy_stm32::{
+    gpio::Output,
+    spi::{Spi, mode::Master},
 };
-use lora_phy::iv::GenericSx126xInterfaceVariant;
-use lora_phy::mod_params::{ModulationParams, PacketParams, RadioError};
-use lora_phy::mod_traits::RadioKind;
-use lora_phy::sx126x::{self, Sx126x, Sx1262};
+
+use embassy_futures::select::{Either, select};
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel};
+use embassy_time::Delay;
+
+use embassy_stm32::mode::Async;
+use lora_phy::mod_params::RadioError;
+use lora_phy::mod_params::{Bandwidth, CodingRate, SpreadingFactor};
+use lora_phy::sx126x::Stm32wl;
+use lora_phy::sx126x::Sx126x;
 use lora_phy::{LoRa, RxMode};
-use panic_rtt_target as _;
-use static_cell::StaticCell;
+use must_hop::SensorData;
+use postcard::{from_bytes, to_slice};
+use {defmt_rtt as _, panic_probe as _};
 
-// Data used inside DATA_CHANNEL
-struct Data {}
-// Statuc channel for communication between data_task and radio_task
-// static DATA_CHANNEL: channel::Channel<CriticalSectionRawMutex, Data, 4> = channel::Channel::new();
-
-// From lora_p2p_recieve.rs example:
-const LORA_FREQUENCY_IN_HZ: u32 = 868_000_000; // WARNING: Set this appropriately for the region
-
-static SPI_BUS: StaticCell<
-    mutex::Mutex<CriticalSectionRawMutex, esp_hal::spi::master::Spi<'static, Async>>,
-> = StaticCell::new();
-
-// TODO: Check these gpio pins, example shows GPIO8 nss
-struct RadioReqs {
-    nss_req: peripherals::GPIO7<'static>,
-    sclk: peripherals::GPIO9<'static>,
-    mosi: peripherals::GPIO10<'static>,
-    miso: peripherals::GPIO11<'static>,
-
-    reset_req: peripherals::GPIO12<'static>,
-    busy_req: peripherals::GPIO13<'static>,
-    dio1_req: peripherals::GPIO14<'static>,
-    spi2: peripherals::SPI2<'static>,
-}
+const LORA_FREQUENCY_IN_HZ: u32 = 868_000_000; // warning: set this appropriately for the region
+type Stm32wlLoRa<'d, CM> = LoRa<
+    Sx126x<
+        iv::SubghzSpiDevice<Spi<'d, Async, CM>>,
+        iv::Stm32wlInterfaceVariant<Output<'d>>,
+        Stm32wl,
+    >,
+    Delay,
+>;
 
 #[allow(
     clippy::large_stack_frames,
@@ -50,130 +37,136 @@ struct RadioReqs {
 )]
 #[allow(unused_variables)]
 #[embassy_executor::task]
-pub async fn radio_task(
-    receiver: channel::Receiver<'static, CriticalSectionRawMutex, Data, 4>,
-    radio_reqs: RadioReqs,
-) -> ! {
-    // Static size we can receive
-    let mut receiving_buffer = [00u8; 100];
-    // Setup radio
-    let (mut lora, modulation_params, rx_packet_params) =
-        match init_radio(radio_reqs, receiving_buffer.len() as u8).await {
-            Ok(tup) => tup,
-            Err(err) => {
-                // Because this is a task, we cannot return
-                info!("Radio error: {}", err);
-                loop {
-                    // Therefore this loop should signal to the engineer that something is wrong
-                    info!("In error state");
-                    embassy_time::Timer::after_secs(30).await;
+pub async fn lora_task(
+    mut lora: Stm32wlLoRa<'static, Master>,
+    rx: channel::Receiver<'static, ThreadModeRawMutex, SensorData, 3>,
+) {
+    loop {
+        let sf = SpreadingFactor::_12;
+        let bw = Bandwidth::_500KHz;
+        let cr = CodingRate::_4_8;
+        let mut receiving_buffer = [00u8; 100];
+        let mdltn_params = {
+            match lora.create_modulation_params(sf, bw, cr, LORA_FREQUENCY_IN_HZ) {
+                Ok(mp) => mp,
+                Err(err) => {
+                    info!("Radio error = {}", err);
+                    continue;
                 }
             }
         };
-    if let Err(err) = lora
-        .prepare_for_rx(RxMode::Continuous, &modulation_params, &rx_packet_params)
-        .await
-    {
-        info!("Radio Error: Preparing for Rx: {}", err);
-        loop {
-            info!("In error state");
-            embassy_time::Timer::after_secs(30).await;
-        }
-    }
-    let expected_msg = b"hello";
-    let expected_msg_len = expected_msg.len();
-    loop {
-        receiving_buffer = [00u8; 100];
-        match lora.rx(&rx_packet_params, &mut receiving_buffer).await {
-            Ok((received_len, _rx_pkt_status)) => {
-                if (received_len == expected_msg_len as u8)
-                    && (receiving_buffer[..expected_msg_len] == *expected_msg)
-                {
-                    info!(
-                        "rx successfull: {}",
-                        core::str::from_utf8(&receiving_buffer[..received_len as usize]).unwrap()
-                    );
-                } else {
-                    info!("rx unknown packet");
+
+        let rx_pkt_params = {
+            match lora.create_rx_packet_params(
+                8,
+                false,
+                receiving_buffer.len() as u8,
+                true,
+                false,
+                &mdltn_params,
+            ) {
+                Ok(pp) => pp,
+                Err(err) => {
+                    info!("Radio error = {}", err);
+                    continue;
                 }
             }
-            Err(err) => info!("rx unsuccessfull: {}", err),
+        };
+
+        match lora
+            .prepare_for_rx(RxMode::Single(255), &mdltn_params, &rx_pkt_params)
+            .await
+        {
+            Ok(()) => {}
+            Err(err) => {
+                info!("Radio error = {}", err);
+                continue;
+            }
+        };
+        let either = select(rx.receive(), lora.rx(&rx_pkt_params, &mut receiving_buffer)).await;
+        match either {
+            Either::First(sensor_data) => {
+                let mdltn_params = {
+                    match lora.create_modulation_params(sf, bw, cr, LORA_FREQUENCY_IN_HZ) {
+                        Ok(mp) => mp,
+                        Err(err) => {
+                            error!("Radio error = {}", err);
+                            continue;
+                        }
+                    }
+                };
+                let mut tx_pkt_params = {
+                    match lora.create_tx_packet_params(8, false, true, false, &mdltn_params) {
+                        Ok(pp) => pp,
+                        Err(err) => {
+                            error!("Radio error = {}", err);
+                            continue;
+                        }
+                    }
+                };
+                let mut buffer = [0u8; 32];
+                let used_slice = match to_slice(&sensor_data, &mut buffer) {
+                    Ok(slice) => slice,
+                    Err(e) => {
+                        error!("Serialization failed: {:?}", e);
+                        continue;
+                    }
+                };
+
+                if let Err(err) = lora
+                    .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 20, used_slice)
+                    .await
+                {
+                    error!("Radio error = {}", err);
+                    continue;
+                }
+
+                match lora.tx().await {
+                    Ok(()) => {
+                        info!("TX DONE");
+                    }
+                    Err(err) => {
+                        error!("Radio error = {}", err);
+                        continue;
+                    }
+                };
+
+                match lora.sleep(false).await {
+                    Ok(()) => info!("Sleep successful"),
+                    Err(err) => error!("Sleep unsuccessful = {}", err),
+                }
+            }
+            Either::Second(conn) => {
+                let expected_packet = SensorData {
+                    device_id: 42,
+                    temperate: 23.5,
+                    voltage: 3.3,
+                    acceleration_x: 1.2,
+                };
+                match conn {
+                    Ok((len, rx_pkt_status)) => {
+                        info!("rx successful, pkt status: {:?}", rx_pkt_status);
+                        let valid_data = &receiving_buffer[..len as usize];
+                        match from_bytes::<SensorData>(valid_data) {
+                            Ok(packet) => {
+                                info!("Got packet!");
+                                if packet == expected_packet {
+                                    info!("SUCCESS: Packets match");
+                                } else {
+                                    error!("ERROR: Packets do not match!");
+                                    warn!(" Expected: {:?}", expected_packet);
+                                    warn!(" Received: {:?}", packet);
+                                }
+                            }
+                            Err(e) => error!("Deserialization failed: {:?}", e),
+                        }
+                    }
+                    Err(err) => match err {
+                        RadioError::ReceiveTimeout => continue,
+                        _ => error!("Error in receiving_buffer: {:?}", err),
+                    },
+                }
+            }
         }
-        // let race_winner = select(
-        //     lora.rx(&rx_packet_params, &mut receiving_buffer),
-        //     receiver.receive(),
-        // )
-        // .await;
-        //
-        // match race_winner {
-        //     // A message appears
-        //     Either::First(rx_result) => {
-        //         todo!();
-        //         // Ok((rec_len, _rx_pkt_status)) => {
-        //         //   // Check for successfull, something like CRC, To/From fields
-        //         // }
-        //         // Err(e) info!("Error in recieve: {:?}", err)
-        //     }
-        //
-        //     // Or a sensor data is ready to be send
-        //     Either::Second(data_to_be_sent) => {
-        //         todo!();
-        //         // lora.tx(...)
-        //     }
-        // }
     }
-}
-
-async fn init_radio(
-    radio_reqs: RadioReqs,
-    max_length: u8,
-) -> Result<(LoRa<impl RadioKind, Delay>, ModulationParams, PacketParams), RadioError> {
-    // initialize SPI
-    let nss = Output::new(radio_reqs.nss_req, Level::High, OutputConfig::default());
-
-    let reset = Output::new(radio_reqs.reset_req, Level::Low, OutputConfig::default());
-    let busy = Input::new(radio_reqs.busy_req, InputConfig::default());
-    let dio1 = Input::new(radio_reqs.dio1_req, InputConfig::default());
-
-    let spi = master::Spi::new(
-        radio_reqs.spi2,
-        master::Config::default()
-            .with_frequency(Rate::from_khz(100))
-            .with_mode(Mode::_0),
-    )
-    .expect("SPI init failed")
-    .with_sck(radio_reqs.sclk)
-    .with_mosi(radio_reqs.mosi)
-    .with_miso(radio_reqs.miso)
-    .into_async();
-
-    // initialize the static SPI bus
-    let spi_bus = SPI_BUS.init(mutex::Mutex::new(spi));
-    let spi_device = embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice::new(spi_bus, nss);
-
-    // Create the SX126x(2) configuration
-    let sx126x_config = sx126x::Config {
-        chip: Sx1262,
-        tcxo_ctrl: Some(sx126x::TcxoCtrlVoltage::Ctrl1V7),
-        use_dcdc: false,
-        rx_boost: true,
-    };
-
-    // Create radio instance
-    let iv =
-        GenericSx126xInterfaceVariant::new(reset, dio1, busy, None, None).expect("IV init failed");
-    let mut lora = LoRa::new(Sx126x::new(spi_device, iv, sx126x_config), false, Delay)
-        .await
-        .expect("LoRa radio instance init failed");
-
-    let modulation_params = lora.create_modulation_params(
-        lora_phy::mod_params::SpreadingFactor::_10,
-        lora_phy::mod_params::Bandwidth::_250KHz,
-        lora_phy::mod_params::CodingRate::_4_8,
-        LORA_FREQUENCY_IN_HZ,
-    )?;
-
-    let rx_packet_params =
-        lora.create_rx_packet_params(4, false, max_length, true, false, &modulation_params)?;
-    Ok((lora, modulation_params, rx_packet_params))
 }
