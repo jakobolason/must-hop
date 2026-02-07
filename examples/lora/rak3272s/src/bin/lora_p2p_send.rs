@@ -104,7 +104,7 @@ async fn main(_spawner: Spawner) {
         };
 
         if let Err(err) = lora
-            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 20, &used_slice)
+            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 20, used_slice)
             .await
         {
             error!("Radio error = {}", err);
