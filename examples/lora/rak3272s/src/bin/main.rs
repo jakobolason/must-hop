@@ -21,11 +21,10 @@ use embassy_time::{Delay, Timer};
 use lora_phy::LoRa;
 use lora_phy::sx126x;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
-use must_hop::SensorData;
 use {defmt_rtt as _, panic_probe as _};
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
-use self::lora_tasks::lora_task;
+use self::lora_tasks::{SensorData, lora_task};
 
 static CHANNEL: Channel<ThreadModeRawMutex, SensorData, 3> = Channel::new();
 
