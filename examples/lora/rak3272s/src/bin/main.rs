@@ -8,7 +8,7 @@ mod iv;
 #[path = "../lora_tasks.rs"]
 mod lora_tasks;
 
-use defmt::{error, info, warn};
+use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_stm32::{
     Config, bind_interrupts,
@@ -18,11 +18,10 @@ use embassy_stm32::{
 };
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_time::{Delay, Timer};
+use lora_phy::LoRa;
+use lora_phy::sx126x;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
-use lora_phy::{LoRa, RxMode};
-use lora_phy::{mod_params::*, sx126x};
 use must_hop::SensorData;
-use postcard::from_bytes;
 use {defmt_rtt as _, panic_probe as _};
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
