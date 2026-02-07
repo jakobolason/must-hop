@@ -15,7 +15,10 @@ use embassy_time::{Delay, Timer};
 use lora_phy::LoRa;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
 use lora_phy::{mod_params::*, sx126x};
+use postcard::to_slice;
 use {defmt_rtt as _, panic_probe as _};
+
+use must_hop::SensorData;
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
 
@@ -50,8 +53,12 @@ async fn main(_spawner: Spawner) {
         use_dcdc: true,
         rx_boost: false,
     };
-    let iv = Stm32wlInterfaceVariant::new(Irqs, use_high_power_pa, Some(rx_pin), Some(tx_pin), None).unwrap();
-    let mut lora = LoRa::new(Sx126x::new(spi, iv, config), true, Delay).await.unwrap();
+    let iv =
+        Stm32wlInterfaceVariant::new(Irqs, use_high_power_pa, Some(rx_pin), Some(tx_pin), None)
+            .unwrap();
+    let mut lora = LoRa::new(Sx126x::new(spi, iv, config), true, Delay)
+        .await
+        .unwrap();
 
     info!("lora setup done ...");
 
@@ -81,18 +88,28 @@ async fn main(_spawner: Spawner) {
                 }
             }
         };
-        let buffer = [0x01u8, 0x02u8, 0x03u8];
-
-        match lora
-            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 20, &buffer)
-            .await
-        {
-            Ok(()) => {}
-            Err(err) => {
-                error!("Radio error = {}", err);
+        let mut buffer = [0u8; 32];
+        let packet = SensorData {
+            device_id: 42,
+            temperate: 23.5,
+            voltage: 3.3,
+            acceleration_x: 1.2,
+        };
+        let used_slice = match to_slice(&packet, &mut buffer) {
+            Ok(slice) => slice,
+            Err(e) => {
+                error!("Serialization failed: {:?}", e);
                 continue;
             }
         };
+
+        if let Err(err) = lora
+            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 20, &used_slice)
+            .await
+        {
+            error!("Radio error = {}", err);
+            continue;
+        }
 
         match lora.tx().await {
             Ok(()) => {

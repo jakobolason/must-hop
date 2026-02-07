@@ -6,7 +6,7 @@
 #[path = "../iv.rs"]
 mod iv;
 
-use defmt::{error, info};
+use defmt::{error, info, warn};
 use embassy_executor::Spawner;
 use embassy_stm32::{
     Config, bind_interrupts,
@@ -14,10 +14,12 @@ use embassy_stm32::{
     rcc::{MSIRange, Sysclk, mux},
     spi::Spi,
 };
-use embassy_time::{Delay, Timer};
+use embassy_time::Delay;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
 use lora_phy::{LoRa, RxMode};
 use lora_phy::{mod_params::*, sx126x};
+use must_hop::SensorData;
+use postcard::from_bytes;
 use {defmt_rtt as _, panic_probe as _};
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
@@ -59,6 +61,13 @@ async fn main(_spawner: Spawner) {
         .await
         .unwrap();
     info!("lora setup done ...");
+
+    let expected_packet = SensorData {
+        device_id: 42,
+        temperate: 23.5,
+        voltage: 3.3,
+        acceleration_x: 1.2,
+    };
 
     loop {
         let mut receiving_buffer = [00u8; 100];
@@ -106,22 +115,28 @@ async fn main(_spawner: Spawner) {
             }
         };
         match lora.rx(&rx_pkt_params, &mut receiving_buffer).await {
-            Ok((received_len, _rx_pkt_status)) => {
-                if (received_len == 3)
-                    && (receiving_buffer[0] == 0x01u8)
-                    && (receiving_buffer[1] == 0x02u8)
-                    && (receiving_buffer[2] == 0x03u8)
-                {
-                    info!("rx successful");
-                    // debug_indicator.set_high();
-                    Timer::after_secs(5).await;
-                    // debug_indicator.set_low();
-                } else {
-                    info!(
-                        "rx unknown packet, status: {:?}: {:?}",
-                        _rx_pkt_status, receiving_buffer
-                    );
+            Ok((len, rx_pkt_status)) => {
+                info!("rx successful, pkt status: {:?}", rx_pkt_status);
+                let valid_data = &receiving_buffer[..len as usize];
+                match from_bytes::<SensorData>(valid_data) {
+                    Ok(packet) => {
+                        info!("Got packet!");
+                        if packet == expected_packet {
+                            info!("SUCCESS: Packets match");
+                        } else {
+                            error!("ERROR: Packets do not match!");
+                            warn!(" Expected: {:?}", expected_packet);
+                            warn!(" Received: {:?}", packet);
+                        }
+                    }
+                    Err(e) => error!("Deserialization failed: {:?}", e),
                 }
+                // } else {
+                //     info!(
+                //         "rx unknown packet, status: {:?}: {:?}",
+                //         rx_pkt_status, receiving_buffer
+                //     );
+                // }
             }
             Err(err) => match err {
                 RadioError::ReceiveTimeout => continue,

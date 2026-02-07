@@ -7,3 +7,5 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 
 defmt = "1.0.1"
+serde = { version = "1.0.228", default-features = false, features = ["derive"] }
+postcard = "1.1.3"
