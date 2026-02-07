@@ -7,7 +7,13 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use c6_tester::bas_peripheral::ble_bas_peripheral_run;
+#[path = "../bas_peripheral.rs"]
+mod ble_bas_peripheral_run;
+#[path = "../led_runner.rs"]
+mod led_runner;
+// use c6_tester::led_runner::slide_rbg_colors;
+// use c6_tester::bas_peripheral::ble_bas_peripheral_run;
+
 // use esp_backtrace as _;
 use defmt::info;
 use embassy_executor::Spawner;
@@ -17,7 +23,6 @@ use esp_radio::ble::controller::BleConnector;
 use panic_rtt_target as _;
 use rtt_target::rtt_init_defmt;
 
-use c6_tester::led_runner::slide_rbg_colors;
 use trouble_host::prelude::ExternalController;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -45,7 +50,7 @@ async fn main(spawner: Spawner) -> ! {
         .into_async();
     // To make RGB led slide through colors
     spawner
-        .spawn(slide_rbg_colors(rmt.channel0, p.GPIO8.into()))
+        .spawn(led_runner::slide_rbg_colors(rmt.channel0, p.GPIO8.into()))
         .expect("TASK slide_rbg_colors failed");
 
     esp_alloc::heap_allocator!(size: 72 * 1024);
@@ -57,7 +62,7 @@ async fn main(spawner: Spawner) -> ! {
         .expect("Connector init failed");
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
     info!("And away we go!!");
-    ble_bas_peripheral_run(controller).await;
+    ble_bas_peripheral_run::ble_bas_peripheral_run(controller).await;
 
     // Takes ownership of peripherals
     // let radio_reqs = RadioReqs {

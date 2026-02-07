@@ -53,8 +53,11 @@ async fn main(_spawner: Spawner) {
         rx_boost: false,
     };
     let iv: Stm32wlInterfaceVariant<Output<'_>> =
-        Stm32wlInterfaceVariant::new(Irqs, use_high_power_pa, Some(rx_pin), Some(tx_pin), None).unwrap();
-    let mut lora = LoRa::new(Sx126x::new(spi, iv, config), true, Delay).await.unwrap();
+        Stm32wlInterfaceVariant::new(Irqs, use_high_power_pa, Some(rx_pin), Some(tx_pin), None)
+            .unwrap();
+    let mut lora = LoRa::new(Sx126x::new(spi, iv, config), true, Delay)
+        .await
+        .unwrap();
     info!("lora setup done ...");
 
     loop {
@@ -76,7 +79,14 @@ async fn main(_spawner: Spawner) {
         };
 
         let rx_pkt_params = {
-            match lora.create_rx_packet_params(8, false, receiving_buffer.len() as u8, true, false, &mdltn_params) {
+            match lora.create_rx_packet_params(
+                8,
+                false,
+                receiving_buffer.len() as u8,
+                true,
+                false,
+                &mdltn_params,
+            ) {
                 Ok(pp) => pp,
                 Err(err) => {
                     info!("Radio error = {}", err);
