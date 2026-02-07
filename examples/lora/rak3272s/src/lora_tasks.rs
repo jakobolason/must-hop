@@ -18,6 +18,7 @@ use lora_phy::mod_params::{PacketStatus, RadioError};
 use lora_phy::sx126x::Stm32wl;
 use lora_phy::sx126x::Sx126x;
 use lora_phy::{LoRa, RxMode};
+use must_hop::{MHNode, MHPacket};
 use postcard::{from_bytes, to_slice};
 use {defmt_rtt as _, panic_probe as _};
 
@@ -54,6 +55,11 @@ pub struct SensorData {
 }
 
 const MAX_PACK_LEN: usize = 100;
+
+struct LoraRadio {
+    lora: Stm32wlLoRa<'static, Master>,
+    tp: TransmitParameters,
+}
 
 #[allow(
     clippy::large_stack_frames,
@@ -139,93 +145,102 @@ pub async fn lora_task(
     }
 }
 
-async fn transmit(
-    lora: &mut Stm32wlLoRa<'static, Master>,
-    sensor_data: SensorData,
-    tp: TransmitParameters,
-) -> Result<(), RadioError> {
-    let mdltn_params = lora.create_modulation_params(tp.sf, tp.bw, tp.cr, tp.lora_hz)?;
-    let mut tx_pkt_params = lora.create_tx_packet_params(8, false, true, false, &mdltn_params)?;
-    let mut buffer = [0u8; 32];
-    let used_slice = match to_slice(&sensor_data, &mut buffer) {
-        Ok(slice) => slice,
-        Err(e) => {
-            error!("Serialization failed: {:?}", e);
-            return Err(RadioError::OpError(1));
-        }
-    };
-    // Simple listen to talk logic
-    loop {
-        if lora.cad(&mdltn_params).await? {
-            info!("cad successfull with activity detected");
-            // TODO: Get some random amount of time before continuing loop
-        } else {
-            info!("cad successfull with NO activity detected");
-            break;
-        }
-    }
-    lora.prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 20, used_slice)
-        .await?;
+impl MHNode for LoraRadio {
+    type Error = RadioError;
+    type Payload = SensorData;
+    type Connection = Result<(u8, PacketStatus), RadioError>;
 
-    lora.tx().await?;
-    info!("Transmit successfull!");
-
-    // NOTE: This might create a delay between transmitting something and being able to receive
-    // again
-    // lora.sleep(false).await?;
-    // info!("Sleep successful");
-    Ok(())
-}
-
-async fn receive(
-    _lora: &mut Stm32wlLoRa<'static, Master>,
-    conn: Result<(u8, PacketStatus), RadioError>,
-    receiving_buffer: &[u8; MAX_PACK_LEN],
-    _tp: TransmitParameters,
-) -> Result<(), RadioError> {
-    let expected_packet = SensorData {
-        device_id: 42,
-        temperate: 23.5,
-        voltage: 3.3,
-        acceleration_x: 1.2,
-    };
-    // First we check if we actually got something
-    let (len, rx_pkt_status) = match conn {
-        Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
-        Err(err) => match err {
-            RadioError::ReceiveTimeout => return Ok(()),
-            _ => {
-                error!("Error in receiving_buffer: {:?}", err);
-                return Err(err);
+    async fn transmit(&mut self, packet: MHPacket) -> Result<(), RadioError> {
+        let mdltn_params = self.lora.create_modulation_params(
+            self.tp.sf,
+            self.tp.bw,
+            self.tp.cr,
+            self.tp.lora_hz,
+        )?;
+        let mut tx_pkt_params =
+            self.lora
+                .create_tx_packet_params(8, false, true, false, &mdltn_params)?;
+        let mut buffer = [0u8; 32];
+        let used_slice = match to_slice(&packet, &mut buffer) {
+            Ok(slice) => slice,
+            Err(e) => {
+                error!("Serialization failed: {:?}", e);
+                return Err(RadioError::OpError(1));
             }
-        },
-    };
-    info!("rx successful, pkt status: {:?}", rx_pkt_status);
-
-    // Try to unpack the buffer into expected packet
-    let valid_data = &receiving_buffer[..len as usize];
-    let packet = match from_bytes::<SensorData>(valid_data) {
-        Ok(packet) => packet,
-        Err(e) => {
-            error!("Deserialization failed: {:?}", e);
-            return Err(RadioError::PayloadSizeUnexpected(0));
+        };
+        // Simple listen to talk logic
+        loop {
+            if self.lora.cad(&mdltn_params).await? {
+                info!("cad successfull with activity detected");
+                // TODO: Get some random amount of time before continuing loop
+            } else {
+                info!("cad successfull with NO activity detected");
+                break;
+            }
         }
-    };
-    info!("Got packet!");
+        self.lora
+            .prepare_for_tx(&mdltn_params, &mut tx_pkt_params, 20, used_slice)
+            .await?;
 
-    // TODO: Check if this should be retransmitted
-    // if (packet.to != me)
-    // transmit(lora, packet, tp).await?;
+        self.lora.tx().await?;
+        info!("Transmit successfull!");
 
-    // TODO: We can of couse now always expect what the package contents should be..
-    if packet == expected_packet {
-        info!("SUCCESS: Packets match");
-
+        // NOTE: This might create a delay between transmitting something and being able to receive
+        // again
+        // lora.sleep(false).await?;
+        // info!("Sleep successful");
         Ok(())
-    } else {
-        error!("ERROR: Packets do not match!");
-        warn!(" Expected: {:?}", expected_packet);
-        warn!(" Received: {:?}", packet);
-        Err(RadioError::ReceiveTimeout)
+    }
+
+    async fn receive(
+        &mut self,
+        conn: Result<(u8, PacketStatus), RadioError>,
+        receiving_buffer: &[u8],
+    ) -> Result<SensorData, RadioError> {
+        let expected_packet = SensorData {
+            device_id: 42,
+            temperate: 23.5,
+            voltage: 3.3,
+            acceleration_x: 1.2,
+        };
+        // First we check if we actually got something
+        let (len, rx_pkt_status) = match conn {
+            Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
+            Err(err) => match err {
+                RadioError::ReceiveTimeout => return Err(err),
+                _ => {
+                    error!("Error in receiving_buffer: {:?}", err);
+                    return Err(err);
+                }
+            },
+        };
+        info!("rx successful, pkt status: {:?}", rx_pkt_status);
+
+        // Try to unpack the buffer into expected packet
+        let valid_data = &receiving_buffer[..len as usize];
+        let packet = match from_bytes::<SensorData>(valid_data) {
+            Ok(packet) => packet,
+            Err(e) => {
+                error!("Deserialization failed: {:?}", e);
+                return Err(RadioError::PayloadSizeUnexpected(0));
+            }
+        };
+        info!("Got packet!");
+
+        // TODO: Check if this should be retransmitted
+        // if (packet.to != me)
+        // transmit(lora, packet, tp).await?;
+
+        // TODO: We can of couse now always expect what the package contents should be..
+        if packet == expected_packet {
+            info!("SUCCESS: Packets match");
+
+            Ok(packet)
+        } else {
+            error!("ERROR: Packets do not match!");
+            warn!(" Expected: {:?}", expected_packet);
+            warn!(" Received: {:?}", packet);
+            Err(RadioError::ReceiveTimeout)
+        }
     }
 }
