@@ -5,6 +5,8 @@
 
 #[path = "../iv.rs"]
 mod iv;
+#[path = "../lora_tasks.rs"]
+mod lora_tasks;
 
 use defmt::{error, info};
 use embassy_executor::Spawner;
@@ -18,9 +20,8 @@ use lora_phy::{mod_params::*, sx126x};
 use postcard::to_slice;
 use {defmt_rtt as _, panic_probe as _};
 
-use must_hop::SensorData;
-
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
+use self::lora_tasks::SensorData;
 
 const LORA_FREQUENCY_IN_HZ: u32 = 868_000_000; // warning: set this appropriately for the region
 

@@ -10,12 +10,16 @@ mod lora_tasks;
 
 use defmt::{error, info};
 use embassy_executor::Spawner;
+use embassy_stm32::peripherals;
+use embassy_stm32::rng;
+use embassy_stm32::rng::Rng;
 use embassy_stm32::{
     Config, bind_interrupts,
     gpio::{Level, Output, Speed},
     rcc::{MSIRange, Sysclk, mux},
     spi::Spi,
 };
+use embassy_sync::channel;
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_time::{Delay, Timer};
 use lora_phy::LoRa;
@@ -30,6 +34,7 @@ static CHANNEL: Channel<ThreadModeRawMutex, SensorData, 3> = Channel::new();
 
 bind_interrupts!(struct Irqs{
     SUBGHZ_RADIO => InterruptHandler;
+    RNG => rng::InterruptHandler<peripherals::RNG>;
 });
 
 #[embassy_executor::main]
@@ -71,5 +76,28 @@ async fn main(spawner: Spawner) {
     loop {
         info!("from main...");
         Timer::after_secs(10u64).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn sensor_task(
+    channel: channel::Sender<'static, ThreadModeRawMutex, SensorData, 3>,
+    mut rng: Rng<'static, peripherals::RNG>, // Ensure 'mut' is here
+) {
+    Timer::after_secs(10).await;
+    loop {
+        let expected_packet = SensorData {
+            device_id: 42,
+            temperate: 23.5,
+            voltage: 3.3,
+            acceleration_x: 1.2,
+        };
+        channel.send(expected_packet).await;
+
+        let random = rng.next_u64();
+        // random number between 3 and 8
+        let r_num = (random % 5) + 3;
+
+        Timer::after_secs(r_num).await;
     }
 }
