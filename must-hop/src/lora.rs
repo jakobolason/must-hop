@@ -1,6 +1,5 @@
-use super::node::{MHNode, MHPacket};
 /// This contains node implementations for Lora
-/// Sx126x currently
+use super::node::{MHNode, MHPacket};
 use lora_phy::mod_params::{
     Bandwidth, CodingRate, ModulationParams, PacketParams, SpreadingFactor,
 };
@@ -8,10 +7,11 @@ use lora_phy::mod_params::{PacketStatus, RadioError};
 use lora_phy::mod_traits::RadioKind;
 use lora_phy::{DelayNs, LoRa, RxMode};
 
-use defmt::{error, info, warn};
+use defmt::{error, trace, warn};
 use embassy_time::Timer;
 use postcard::{from_bytes, to_slice};
 
+/// Parameters that define send and receive parameters
 #[derive(Clone, Copy)]
 pub struct TransmitParameters {
     pub sf: SpreadingFactor,
@@ -25,11 +25,14 @@ pub struct TransmitParameters {
     pub iq: bool,
 }
 
+/// Unsure whether this will be used
 pub enum RadioState {
     Rx,
     Tx,
 }
 
+/// A node implementatino for lora, where a LoRa interface variant type has to be implemented to
+/// use. An IV for a SX126x is shown in `/examples`
 pub struct LoraNode<'a, RK, DLY>
 where
     RK: RadioKind,
@@ -71,7 +74,7 @@ where
         // Simple listen to talk logic
         // TODO: This crashes when in a loop
         // loop {
-        info!("preparing for cad ...");
+        trace!("preparing for cad ...");
         self.lora.prepare_for_cad(&self.mdltn_params).await?;
         if self.lora.cad(&self.mdltn_params).await? {
             warn!("cad successfull with activity detected");
@@ -79,7 +82,7 @@ where
             Timer::after_millis(50).await;
             // TODO: Get some random amount of time before continuing loop
         } else {
-            info!("cad successfull with NO activity detected");
+            trace!("cad successfull with NO activity detected");
             // break;
         }
         // }
@@ -88,7 +91,7 @@ where
             .await?;
 
         self.lora.tx().await?;
-        info!("Transmit successfull!");
+        trace!("Transmit successfull!");
 
         // NOTE: This might create a delay between transmitting something and being able to receive
         // again
@@ -114,7 +117,7 @@ where
                 }
             },
         };
-        info!("rx successful, pkt status: {:?}", rx_pkt_status);
+        trace!("rx successful, pkt status: {:?}", rx_pkt_status);
 
         // Try to unpack the buffer into expected packet
         let valid_data = &receiving_buffer[..len as usize];
@@ -125,7 +128,7 @@ where
                 return Err(RadioError::PayloadSizeUnexpected(0));
             }
         };
-        info!("Got packet!");
+        trace!("Got packet!");
 
         // TODO: Check if this should be retransmitted
         // if (packet.to != me)
