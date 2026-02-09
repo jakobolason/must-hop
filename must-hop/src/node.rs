@@ -1,3 +1,4 @@
+use core::future::Future;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
@@ -14,13 +15,10 @@ pub trait MHNode {
     type Error;
     type Connection;
 
-    fn transmit(
-        &mut self,
-        packet: MHPacket,
-    ) -> impl core::future::Future<Output = Result<(), Self::Error>>;
+    fn transmit(&mut self, packet: MHPacket) -> impl Future<Output = Result<(), Self::Error>>;
     fn receive(
         &mut self,
         conn: Self::Connection,
         receiving_buffer: &[u8],
-    ) -> impl core::future::Future<Output = Result<MHPacket, Self::Error>>;
+    ) -> impl Future<Output = Result<MHPacket, Self::Error>>;
 }
