@@ -12,7 +12,6 @@ pub struct MHPacket<const MAX_PACKET_SIZE: usize = 128> {
 
 pub trait MHNode {
     type Error;
-    type Payload;
     type Connection;
 
     fn transmit(
@@ -23,5 +22,5 @@ pub trait MHNode {
         &mut self,
         conn: Self::Connection,
         receiving_buffer: &[u8],
-    ) -> impl core::future::Future<Output = Result<Self::Payload, Self::Error>>;
+    ) -> impl core::future::Future<Output = Result<MHPacket, Self::Error>>;
 }

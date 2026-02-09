@@ -9,10 +9,8 @@ use lora_phy::mod_traits::RadioKind;
 use lora_phy::{DelayNs, LoRa, RxMode};
 
 use defmt::{error, info, warn};
-use embassy_time::{Delay, Timer};
-use heapless::Vec;
+use embassy_time::Timer;
 use postcard::{from_bytes, to_slice};
-use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy)]
 pub struct TransmitParameters {
@@ -27,41 +25,12 @@ pub struct TransmitParameters {
     pub iq: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format)]
-pub struct SensorData {
-    pub device_id: u8,
-    pub temperate: f32,
-    pub voltage: f32,
-    pub acceleration_x: f32,
-}
-
-// TODO: Shuold not use this, only for prototyping
-impl From<SensorData> for MHPacket {
-    fn from(data: SensorData) -> Self {
-        let mut buffer = [0u8; MAX_PACK_LEN];
-        let used_slice = to_slice(&data, &mut buffer).expect("Coudl not serialize sensor data");
-        let payload_bytes =
-            Vec::from_slice(used_slice).expect("could not get vec, sensor data was too large");
-        // let payload_bytes =
-        //     to_vec(&data).expect("Serialization failed, struct too large for buffer");
-
-        Self {
-            destination_id: 1,
-            source_id: 2,
-            payload: payload_bytes,
-            hop_count: 0,
-        }
-    }
-}
-
-const MAX_PACK_LEN: usize = 128;
-
-enum RadioState {
+pub enum RadioState {
     Rx,
     Tx,
 }
 
-struct LoraNode<'a, RK, DLY>
+pub struct LoraNode<'a, RK, DLY>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -79,15 +48,18 @@ where
     DLY: DelayNs,
 {
     type Error = RadioError;
-    type Payload = SensorData;
     type Connection = Result<(u8, PacketStatus), RadioError>;
 
     // Should transform to Tx if in Rx
     async fn transmit(&mut self, packet: MHPacket) -> Result<(), RadioError> {
         // TODO: Is this necessary?
-        let mut tx_pkt_params =
-            self.lora
-                .create_tx_packet_params(8, false, true, false, &self.mdltn_params)?;
+        let mut tx_pkt_params = self.lora.create_tx_packet_params(
+            self.tp.pre_amp,
+            self.tp.imp_hed,
+            self.tp.crc,
+            self.tp.iq,
+            &self.mdltn_params,
+        )?;
         let mut buffer = [0u8; 32];
         let used_slice = match to_slice(&packet, &mut buffer) {
             Ok(slice) => slice,
@@ -130,24 +102,7 @@ where
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
         receiving_buffer: &[u8],
-    ) -> Result<SensorData, RadioError> {
-        let expected_packet = SensorData {
-            device_id: 42,
-            temperate: 23.5,
-            voltage: 3.3,
-            acceleration_x: 1.2,
-        };
-        let mut buffer = [0u8; MAX_PACK_LEN];
-        let used_slice =
-            to_slice(&expected_packet, &mut buffer).expect("Coudl not serialize sensor data");
-        let payload_bytes =
-            Vec::from_slice(used_slice).expect("could not get vec, sensor data was too large");
-        let mhpacket = MHPacket {
-            destination_id: 1,
-            source_id: 2,
-            payload: payload_bytes,
-            hop_count: 0,
-        };
+    ) -> Result<MHPacket, RadioError> {
         // First we check if we actually got something
         let (len, rx_pkt_status) = match conn {
             Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
@@ -176,23 +131,7 @@ where
         // if (packet.to != me)
         // transmit(lora, packet, tp).await?;
 
-        // TODO: We can of couse now always expect what the package contents should be..
-        if packet == mhpacket {
-            info!("SUCCESS: Packets match");
-            let payload = match from_bytes::<SensorData>(&packet.payload) {
-                Ok(packet) => packet,
-                Err(e) => {
-                    error!("Deserialization failed: {:?}", e);
-                    return Err(RadioError::PayloadSizeUnexpected(0));
-                }
-            };
-            Ok(payload)
-        } else {
-            error!("ERROR: Packets do not match!");
-            warn!(" Expected: {:?}", expected_packet);
-            warn!(" Received: {:?}", packet);
-            Err(RadioError::ReceiveTimeout)
-        }
+        Ok(packet)
     }
 }
 
@@ -201,7 +140,7 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
-    fn new(lora: &'a mut LoRa<RK, DLY>, tp: TransmitParameters) -> Result<Self, RadioError> {
+    pub fn new(lora: &'a mut LoRa<RK, DLY>, tp: TransmitParameters) -> Result<Self, RadioError> {
         let mdltn_params = lora.create_modulation_params(tp.sf, tp.bw, tp.cr, tp.lora_hz)?;
 
         let rx_pkt_params = lora.create_rx_packet_params(
@@ -221,7 +160,7 @@ where
         })
     }
 
-    async fn prepare_for_rx(&mut self) -> Result<(), RadioError> {
+    pub async fn prepare_for_rx(&mut self) -> Result<(), RadioError> {
         // TODO: Is it a proble using single here? Should it be continouos to not get timeout
         // errors all the time? Can this listening be timed and synchronized for a TDMA?
         self.lora
@@ -229,7 +168,7 @@ where
             .await
     }
 
-    async fn listen(&mut self, rec_buf: &mut [u8]) -> Result<(u8, PacketStatus), RadioError> {
+    pub async fn listen(&mut self, rec_buf: &mut [u8]) -> Result<(u8, PacketStatus), RadioError> {
         if let RadioState::Tx = self.radio_state {
             self.prepare_for_rx().await?;
         }
