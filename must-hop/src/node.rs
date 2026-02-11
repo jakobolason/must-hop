@@ -11,11 +11,11 @@ pub struct MHPacket<const MAX_PACKET_SIZE: usize = 128> {
     pub hop_count: u8,
 }
 
-pub trait MHNode {
+pub trait MHNode<const N: usize> {
     type Error;
     type Connection;
 
-    fn transmit(&mut self, packet: MHPacket) -> impl Future<Output = Result<(), Self::Error>>;
+    fn transmit(&mut self, packet: MHPacket<N>) -> impl Future<Output = Result<(), Self::Error>>;
     fn receive(
         &mut self,
         conn: Self::Connection,

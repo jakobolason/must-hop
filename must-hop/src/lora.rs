@@ -33,7 +33,7 @@ pub enum RadioState {
 
 /// A node implementatino for lora, where a LoRa interface variant type has to be implemented to
 /// use. An IV for a SX126x is shown in `/examples`
-pub struct LoraNode<'a, RK, DLY>
+pub struct LoraNode<'a, RK, DLY, const N: usize>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -45,7 +45,7 @@ where
     radio_state: RadioState,
 }
 
-impl<RK, DLY> MHNode for LoraNode<'_, RK, DLY>
+impl<RK, DLY, const N: usize> MHNode<N> for LoraNode<'_, RK, DLY, N>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -54,7 +54,7 @@ where
     type Connection = Result<(u8, PacketStatus), RadioError>;
 
     // Should transform to Tx if in Rx
-    async fn transmit(&mut self, packet: MHPacket) -> Result<(), RadioError> {
+    async fn transmit(&mut self, packet: MHPacket<N>) -> Result<(), RadioError> {
         // TODO: Is this necessary?
         let mut tx_pkt_params = self.lora.create_tx_packet_params(
             self.tp.pre_amp,
@@ -138,7 +138,7 @@ where
     }
 }
 
-impl<'a, RK, DLY> LoraNode<'a, RK, DLY>
+impl<'a, RK, DLY, const N: usize> LoraNode<'a, RK, DLY, N>
 where
     RK: RadioKind,
     DLY: DelayNs,
