@@ -1,5 +1,5 @@
 [package]
-name = "libloragw-sx1302-sys"
+name = "libloragw-sys"
 version = "0.1.0"
 edition = "2024"
 authors = ["Jakob Olason <jakobolason@proton.me>"]

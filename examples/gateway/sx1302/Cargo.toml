@@ -1,0 +1,8 @@
+[package]
+edition = "2024"
+name = "must-gateway-sx1302-example"
+version = "0.1.0"
+
+[dependencies]
+rppal = "0.14"
+libloragw-sys = { path = "../../../libloragw-sys" }

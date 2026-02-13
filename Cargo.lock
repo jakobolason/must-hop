@@ -493,7 +493,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "libloragw-sx1302-sys"
+name = "libloragw-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
