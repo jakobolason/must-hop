@@ -65,6 +65,6 @@ fn main() {
             return;
         }
     };
-    let cfg = Config::from_str_or_default(None).unwrap();
+    // let cfg = Config::from_str_or_default(None).unwrap();
     // let _ = conc.connect("/dev/spidev0.0").unwrap();
 }
