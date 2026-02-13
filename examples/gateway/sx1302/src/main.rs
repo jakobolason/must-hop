@@ -1,4 +1,5 @@
 use libloragw_sys::{lgw_get_eui, lgw_version_info};
+use loragw::{Concentrator, Error};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -52,5 +53,10 @@ fn main() {
         }
         // Convert the C string pointer to a safe Rust String
         // println!("Success! libloragw EUI: {}", eui_ptr);
+    }
+    println!("Now try and use loragw:");
+    match Concentrator::open() {
+        Ok(_) => println!("got concentrator!"),
+        Err(e) => eprintln!("Error making concentrator: {:?}", e),
     }
 }

@@ -5,4 +5,5 @@ version = "0.1.0"
 
 [dependencies]
 rppal = "0.14"
+loragw = { path = "../../../loragw" }
 libloragw-sys = { path = "../../../libloragw-sys" }
