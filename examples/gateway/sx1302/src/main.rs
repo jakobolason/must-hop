@@ -1,5 +1,5 @@
 use libloragw_sys::{lgw_get_eui, lgw_version_info};
-use loragw::{cfg::Config, Concentrator, Error};
+use loragw::{cfg::Config, Concentrator, Error, Running, RxRFConf};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -26,6 +26,19 @@ fn reset_lgw() -> Result<(), Box<dyn std::error::Error>> {
     println!("Reset complete.");
 
     Ok(())
+}
+
+fn create_concentrator() -> Result<Concentrator<Running>, Error> {
+    let spi_conn = "/dev/spidev0.0";
+    let conf = Config::from_str_or_default(None)?;
+    let radios = RxRFConf::try_from(conf.radios.expect("Radios configuration is required"))?;
+    Concentrator::open()?
+        .connect(spi_conn)?
+        .set_config_board(conf.board.try_into()?)
+        .set_rx_rfs(radios)
+        .set_config_channels(conf.multirate_channels)
+        .set_config_tx_gains(conf.tx_gains)
+        .start()
 }
 
 fn main() {
@@ -55,15 +68,4 @@ fn main() {
         // println!("Success! libloragw EUI: {}", eui_ptr);
     }
     println!("Now try and use loragw:");
-    let conc = match Concentrator::open() {
-        Ok(c) => {
-            println!("got concentrator!");
-            c
-        }
-        Err(e) => {
-            eprintln!("Error making concentrator: {:?}", e);
-            return;
-        }
-    };
-    let _ = conc.connect("/dev/spidev0.0").unwrap();
 }

@@ -63,6 +63,16 @@ impl From<Error> for AppError {
         AppError::Concentrator(err)
     }
 }
+impl From<AppError> for Error {
+    fn from(err: AppError) -> Self {
+        match err {
+            AppError::Concentrator(err) => err,
+            AppError::IO(err) => Error::Data,
+            AppError::Config(err) => Error::Toml(err),
+            AppError::Generic(err) => Error::Data,
+        }
+    }
+}
 
 /// Wraps a `libloragw-sys` function call and:
 /// - wraps the return code in a `Result`

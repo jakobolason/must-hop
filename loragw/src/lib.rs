@@ -41,10 +41,9 @@ pub struct Closed {}
 pub struct Builder<'a> {
     connected: bool,
     board: Option<BoardConf>,
-    rx_rf_conf: RxRFConf,
+    rx_rf_conf: Vec<RxRFConf>,
     gains: &'a [TxGain],
-    chain: u8,
-    channel_conf: ChannelConf,
+    channel_conf: Vec<(u8, ChannelConf)>,
 }
 pub struct Running {}
 
@@ -96,29 +95,38 @@ impl<'a> Concentrator<Builder<'a>> {
         Ok(self)
     }
     /// Configure the gateway board.
-    pub fn config_board(mut self, conf: BoardConf) -> Self {
+    pub fn set_config_board(mut self, conf: BoardConf) -> Self {
         log::info!("conf: {:?}", conf);
         self.state.board = Some(conf);
         self
     }
 
     /// Configure an RF chain.
-    pub fn with_rx_rf(mut self, conf: RxRFConf) -> Self {
+    pub fn set_rx_rfs(mut self, conf: Vec<RxRFConf>) -> Self {
         log::info!("{:?}", conf);
         self.state.rx_rf_conf = conf;
         self
     }
+    pub fn add_rx_rf(mut self, conf: RxRFConf) -> Self {
+        log::info!("conf: {:?}", conf);
+        self.state.rx_rf_conf.push(conf);
+        self
+    }
 
     /// Configure an IF chain + modem (must configure before start).
-    pub fn config_channel(mut self, chain: u8, conf: ChannelConf) -> Self {
+    pub fn set_config_channels(mut self, confs: Vec<(u8, ChannelConf)>) -> Self {
+        // log::info!("chain: {}, conf: {:?}", chain, conf);
+        self.state.channel_conf = confs;
+        self
+    }
+    pub fn add_config_channel(mut self, chain: u8, conf: ChannelConf) -> Self {
         log::info!("chain: {}, conf: {:?}", chain, conf);
-        self.state.chain = chain;
-        self.state.channel_conf = conf;
+        self.state.channel_conf.push((chain, conf));
         self
     }
 
     /// Configure the Tx gain LUT.
-    pub fn config_tx_gain(mut self, gains: &'a [TxGain]) -> Self {
+    pub fn set_config_tx_gains(mut self, gains: &'a [TxGain]) -> Self {
         log::info!("gains: {:?}", gains);
         self.state.gains = gains;
         self
@@ -138,18 +146,17 @@ impl<'a> Concentrator<Builder<'a>> {
         unsafe { hal_call!(lgw_board_setconf(&mut board.into())) }?;
 
         // rx_rf chain
-        let rx_rf_conf = self.state.rx_rf_conf;
-        unsafe {
-            hal_call!(lgw_rxrf_setconf(
-                rx_rf_conf.radio as u8,
-                &mut rx_rf_conf.into()
-            ))
-        }?;
+        self.state.rx_rf_conf.iter().try_for_each(|c| unsafe {
+            hal_call!(lgw_rxrf_setconf(c.radio as u8, &mut c.into())).map(|_| ())
+        })?;
 
         // configure IF chain + modem
-        let chain = self.state.chain;
-        let chan_conf = self.state.channel_conf;
-        unsafe { hal_call!(lgw_rxif_setconf(chain, &mut chan_conf.into())) }?;
+        self.state
+            .channel_conf
+            .iter()
+            .try_for_each(|(chain, chan_conf)| unsafe {
+                hal_call!(lgw_rxif_setconf(*chain, &mut chan_conf.into())).map(|_| ())
+            })?;
 
         // conf Tx gain LUT
         let gains = self.state.gains;

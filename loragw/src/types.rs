@@ -252,8 +252,8 @@ pub struct RxRFConf {
     pub tx_notch_freq: u32,
 }
 
-impl From<RxRFConf> for llg::lgw_conf_rxrf_s {
-    fn from(other: RxRFConf) -> Self {
+impl From<&RxRFConf> for llg::lgw_conf_rxrf_s {
+    fn from(other: &RxRFConf) -> Self {
         println!("add missing fields");
         llg::lgw_conf_rxrf_s {
             enable: other.enable,
@@ -311,10 +311,10 @@ pub enum ChannelConf {
 }
 
 #[allow(clippy::needless_update)]
-impl From<ChannelConf> for llg::lgw_conf_rxif_s {
-    fn from(other: ChannelConf) -> Self {
+impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
+    fn from(other: &ChannelConf) -> Self {
         match other {
-            ChannelConf::Disable => llg::lgw_conf_rxif_s {
+            &ChannelConf::Disable => llg::lgw_conf_rxif_s {
                 enable: false,
                 rf_chain: 0,
                 freq_hz: 0,
@@ -324,7 +324,7 @@ impl From<ChannelConf> for llg::lgw_conf_rxif_s {
                 sync_word: 0,
                 ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
-            ChannelConf::Fixed {
+            &ChannelConf::Fixed {
                 radio,
                 freq,
                 bandwidth,
@@ -339,7 +339,7 @@ impl From<ChannelConf> for llg::lgw_conf_rxif_s {
                 sync_word: 0,
                 ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
-            ChannelConf::Multirate { radio, freq } => llg::lgw_conf_rxif_s {
+            &ChannelConf::Multirate { radio, freq } => llg::lgw_conf_rxif_s {
                 enable: true,
                 rf_chain: radio as u8,
                 freq_hz: freq,
@@ -349,7 +349,7 @@ impl From<ChannelConf> for llg::lgw_conf_rxif_s {
                 sync_word: 0,
                 ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
-            ChannelConf::FSK {
+            &ChannelConf::FSK {
                 radio,
                 freq,
                 bandwidth,
