@@ -63,6 +63,7 @@ where
             self.tp.iq,
             &self.mdltn_params,
         )?;
+        // TODO: This should be the const generic max pack len
         let mut buffer = [0u8; 32];
         let used_slice = match to_slice(&packet, &mut buffer) {
             Ok(slice) => slice,
