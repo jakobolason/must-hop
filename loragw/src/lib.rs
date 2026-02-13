@@ -90,8 +90,8 @@ impl<'a> Concentrator<Builder<'a>> {
     /// exists and is the correct version.
     pub fn connect(mut self, spidev_path: &str) -> Result<Self> {
         let c_str = CString::new(spidev_path).unwrap();
-        // TODO: Find out what this u32 should be
-        unsafe { hal_call!(lgw_connect(1u32, c_str.as_ptr())) }?;
+        // NOTE: 0 => SPI, 1 => USB
+        unsafe { hal_call!(lgw_connect(0u32, c_str.as_ptr())) }?;
         self.state.connected = true;
         Ok(self)
     }

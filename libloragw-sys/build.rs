@@ -15,6 +15,10 @@ fn main() {
         .include("vendor/sx1302_hal/libloragw/inc")
         .include("vendor/sx1302_hal/libtools/inc")
         .include("vendor/sx1302_hal_cfg")
+        // For debug
+        .define("DEBUG_COM", Some("1"))
+        .define("DEBUG_REG", Some("1"))
+        .define("DEBUG_HAL", Some("1"))
         .file("vendor/sx1302_hal/libloragw/src/loragw_aux.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_cal.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_com.c")
