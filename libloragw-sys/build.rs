@@ -17,8 +17,11 @@ fn main() {
         .include("vendor/sx1302_hal_cfg")
         .file("vendor/sx1302_hal/libloragw/src/loragw_aux.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_cal.c")
+        .file("vendor/sx1302_hal/libloragw/src/loragw_com.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_debug.c")
+        .file("vendor/sx1302_hal/libloragw/src/loragw_gps.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_hal.c")
+        // _lbt.c, _mcu.c
         .file("vendor/sx1302_hal/libloragw/src/loragw_i2c.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_reg.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_spi.c")

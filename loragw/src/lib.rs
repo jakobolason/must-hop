@@ -1,5 +1,3 @@
-#![deny(missing_docs)]
-
 //! This crate provides a high-level interface which serves as
 //! building-block for creating LoRa gateways using the
 //! [SX1301](https://www.semtech.com/products/wireless-rf/lora-gateways/sx1301)
@@ -10,15 +8,15 @@ mod error;
 mod types;
 pub use crate::error::*;
 pub use crate::types::*;
+use std::ffi::CString;
 use std::{
     cell::Cell,
     convert::{TryFrom, TryInto},
     marker::PhantomData,
-    ops,
     sync::atomic::{AtomicBool, Ordering},
-    thread, time,
 };
 
+pub mod cfg;
 // pub(crate) use libloragw_sys as llg;
 pub(crate) use libloragw_sys as llg;
 
@@ -26,92 +24,164 @@ pub(crate) use libloragw_sys as llg;
 // This is not a great solution, since another process has its
 // own count.
 static GW_IS_OPEN: AtomicBool = AtomicBool::new(false);
+struct GatewayGuard {}
+
+impl Drop for GatewayGuard {
+    fn drop(&mut self) {
+        log::info!("Cleaning up gateway resources");
+        unsafe {
+            let _ = hal_call!(lgw_stop());
+        }
+        GW_IS_OPEN.store(false, Ordering::SeqCst);
+    }
+}
+
+pub struct Closed {}
+#[derive(Default)]
+pub struct Builder<'a> {
+    connected: bool,
+    board: Option<BoardConf>,
+    rx_rf_conf: RxRFConf,
+    gains: &'a [TxGain],
+    chain: u8,
+    channel_conf: ChannelConf,
+}
+pub struct Running {}
 
 /// A LoRa concentrator.
-pub struct Concentrator {
+pub struct Concentrator<State> {
     /// Used to prevent `self` from auto implementing `Sync`.
     ///
     /// This is necessary because the `libloragw` makes liberal use of
     /// globals and is not thread-safe.
     _prevent_sync: PhantomData<Cell<()>>,
+    _guard: GatewayGuard,
+    state: State,
 }
 
-impl Concentrator {
-    /// Open the spidev-connected concentrator.
-    pub fn open() -> Result<Self> {
+impl Concentrator<Closed> {
+    // Open the spidev-connected concentrator.
+    pub fn open<'a>() -> Result<Concentrator<Builder<'a>>> {
         // We expect `false`, and want to swap to `true`.
         // If it fails (is_err), the lock is already held.
         if GW_IS_OPEN
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_err()
         {
-            eprintln!("concentrator busy");
+            log::error!("concentrator busy");
             return Err(Error::Busy); // Make sure Error::Busy is properly in scope!
         }
+        log::info!("Gateware model initialized");
 
         Ok(Concentrator {
             _prevent_sync: PhantomData,
+            _guard: GatewayGuard {},
+            state: Builder {
+                ..Default::default()
+            },
         })
     }
+}
 
+impl<'a> Concentrator<Builder<'a>> {
+    /// Attempt to connect to concentrator.
+    ///
+    /// This function is intended to check if we the concentrator chip
+    /// exists and is the correct version.
+    pub fn connect(mut self, spidev_path: &str) -> Result<Self> {
+        let c_str = CString::new(spidev_path).unwrap();
+        // TODO: Find out what this u32 should be
+        unsafe { hal_call!(lgw_connect(1u32, c_str.as_ptr())) }?;
+        self.state.connected = true;
+        Ok(self)
+    }
     /// Configure the gateway board.
-    pub fn config_board(&self, conf: &BoardConf) -> Result {
-        println!("conf: {:?}", conf);
-        unsafe { hal_call!(lgw_board_setconf(&mut conf.into())) }?;
-        Ok(())
+    pub fn config_board(mut self, conf: BoardConf) -> Self {
+        log::info!("conf: {:?}", conf);
+        self.state.board = Some(conf);
+        self
     }
 
     /// Configure an RF chain.
-    pub fn config_rx_rf(&self, conf: &RxRFConf) -> Result {
-        println!("{:?}", conf);
-        unsafe { hal_call!(lgw_rxrf_setconf(conf.radio as u8, &mut conf.into())) }?;
-        Ok(())
+    pub fn with_rx_rf(mut self, conf: RxRFConf) -> Self {
+        log::info!("{:?}", conf);
+        self.state.rx_rf_conf = conf;
+        self
     }
 
     /// Configure an IF chain + modem (must configure before start).
-    pub fn config_channel(&self, chain: u8, conf: &ChannelConf) -> Result {
-        println!("chain: {}, conf: {:?}", chain, conf);
-        unsafe { hal_call!(lgw_rxif_setconf(chain, &mut conf.into())) }?;
-        Ok(())
+    pub fn config_channel(mut self, chain: u8, conf: ChannelConf) -> Self {
+        log::info!("chain: {}, conf: {:?}", chain, conf);
+        self.state.chain = chain;
+        self.state.channel_conf = conf;
+        self
     }
 
     /// Configure the Tx gain LUT.
-    pub fn config_tx_gain(&self, gains: &[TxGain]) -> Result {
+    pub fn config_tx_gain(mut self, gains: &'a [TxGain]) -> Self {
+        log::info!("gains: {:?}", gains);
+        self.state.gains = gains;
+        self
+    }
+
+    /// according to previously set parameters.
+    pub fn start(self) -> Result<Concentrator<Running>> {
+        if !self.state.connected {
+            return Err(Error::BuilderError);
+        }
+        log::info!("starting concentrator");
+        // board config
+        let board = match self.state.board {
+            Some(board) => board,
+            None => return Err(Error::BuilderError),
+        };
+        unsafe { hal_call!(lgw_board_setconf(&mut board.into())) }?;
+
+        // rx_rf chain
+        let rx_rf_conf = self.state.rx_rf_conf;
+        unsafe {
+            hal_call!(lgw_rxrf_setconf(
+                rx_rf_conf.radio as u8,
+                &mut rx_rf_conf.into()
+            ))
+        }?;
+
+        // configure IF chain + modem
+        let chain = self.state.chain;
+        let chan_conf = self.state.channel_conf;
+        unsafe { hal_call!(lgw_rxif_setconf(chain, &mut chan_conf.into())) }?;
+
+        // conf Tx gain LUT
+        let gains = self.state.gains;
         if gains.is_empty() || gains.len() > 16 {
-            eprintln!(
+            log::error!(
                 "gain table must contain 1 to 16 entries, {} provided",
                 gains.len()
             );
             return Err(Error::Size);
         }
-        println!("gains: {:?}", gains);
         let mut lut = TxGainLUT::default();
         lut.lut[..gains.len()].clone_from_slice(gains);
         lut.size = gains.len() as u8;
         unsafe {
-            // TODO: What should this u8 be?
+            // TODO: de-hardcode this 0u8 (? from helium)
             hal_call!(lgw_txgain_setconf(
                 0u8,
                 &mut lut as *mut TxGainLUT as *mut llg::lgw_tx_gain_lut_s
             ))
         }?;
-        Ok(())
-    }
 
-    /// according to previously set parameters.
-    pub fn start(&self) -> Result {
-        println!("starting concentrator");
+        // Now we ready to start
         unsafe { hal_call!(lgw_start()) }?;
-        Ok(())
+        Ok(Concentrator {
+            _prevent_sync: PhantomData,
+            _guard: self._guard,
+            state: Running {},
+        })
     }
+}
 
-    /// Stop the LoRa concentrator and disconnect it.
-    pub fn stop(&self) -> Result {
-        println!("stopping concentrator");
-        unsafe { hal_call!(lgw_stop()) }?;
-        Ok(())
-    }
-
+impl Concentrator<Running> {
     /// Returns the concentrators current receive status.
     pub fn receive_status(&self) -> Result<RxStatus> {
         const RX_STATUS: u8 = 2;
@@ -119,7 +189,7 @@ impl Concentrator {
         unsafe {
             hal_call!(lgw_status(
                 {
-                    println!("remove hardcoded RF chain argument from status calls");
+                    log::info!("remove hardcoded RF chain argument from status calls");
                     0u8
                 },
                 RX_STATUS,
@@ -132,12 +202,22 @@ impl Concentrator {
     /// Perform a non-blocking read of up to 16 packets from
     /// concentrator's FIFO.
     pub fn receive(&self) -> Result<Option<Vec<RxPacket>>> {
-        let mut tmp_buf: [llg::lgw_pkt_rx_s; 16] = unsafe { std::mem::zeroed() };
-        let len = unsafe { hal_call!(lgw_receive(tmp_buf.len() as u8, tmp_buf.as_mut_ptr())) }?;
+        let mut tmp_buf: [std::mem::MaybeUninit<llg::lgw_pkt_rx_s>; 16] =
+            unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+
+        let len = unsafe {
+            hal_call!(lgw_receive(
+                tmp_buf.len() as u8,
+                tmp_buf.as_mut_ptr() as *mut llg::lgw_pkt_rx_s
+            ))
+        }?;
+
         if len > 0 {
-            let mut out = Vec::new();
-            for tmp in tmp_buf[..len].iter() {
-                out.push(RxPacket::try_from(tmp)?);
+            let mut out = Vec::with_capacity(len as usize);
+            for i in 0..(len as usize) {
+                // SAFE: We know C initialized up to `len` elements
+                let pkt = unsafe { tmp_buf[i].assume_init() };
+                out.push(RxPacket::try_from(&pkt)?);
             }
             Ok(Some(out))
         } else {
@@ -147,29 +227,27 @@ impl Concentrator {
 
     // TODO: How to do this
     // /// Transmit `packet` over the air.
-    // pub fn transmit(&self, packet: TxPacket) -> Result {
+    // pub fn transmit(self, packet: TxPacket) -> Result {
     //     while self.transmit_status()? != TxStatus::Free {
     //         const SLEEP_TIME: time::Duration = time::Duration::from_millis(5);
-    //         println!("transmitter is busy, sleeping for {:?}", SLEEP_TIME);
+    //         log::info!("transmitter is busy, sleeping for {:?}", SLEEP_TIME);
     //         thread::sleep(SLEEP_TIME);
     //     }
     //     unsafe { hal_call!(lgw_send(&mut packet.try_into()?)) }?;
     //     Ok(())
     // }
 
-    /// Attempt to connect to concentrator.
-    ///
-    /// This function is intended to check if we the concentrator chip
-    /// exists and is the correct version.
-    pub fn connect(&self, spidev_path: &::std::ffi::CStr) -> Result {
-        // TODO: Find out what this u32 should be
-        unsafe { hal_call!(lgw_connect(1u32, spidev_path.as_ptr())) }?;
-        Ok(())
+    /// Stop the LoRa concentrator and disconnect it.
+    pub fn stop(self) -> Result<Concentrator<Closed>> {
+        log::info!("stopping concentrator");
+        unsafe { hal_call!(lgw_stop()) }?;
+        Ok(Concentrator {
+            _prevent_sync: PhantomData,
+            _guard: self._guard,
+            state: Closed {},
+        })
     }
-}
 
-// Private functions.
-impl Concentrator {
     /// Returns the concentrators current transmit status.
     ///
     /// We keep this private since `transmit` uses it internally, and
@@ -181,7 +259,7 @@ impl Concentrator {
         unsafe {
             hal_call!(lgw_status(
                 {
-                    println!("[WARN] remove hardcoded RF chain argument from status calls");
+                    log::info!("[WARN] remove hardcoded RF chain argument from status calls");
                     0u8
                 },
                 TX_STATUS,
@@ -189,13 +267,6 @@ impl Concentrator {
             ))
         }?;
         tx_status.try_into()
-    }
-}
-
-impl ops::Drop for Concentrator {
-    fn drop(&mut self) {
-        println!("closing concentrator");
-        GW_IS_OPEN.store(false, Ordering::Release);
     }
 }
 

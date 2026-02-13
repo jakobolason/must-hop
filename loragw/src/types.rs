@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{error, llg};
 use std::{convert::TryFrom, fmt, time};
 
@@ -5,9 +7,9 @@ const MOD_LORA: u8 = 0x10;
 const MOD_FSK: u8 = 0x20;
 
 /// Radio types that can be found on the LoRa concentrator.
-#[derive(Debug, Clone, Copy)]
-#[allow(missing_docs)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum RadioType {
+    #[default]
     None = 0,
     SX1255 = 1,
     SX1257 = 2,
@@ -151,20 +153,21 @@ impl fmt::Debug for Coderate {
 
 /// Represents one of two possible front-end radios connected to the
 /// concentrator.
-#[derive(Debug, Clone, Copy)]
-pub enum Radio {
+#[derive(Debug, Clone, Copy, Default)]
+pub enum FrontRadio {
     /// Radio 0
+    #[default]
     R0 = 0,
     /// Radio 1
     R1 = 1,
 }
 
-impl TryFrom<u32> for Radio {
+impl TryFrom<u32> for FrontRadio {
     type Error = error::Error;
     fn try_from(other: u32) -> Result<Self, error::Error> {
         match other {
-            0 => Ok(Radio::R0),
-            1 => Ok(Radio::R1),
+            0 => Ok(FrontRadio::R0),
+            1 => Ok(FrontRadio::R1),
             _ => Err(error::Error::Data),
         }
     }
@@ -176,13 +179,13 @@ pub struct BoardConf {
     /// Enable ONLY for *public* networks using the LoRa MAC protocol.
     pub lorawan_public: bool,
     /// Index of RF chain which provides clock to concentrator.
-    pub clksrc: Radio,
+    pub clksrc: FrontRadio,
     /// Path to SPI device.
     pub spidev_path: ::std::ffi::CString,
 }
 
-impl From<&BoardConf> for llg::lgw_conf_board_s {
-    fn from(other: &BoardConf) -> Self {
+impl From<BoardConf> for llg::lgw_conf_board_s {
+    fn from(other: BoardConf) -> Self {
         llg::lgw_conf_board_s {
             lorawan_public: other.lorawan_public,
             clksrc: other.clksrc as u8,
@@ -190,7 +193,7 @@ impl From<&BoardConf> for llg::lgw_conf_board_s {
             // TODO: What should this be?
             com_type: 1,
             // TODO: What should this be?
-            com_path: [1i8; 64],
+            com_path: [1u8; 64],
             // spidev_path: {
             //     let mut path = [0; 64];
             //     // let other_path = other.spidev_path.as_bytes_with_nul();
@@ -231,17 +234,17 @@ pub struct LBTConf {
 }
 
 /// RF chain configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RxRFConf {
     /// The radio we are configuring.
-    pub radio: Radio,
+    pub radio: FrontRadio,
     /// Enable this RF chain.
     pub enable: bool,
     /// Tune this chain to this frequency.
     pub freq: u32,
     /// Board-specific RSSI correction factor.
     pub rssi_offset: f32,
-    /// Radio model of this chain.
+    /// FrontRadio model of this chain.
     pub type_: RadioType,
     /// Enable transmission on this chain.
     pub tx_enable: bool,
@@ -249,8 +252,8 @@ pub struct RxRFConf {
     pub tx_notch_freq: u32,
 }
 
-impl From<&RxRFConf> for llg::lgw_conf_rxrf_s {
-    fn from(other: &RxRFConf) -> Self {
+impl From<RxRFConf> for llg::lgw_conf_rxrf_s {
+    fn from(other: RxRFConf) -> Self {
         println!("add missing fields");
         llg::lgw_conf_rxrf_s {
             enable: other.enable,
@@ -264,14 +267,15 @@ impl From<&RxRFConf> for llg::lgw_conf_rxrf_s {
 }
 
 /// Modem and IF configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ChannelConf {
     /// Disable this channel.
+    #[default]
     Disable,
     /// Standard (fixed bandwidth and spreading) LoRa channel.
     Fixed {
         /// IQ sample source for this channel.
-        radio: Radio,
+        radio: FrontRadio,
         /// Center frequency for this channel (relative to `radio`'s center frequency).
         freq: i32,
         /// Receive bandwidth.
@@ -285,14 +289,14 @@ pub enum ChannelConf {
     /// decode packets transmitted with varying valid LoRa schemes.
     Multirate {
         /// IQ sample source for this channel.
-        radio: Radio,
+        radio: FrontRadio,
         /// Center frequency for this channel (relative to `radio`'s center frequency).
         freq: i32,
     },
     /// Frequency-shift-keying channel.
     FSK {
         /// IQ sample source for this channel.
-        radio: Radio,
+        radio: FrontRadio,
         /// Center frequency for this channel (relative to `radio`'s center frequency).
         freq: i32,
         /// Receive bandwidth.
@@ -307,8 +311,8 @@ pub enum ChannelConf {
 }
 
 #[allow(clippy::needless_update)]
-impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
-    fn from(other: &ChannelConf) -> Self {
+impl From<ChannelConf> for llg::lgw_conf_rxif_s {
+    fn from(other: ChannelConf) -> Self {
         match other {
             ChannelConf::Disable => llg::lgw_conf_rxif_s {
                 enable: false,
@@ -320,7 +324,7 @@ impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
                 sync_word: 0,
                 ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
-            &ChannelConf::Fixed {
+            ChannelConf::Fixed {
                 radio,
                 freq,
                 bandwidth,
@@ -335,7 +339,7 @@ impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
                 sync_word: 0,
                 ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
-            &ChannelConf::Multirate { radio, freq } => llg::lgw_conf_rxif_s {
+            ChannelConf::Multirate { radio, freq } => llg::lgw_conf_rxif_s {
                 enable: true,
                 rf_chain: radio as u8,
                 freq_hz: freq,
@@ -345,7 +349,7 @@ impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
                 sync_word: 0,
                 ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
-            &ChannelConf::FSK {
+            ChannelConf::FSK {
                 radio,
                 freq,
                 bandwidth,
@@ -385,7 +389,7 @@ impl TryFrom<u32> for CRCCheck {
             0x11 => CRCCheck::Fail,
             0x10 => CRCCheck::Pass,
             invalid => {
-                eprintln!("unable to convert {:?} to Radio", invalid);
+                eprintln!("unable to convert {:?} to FrontRadio", invalid);
                 return Err(error::Error::Data);
             }
         })
@@ -404,7 +408,7 @@ pub struct RxPacketLoRa {
     /// 1uS-resolution timestamp derived from concentrator's internal counter.
     pub timestamp: time::Duration,
     /// RF chain this packet was received on.
-    pub radio: Radio,
+    pub radio: FrontRadio,
     /// Modulation bandwidth.
     pub bandwidth: Bandwidth,
     /// Spreading factor of this packet.
@@ -439,7 +443,7 @@ pub struct RxPacketFSK {
     /// 1uS-resolution timestamp derived from concentrator's internal counter.
     pub timestamp: time::Duration,
     /// RF chain this packet was received on.
-    pub radio: Radio,
+    pub radio: FrontRadio,
     /// Datarate of this packet.
     pub datarate: u32,
     /// Average packet RSSI, in dB.
@@ -470,7 +474,7 @@ impl TryFrom<&llg::lgw_pkt_rx_s> for RxPacket {
                 if_chain: other.if_chain,
                 crc_check: CRCCheck::try_from(u32::from(other.status))?,
                 timestamp: time::Duration::from_micros(u64::from(other.count_us)),
-                radio: Radio::try_from(u32::from(other.rf_chain))?,
+                radio: FrontRadio::try_from(u32::from(other.rf_chain))?,
                 bandwidth: Bandwidth::try_from(u32::from(other.bandwidth))?,
                 spreading: Spreading::try_from(other.datarate)?,
                 coderate: Coderate::try_from(u32::from(other.coderate))?,
@@ -487,7 +491,7 @@ impl TryFrom<&llg::lgw_pkt_rx_s> for RxPacket {
                 if_chain: other.if_chain,
                 crc_check: CRCCheck::try_from(u32::from(other.status))?,
                 timestamp: time::Duration::from_micros(u64::from(other.count_us)),
-                radio: Radio::try_from(u32::from(other.rf_chain))?,
+                radio: FrontRadio::try_from(u32::from(other.rf_chain))?,
                 datarate: other.datarate,
 
                 rssi: other.rssis,
@@ -544,7 +548,7 @@ pub struct TxPacketLoRa {
     /// When to send this packet.
     pub mode: TxMode,
     /// Which radio to transmit on.
-    pub radio: Radio,
+    pub radio: FrontRadio,
     /// TX power (in dBm).
     pub power: i8,
     /// Modulation bandwidth.
@@ -575,7 +579,7 @@ pub struct TxPacketFSK {
     /// When to send this packet.
     pub mode: TxMode,
     /// Which radio to transmit on.
-    pub radio: Radio,
+    pub radio: FrontRadio,
     /// TX power (in dBm).
     pub power: i8,
     /// Datarate in bits/second.
@@ -595,7 +599,7 @@ pub struct TxPacketFSK {
 }
 /// Structure containing all gains of Tx chain.
 #[repr(C)]
-#[derive(Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct TxGain {
     /// Measured TX power at the board connector (in dBm).
     pub rf_power: i8,

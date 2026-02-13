@@ -1,5 +1,5 @@
 use libloragw_sys::{lgw_get_eui, lgw_version_info};
-use loragw::{Concentrator, Error};
+use loragw::{cfg::Config, Concentrator, Error};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -55,8 +55,16 @@ fn main() {
         // println!("Success! libloragw EUI: {}", eui_ptr);
     }
     println!("Now try and use loragw:");
-    match Concentrator::open() {
-        Ok(_) => println!("got concentrator!"),
-        Err(e) => eprintln!("Error making concentrator: {:?}", e),
-    }
+    let conc = match Concentrator::open() {
+        Ok(c) => {
+            println!("got concentrator!");
+            c
+        }
+        Err(e) => {
+            eprintln!("Error making concentrator: {:?}", e);
+            return;
+        }
+    };
+    let cfg = Config::from_str_or_default(None).unwrap();
+    // let _ = conc.connect("/dev/spidev0.0").unwrap();
 }
