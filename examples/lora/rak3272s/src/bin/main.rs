@@ -72,6 +72,10 @@ async fn main(spawner: Spawner) {
         error!("error in spawning lora task: {:?}", e);
     }
     // TODO: Add sensor data creation task
+    let rng = Rng::new(p.RNG, Irqs);
+    if let Err(e) = spawner.spawn(sensor_task(CHANNEL.sender(), rng)) {
+        error!("Error in spawning lora task: {:?}, ", e);
+    }
 
     loop {
         info!("from main...");
@@ -94,9 +98,11 @@ async fn sensor_task(
         };
         channel.send(expected_packet).await;
 
+        info!("Send a packet!");
         let random = rng.next_u64();
         // random number between 3 and 8
         let r_num = (random % 5) + 3;
+        info!("waiting {} seconds ...", r_num);
 
         Timer::after_secs(r_num).await;
     }

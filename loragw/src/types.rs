@@ -27,30 +27,13 @@ impl TryFrom<&str> for RadioType {
             "SX1276" => RadioType::SX1276,
             "SX1250" => RadioType::SX1250,
             invalid => {
-                log::error!("unable to convert {:?} to RadioType", invalid);
+                eprintln!("unable to convert {:?} to RadioType", invalid);
                 return Err(error::Error::Data);
             }
         })
     }
 }
-
 /// Spreading factor.
-#[cfg(feature = "sx1301")]
-#[derive(Debug, Clone, Copy)]
-#[allow(missing_docs)]
-pub enum Spreading {
-    Undefined = 0x00,
-    SF7 = 0x02,
-    SF8 = 0x04,
-    SF9 = 0x08,
-    SF10 = 0x10,
-    SF11 = 0x20,
-    SF12 = 0x40,
-    Multi = 0x7E,
-}
-
-/// Spreading factor.
-#[cfg(feature = "sx1302")]
 #[derive(Debug, Clone, Copy)]
 #[allow(missing_docs)]
 pub enum Spreading {
@@ -69,22 +52,6 @@ pub enum Spreading {
 impl TryFrom<u32> for Spreading {
     type Error = error::Error;
 
-    #[cfg(feature = "sx1301")]
-    fn try_from(other: u32) -> Result<Self, error::Error> {
-        Ok(match other {
-            0x00 => Spreading::Undefined,
-            0x02 => Spreading::SF7,
-            0x04 => Spreading::SF8,
-            0x08 => Spreading::SF9,
-            0x10 => Spreading::SF10,
-            0x20 => Spreading::SF11,
-            0x40 => Spreading::SF12,
-            0x7E => Spreading::Multi,
-            _ => return Err(error::Error::Data),
-        })
-    }
-
-    #[cfg(feature = "sx1302")]
     fn try_from(other: u32) -> Result<Self, error::Error> {
         Ok(match other {
             0 => Spreading::Undefined,
@@ -98,37 +65,13 @@ impl TryFrom<u32> for Spreading {
             12 => Spreading::SF12,
             0x7E => Spreading::Multi,
             invalid => {
-                log::error!("unable to convert {:?} to Spreading", invalid);
+                eprintln!("unable to convert {:?} to Spreading", invalid);
                 return Err(error::Error::Data);
             }
         })
     }
 }
-
 /// Configured receive bandwidth.
-#[cfg(feature = "sx1301")]
-#[derive(Debug, Clone, Copy)]
-pub enum Bandwidth {
-    /// Auto bandwidth.
-    Undefined = 0,
-    /// 500 kHz.
-    BW500kHz = 0x01,
-    /// 250 kHz.
-    BW250kHz = 0x02,
-    /// 125 kHz.
-    BW125kHz = 0x03,
-    /// 62.5 kHz
-    BW62_5kHz = 0x04,
-    /// 31.2 kHz.
-    BW31_2kHz = 0x05,
-    /// 15.6 kHz.
-    BW15_6kHz = 0x06,
-    /// 7.8 kHz.
-    BW7_8kHz = 0x07,
-}
-
-/// Configured receive bandwidth.
-#[cfg(feature = "sx1302")]
 #[derive(Debug, Clone, Copy)]
 pub enum Bandwidth {
     /// Auto bandwidth.
@@ -144,25 +87,6 @@ pub enum Bandwidth {
 impl TryFrom<u32> for Bandwidth {
     type Error = error::Error;
 
-    #[cfg(feature = "sx1301")]
-    fn try_from(other: u32) -> Result<Self, error::Error> {
-        Ok(match other {
-            0 => Bandwidth::Undefined,
-            0x01 => Bandwidth::BW500kHz,
-            0x02 => Bandwidth::BW250kHz,
-            0x03 => Bandwidth::BW125kHz,
-            0x04 => Bandwidth::BW62_5kHz,
-            0x05 => Bandwidth::BW31_2kHz,
-            0x06 => Bandwidth::BW15_6kHz,
-            0x07 => Bandwidth::BW7_8kHz,
-            invalid => {
-                log::error!("unable to convert {:?} to Bandwidth", invalid);
-                return Err(error::Error::Data);
-            }
-        })
-    }
-
-    #[cfg(feature = "sx1302")]
     fn try_from(other: u32) -> Result<Self, error::Error> {
         Ok(match other {
             0 => Bandwidth::Undefined,
@@ -170,7 +94,7 @@ impl TryFrom<u32> for Bandwidth {
             5 => Bandwidth::BW250kHz,
             6 => Bandwidth::BW500kHz,
             invalid => {
-                log::error!("unable to convert {:?} to Bandwidth", invalid);
+                eprintln!("unable to convert {:?} to Bandwidth", invalid);
                 return Err(error::Error::Data);
             }
         })
@@ -202,7 +126,7 @@ impl TryFrom<u32> for Coderate {
             0x03 => Coderate::Cr4_7,
             0x04 => Coderate::Cr4_8,
             invalid => {
-                log::error!("unable to convert {:?} to Coderate", invalid);
+                eprintln!("unable to convert {:?} to Coderate", invalid);
                 return Err(error::Error::Data);
             }
         })
@@ -262,20 +186,22 @@ impl From<&BoardConf> for llg::lgw_conf_board_s {
         llg::lgw_conf_board_s {
             lorawan_public: other.lorawan_public,
             clksrc: other.clksrc as u8,
-            #[cfg(feature = "sx1302")]
-            full_duplex: false,
-            #[cfg(feature = "sx1302")]
-            spidev_path: {
-                let mut path = [0; 64];
-                // let other_path = other.spidev_path.as_bytes_with_nul();
-                for (dst, src) in path
-                    .iter_mut()
-                    .zip(other.spidev_path.as_bytes_with_nul().iter())
-                {
-                    *dst = *src as ::std::os::raw::c_char
-                }
-                path
-            },
+            full_duplex: true,
+            // TODO: What should this be?
+            com_type: 1,
+            // TODO: What should this be?
+            com_path: [1i8; 64],
+            // spidev_path: {
+            //     let mut path = [0; 64];
+            //     // let other_path = other.spidev_path.as_bytes_with_nul();
+            //     for (dst, src) in path
+            //         .iter_mut()
+            //         .zip(other.spidev_path.as_bytes_with_nul().iter())
+            //     {
+            //         *dst = *src as ::std::os::raw::c_char
+            //     }
+            //     path
+            // },
         }
     }
 }
@@ -325,14 +251,14 @@ pub struct RxRFConf {
 
 impl From<&RxRFConf> for llg::lgw_conf_rxrf_s {
     fn from(other: &RxRFConf) -> Self {
-        log::warn!("add missing fields");
+        println!("add missing fields");
         llg::lgw_conf_rxrf_s {
             enable: other.enable,
             freq_hz: other.freq,
             rssi_offset: other.rssi_offset,
             type_: other.type_ as u32,
             tx_enable: other.tx_enable,
-            ..Default::default()
+            ..unsafe { std::mem::zeroed() } // ..Default::default()
         }
     }
 }
@@ -392,7 +318,7 @@ impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
                 datarate: 0,
                 sync_word_size: 0,
                 sync_word: 0,
-                ..Default::default()
+                ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
             &ChannelConf::Fixed {
                 radio,
@@ -407,7 +333,7 @@ impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
                 datarate: spreading as u32,
                 sync_word_size: 0,
                 sync_word: 0,
-                ..Default::default()
+                ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
             &ChannelConf::Multirate { radio, freq } => llg::lgw_conf_rxif_s {
                 enable: true,
@@ -417,7 +343,7 @@ impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
                 datarate: Spreading::Undefined as u32,
                 sync_word_size: 0,
                 sync_word: 0,
-                ..Default::default()
+                ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
             &ChannelConf::FSK {
                 radio,
@@ -434,7 +360,7 @@ impl From<&ChannelConf> for llg::lgw_conf_rxif_s {
                 datarate,
                 sync_word_size,
                 sync_word,
-                ..Default::default()
+                ..unsafe { std::mem::zeroed() } // ..Default::default()
             },
         }
     }
@@ -459,7 +385,7 @@ impl TryFrom<u32> for CRCCheck {
             0x11 => CRCCheck::Fail,
             0x10 => CRCCheck::Pass,
             invalid => {
-                log::error!("unable to convert {:?} to Radio", invalid);
+                eprintln!("unable to convert {:?} to Radio", invalid);
                 return Err(error::Error::Data);
             }
         })
@@ -548,9 +474,7 @@ impl TryFrom<&llg::lgw_pkt_rx_s> for RxPacket {
                 bandwidth: Bandwidth::try_from(u32::from(other.bandwidth))?,
                 spreading: Spreading::try_from(other.datarate)?,
                 coderate: Coderate::try_from(u32::from(other.coderate))?,
-                #[cfg(feature = "sx1301")]
-                rssi: other.rssi,
-                #[cfg(feature = "sx1302")]
+
                 rssi: other.rssis,
                 snr: other.snr,
                 snr_min: other.snr_min,
@@ -565,15 +489,13 @@ impl TryFrom<&llg::lgw_pkt_rx_s> for RxPacket {
                 timestamp: time::Duration::from_micros(u64::from(other.count_us)),
                 radio: Radio::try_from(u32::from(other.rf_chain))?,
                 datarate: other.datarate,
-                #[cfg(feature = "sx1301")]
-                rssi: other.rssi,
-                #[cfg(feature = "sx1302")]
+
                 rssi: other.rssis,
                 crc: other.crc,
                 payload: other.payload[..other.size as usize].to_vec(),
             }),
             invalid => {
-                log::error!("unable to convert {:?} to RxPacket", invalid);
+                eprintln!("unable to convert {:?} to RxPacket", invalid);
                 return Err(error::Error::Data);
             }
         })
@@ -671,88 +593,11 @@ pub struct TxPacketFSK {
     /// Arbitrary user-defined payload to transmit.
     pub payload: Vec<u8>,
 }
-
-impl TryFrom<TxPacket> for llg::lgw_pkt_tx_s {
-    type Error = error::Error;
-
-    #[cfg_attr(feature = "sx1301", allow(clippy::needless_update))]
-    fn try_from(other: TxPacket) -> Result<Self, error::Error> {
-        match other {
-            TxPacket::LoRa(other) => {
-                if other.payload.len() > 256 {
-                    log::error!("attempt to send {} byte payload", other.payload.len());
-                    Err(error::Error::Size)
-                } else {
-                    let (mode, delay) = other.mode.into();
-                    log::warn!("add missing fields");
-                    Ok(llg::lgw_pkt_tx_s {
-                        freq_hz: other.freq,
-                        tx_mode: mode,
-                        count_us: delay,
-                        rf_chain: other.radio as u8,
-                        rf_power: other.power,
-                        modulation: MOD_LORA,
-                        bandwidth: other.bandwidth as u8,
-                        datarate: other.spreading as u32,
-                        coderate: other.coderate as u8,
-                        invert_pol: other.invert_polarity,
-                        f_dev: 0,
-                        preamble: other.preamble.unwrap_or(0),
-
-                        no_crc: other.omit_crc,
-                        no_header: other.implicit_header,
-                        size: other.payload.len() as u16,
-                        payload: {
-                            let mut buf: [u8; 256] = [0u8; 256];
-                            buf[..other.payload.len()].copy_from_slice(other.payload.as_ref());
-                            buf
-                        },
-                        ..Default::default()
-                    })
-                }
-            }
-            TxPacket::FSK(other) => {
-                if other.payload.len() > 256 {
-                    log::error!("attempt to send {} byte payload", other.payload.len());
-                    Err(error::Error::Size)
-                } else {
-                    let (mode, delay) = other.mode.into();
-                    log::warn!("add missing fields");
-                    Ok(llg::lgw_pkt_tx_s {
-                        freq_hz: other.freq,
-                        tx_mode: mode,
-                        count_us: delay,
-                        rf_chain: other.radio as u8,
-                        rf_power: other.power,
-                        modulation: MOD_FSK,
-                        bandwidth: 0,
-                        datarate: other.datarate,
-                        coderate: Coderate::Undefined as u8,
-                        invert_pol: false,
-                        f_dev: other.deviation,
-                        preamble: other.preamble.unwrap_or(0),
-                        no_crc: other.omit_crc,
-                        no_header: other.fixed_len,
-                        size: other.payload.len() as u16,
-                        payload: {
-                            let mut buf: [u8; 256] = [0u8; 256];
-                            buf[..other.payload.len()].copy_from_slice(other.payload.as_ref());
-                            buf
-                        },
-                        ..Default::default()
-                    })
-                }
-            }
-        }
-    }
-}
-
 /// Structure containing all gains of Tx chain.
 #[repr(C)]
 #[derive(Debug, Clone, Default)]
 pub struct TxGain {
     /// Measured TX power at the board connector (in dBm).
-    #[cfg(feature = "sx1302")]
     pub rf_power: i8,
     /// Control of the digital gain of SX1301 (2 bits).
     pub dig_gain: u8,
@@ -762,17 +607,12 @@ pub struct TxGain {
     pub dac_gain: u8,
     /// control of the radio mixer (4 bits).
     pub mix_gain: u8,
-    /// Measured TX power at the board connector (in dBm).
-    #[cfg(feature = "sx1301")]
-    pub rf_power: i8,
+
     /// (sx125x) calibrated I offset.
-    #[cfg(feature = "sx1302")]
     pub offset_i: i8,
     /// (sx125x) calibrated Q offset.
-    #[cfg(feature = "sx1302")]
     pub offset_q: i8,
     /// 6 bits, (sx1250) control the radio power index to be used for configuration.
-    #[cfg(feature = "sx1302")]
     pub pwr_id: u8,
 }
 
@@ -809,7 +649,7 @@ impl TryFrom<u8> for TxStatus {
             3 => TxStatus::Scheduled,
             4 => TxStatus::Transmitting,
             invalid => {
-                log::error!("unable to convert {:?} to TxStatus", invalid);
+                eprintln!("unable to convert {:?} to TxStatus", invalid);
                 return Err(error::Error::Data);
             }
         })
@@ -836,7 +676,7 @@ impl TryFrom<u8> for RxStatus {
             2 => RxStatus::On,
             3 => RxStatus::Suspended,
             invalid => {
-                log::error!("unable to convert {:?} to RxStatus", invalid);
+                eprintln!("unable to convert {:?} to RxStatus", invalid);
                 return Err(error::Error::Data);
             }
         })

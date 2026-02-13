@@ -1,4 +1,4 @@
-use libloragw_sys::{lgw_get_eui, lgw_version_info}; // Your generated bindings
+use libloragw_sys::{lgw_get_eui, lgw_version_info};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -40,8 +40,8 @@ fn main() {
     unsafe {
         // lgw_version_info returns a *const c_char
         let version_ptr = lgw_version_info();
-        let mut test: u64 = 0;
-        let eui_ptr = lgw_get_eui(&mut test);
+        // let mut test: u64 = 10;
+        // let eui_ptr = lgw_get_eui(&mut test);
 
         if !version_ptr.is_null() {
             // Convert the C string pointer to a safe Rust String
@@ -51,6 +51,6 @@ fn main() {
             println!("Failed to get version info pointer.");
         }
         // Convert the C string pointer to a safe Rust String
-        println!("Success! libloragw EUI: {}", eui_ptr);
+        // println!("Success! libloragw EUI: {}", eui_ptr);
     }
 }

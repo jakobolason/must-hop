@@ -1,7 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["must-hop", "libloragw-sys"]
-exclude = ["examples/ble/esp32c6", "examples/lora/rak3272s", "examples/gateway/sx1302"]
+members = ["must-hop", "libloragw-sys", "loragw"]
+exclude = [
+  "examples/ble/esp32c6",
+  "examples/lora/rak3272s",
+  "examples/gateway/sx1302",
+]
 
 
 [profile.dev]

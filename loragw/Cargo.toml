@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-libloragw = { path = "../libloragw-sys"}
+libloragw-sys = { path = "../libloragw-sys" }

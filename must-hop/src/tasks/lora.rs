@@ -1,4 +1,4 @@
-use defmt::{error, info};
+use defmt::{error, info, trace};
 
 use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
@@ -56,6 +56,7 @@ pub async fn lora_task<RK, DLY, T, M, const MAX_PACK_LEN: usize>(
         let mut receiving_buffer = [00u8; MAX_PACK_LEN];
 
         info!("Waiting for packet or sensor data to send");
+        trace!("Waiting for packet in trace");
         // Either sensor data should be sent, or a packet is ready to be received
         let either = select(channel.receive(), node.listen(&mut receiving_buffer)).await;
         match either {

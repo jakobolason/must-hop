@@ -535,6 +535,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "loragw"
+version = "0.1.0"
+dependencies = [
+ "libloragw-sys",
+]
+
+[[package]]
 name = "lorawan"
 version = "0.9.1"
 source = "git+https://github.com/lora-rs/lora-rs.git#152cb9261ce5a68c8efa4b0884e07223fea8d4f4"
