@@ -1,0 +1,10 @@
+[package]
+name = "libloragw-sx1302-sys"
+version = "0.1.0"
+edition = "2024"
+authors = ["Jakob Olason <jakobolason@proton.me>"]
+build = "build.rs"
+
+[build-dependencies]
+cc = "1.0.37"
+bindgen = "0.72.1"

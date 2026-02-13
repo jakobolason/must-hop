@@ -60,12 +60,14 @@ pub async fn lora_task<RK, DLY, T, M, const MAX_PACK_LEN: usize>(
         let either = select(channel.receive(), node.listen(&mut receiving_buffer)).await;
         match either {
             Either::First(data) => {
+                // nm.send(packet).await
                 if let Err(e) = node.transmit(data.into()).await {
                     error!("Error in transmitting: {:?}", e);
                     continue;
                 }
             }
             Either::Second(conn) => {
+                // nm.receive(packet).await
                 if let Err(e) = node.receive(conn, &receiving_buffer).await {
                     error!("Error in receing information: {:?}", e);
                     continue;

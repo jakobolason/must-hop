@@ -1,0 +1,3 @@
+[submodule "libloragw-sys/vendor/sx1302_hal"]
+	path = libloragw-sys/vendor/sx1302_hal
+	url = https://github.com/jakobolason/sx1302_hal
