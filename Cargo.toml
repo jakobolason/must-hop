@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["must-hop", "libloragw-sys", "loragw"]
+members = ["must-hop", "libloragw-sys", "loragw", "must-gw"]
 exclude = [
   "examples/ble/esp32c6",
   "examples/lora/rak3272s",
