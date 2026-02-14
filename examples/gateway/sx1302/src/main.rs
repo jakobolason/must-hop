@@ -1,5 +1,8 @@
 use libloragw_sys::{lgw_get_eui, lgw_version_info};
-use loragw::{cfg::Config, BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain};
+use loragw::{
+    cfg::Config, BoardConf, ChannelConf, Concentrator, Error, Running, RxPacket, RxRFConf, TxGain,
+};
+use must_hop::{lora::SensorData, node::MHPacket};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -116,10 +119,38 @@ fn main() {
     }
     println!("now try receive!");
     loop {
-        match conc.receive() {
-            Ok(Some(packet)) => println!("SUCCESS !!!! Received packet: {:?}", packet),
-            Ok(None) => {}
-            Err(e) => eprintln!("Error receiving packet: {:?}", e),
+        let pkts: Vec<RxPacket> = match conc.receive() {
+            Ok(Some(packet)) => packet,
+            Ok(None) => continue,
+            Err(e) => {
+                eprintln!("Error receiving packet: {:?}", e);
+                continue;
+            }
+        };
+        for pkt in pkts {
+            let pkt = match pkt {
+                RxPacket::LoRa(rx_packet) => rx_packet,
+                _ => continue,
+            };
+            let raw_bytes = pkt.payload;
+            let mh_pack = match postcard::from_bytes::<MHPacket>(&raw_bytes) {
+                Ok(packet) => packet,
+                Err(e) => {
+                    eprintln!("Error deserializing MHPacket: {:?}", e);
+                    continue;
+                }
+            };
+            println!("SUCCESS !!!! Received packet: {:?}", mh_pack);
+
+            let raw_bytes = mh_pack.payload;
+            let sensor_data = match postcard::from_bytes::<SensorData>(&raw_bytes) {
+                Ok(packet) => packet,
+                Err(e) => {
+                    eprintln!("Error deserializing SensorData: {:?}", e);
+                    continue;
+                }
+            };
+            println!("SUCCESS !!!! Received packet: {:?}", sensor_data);
         }
     }
 }
