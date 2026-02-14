@@ -1,6 +1,6 @@
 use super::{
     error::{AppError, Error},
-    types::{BoardConf, ChannelConf, FrontRadio, RadioType, RxRFConf, TxGain},
+    types::{BoardConf, ChannelConf, ComType, FrontRadio, RadioType, RxRFConf, TxGain},
 };
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, ffi::CString};
@@ -14,7 +14,7 @@ pub struct Config {
     pub board: Board,
     pub radios: Option<Vec<Radio>>,
     pub multirate_channels: Option<Vec<MultirateLoraChannel>>,
-    pub tx_gains: Option<Vec<TxGain>>,
+    pub tx_gains: Option<Vec<ConfTxGain>>,
 }
 
 impl Config {
@@ -32,6 +32,7 @@ pub struct Board {
     pub lorawan_public: bool,
     pub clksrc: u32,
     pub spidev_path: CString,
+    pub com_type: ComType,
 }
 
 impl TryFrom<Board> for BoardConf {
@@ -41,6 +42,7 @@ impl TryFrom<Board> for BoardConf {
             lorawan_public: other.lorawan_public,
             clksrc: FrontRadio::try_from(other.clksrc)?,
             spidev_path: other.spidev_path,
+            com_type: other.com_type,
         })
     }
 }
@@ -88,14 +90,31 @@ impl TryFrom<&MultirateLoraChannel> for ChannelConf {
     }
 }
 
-// #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-// pub struct TxGain {
-//     #[serde(rename(serialize = "dbm", deserialize = "dbm"))]
-//     pub rf_power: i8,
-//     #[serde(rename(serialize = "dig", deserialize = "dig"))]
-//     pub dig_gain: u8,
-//     #[serde(rename(serialize = "pa", deserialize = "pa"))]
-//     pub pa_gain: u8,
-//     #[serde(rename(serialize = "mix", deserialize = "mix"))]
-//     pub mix_gain: u8,
-// }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConfTxGain {
+    #[serde(rename(serialize = "dbm", deserialize = "dbm"))]
+    pub rf_power: i8,
+    #[serde(rename(serialize = "dig", deserialize = "dig"))]
+    pub dig_gain: u8,
+    #[serde(rename(serialize = "pa", deserialize = "pa"))]
+    pub pa_gain: u8,
+    #[serde(rename(serialize = "mix", deserialize = "mix"))]
+    pub mix_gain: u8,
+}
+impl From<ConfTxGain> for TxGain {
+    fn from(conf: ConfTxGain) -> Self {
+        TxGain {
+            rf_power: conf.rf_power,
+            pa_gain: conf.pa_gain,
+            mix_gain: conf.mix_gain,
+            dig_gain: conf.dig_gain,
+
+            // Initialize other fields that might exist in TxGain but not in TOML
+            // For example, if using SX1250, you might need pwr_idx, or dac_gain:
+            dac_gain: 3, // Default value (example)
+            pwr_id: 0,   // Default value (example)
+            offset_i: 0,
+            offset_q: 0,
+        }
+    }
+}

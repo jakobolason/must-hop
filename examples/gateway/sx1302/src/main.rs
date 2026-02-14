@@ -1,5 +1,5 @@
 use libloragw_sys::{lgw_get_eui, lgw_version_info};
-use loragw::{cfg::Config, BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf};
+use loragw::{cfg::Config, BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -11,35 +11,25 @@ fn reset_lgw() -> Result<(), Box<dyn std::error::Error>> {
 
     // Grab access to the Pi's GPIO peripherals
     let gpio = Gpio::new()?;
-
     // Get pin 17 and configure it as an output
     let mut pin = gpio.get(17)?.into_output();
-
     // pinctrl set 17 op dh (Drive High)
     pin.set_high();
     thread::sleep(Duration::from_millis(100)); // sleep 0.1
-
-    // pinctrl set 17 op dl (Drive Low)
+                                               // pinctrl set 17 op dl (Drive Low)
     pin.set_low();
     thread::sleep(Duration::from_millis(100)); // sleep 0.1
 
     println!("Reset complete.");
-
     Ok(())
 }
 
 fn create_concentrator() -> Result<Concentrator<Running>, Error> {
     let spi_conn = "/dev/spidev0.0";
-
-    // 1. Load the configuration (owned data)
     let conf = Config::from_str_or_default(None)?;
 
-    // 2. Convert Board Config
-    // We clone board because we need 'conf' to stay alive for tx_gains references later
     let board_conf = BoardConf::try_from(conf.board.clone()).map_err(Error::from)?;
 
-    // 3. Convert Radios
-    // Map Config::Radio -> Types::RxRFConf
     let radios: Vec<RxRFConf> = match &conf.radios {
         Some(r_vec) => r_vec
             .iter()
@@ -48,9 +38,6 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
         None => Vec::new(),
     };
 
-    // 4. Convert Channels
-    // Map Config::MultirateLoraChannel -> (index, Types::ChannelConf)
-    // We use enumerate() to assign the chain index (0, 1, etc.)
     let channels: Vec<(u8, ChannelConf)> = match &conf.multirate_channels {
         Some(ch_vec) => ch_vec
             .iter()
@@ -65,7 +52,16 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
 
     // 5. Handle Tx Gains
     // Returns a slice &[TxGain] derived from the owned 'conf'
-    let tx_gains = conf.tx_gains.as_deref().unwrap_or(&[]);
+    let tx_gains: Vec<TxGain> = conf
+        .tx_gains
+        .as_ref()
+        .map(|gains| {
+            gains
+                .iter()
+                .map(|g| TxGain::from(g.clone())) // Convert ConfTxGain -> TxGain
+                .collect()
+        })
+        .unwrap_or_default();
 
     // 6. Build and Start
     Concentrator::open()?
@@ -73,7 +69,7 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
         .set_config_board(board_conf)
         .set_rx_rfs(radios)
         .set_config_channels(channels)
-        .set_config_tx_gains(tx_gains)
+        .set_config_tx_gains(&tx_gains)
         .start()
 }
 

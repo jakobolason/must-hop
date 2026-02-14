@@ -173,6 +173,13 @@ impl TryFrom<u32> for FrontRadio {
     }
 }
 
+/// Communication type used by the concentrator.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum ComType {
+    SPI = 0,
+    USB = 1,
+}
+
 /// Board-specific configuration.
 #[derive(Debug, Clone)]
 pub struct BoardConf {
@@ -182,6 +189,8 @@ pub struct BoardConf {
     pub clksrc: FrontRadio,
     /// Path to SPI device.
     pub spidev_path: ::std::ffi::CString,
+    /// Communication type.
+    pub com_type: ComType,
 }
 
 impl From<BoardConf> for llg::lgw_conf_board_s {
@@ -191,7 +200,7 @@ impl From<BoardConf> for llg::lgw_conf_board_s {
             clksrc: other.clksrc as u8,
             full_duplex: true,
             // TODO: What should this be?
-            com_type: 1,
+            com_type: other.com_type as u32,
             // TODO: What should this be?
             com_path: [1u8; 64],
             // spidev_path: {
