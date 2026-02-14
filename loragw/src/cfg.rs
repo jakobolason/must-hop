@@ -47,6 +47,7 @@ impl TryFrom<Board> for BoardConf {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Radio {
+    // TODO: Make id an enum? { Radio1, Radio2 } to avoid trys
     pub id: u32,
     pub freq: u32,
     pub rssi_offset: f32,
