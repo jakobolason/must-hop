@@ -26,7 +26,7 @@ pub async fn lora_task<RK, DLY, T, M, const MAX_PACK_LEN: usize>(
     M: embassy_sync::blocking_mutex::raw::RawMutex,
 {
     let sf = SpreadingFactor::_12;
-    let bw = Bandwidth::_500KHz;
+    let bw = Bandwidth::_125KHz;
     let cr = CodingRate::_4_8;
     loop {
         info!("In lora task loop");

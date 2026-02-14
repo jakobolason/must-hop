@@ -8,7 +8,7 @@ use lora_phy::mod_traits::RadioKind;
 use lora_phy::{DelayNs, LoRa, RxMode};
 
 use defmt::{error, trace, warn};
-use embassy_time::Timer;
+use embassy_time::{Instant, Timer};
 use postcard::{from_bytes, to_slice};
 
 /// Parameters that define send and receive parameters
@@ -56,6 +56,7 @@ where
     // Should transform to Tx if in Rx
     async fn transmit(&mut self, packet: MHPacket<N>) -> Result<(), RadioError> {
         // TODO: Is this necessary?
+        let now = Instant::now();
         let mut tx_pkt_params = self.lora.create_tx_packet_params(
             self.tp.pre_amp,
             self.tp.imp_hed,
@@ -93,6 +94,9 @@ where
 
         self.lora.tx().await?;
         trace!("Transmit successfull!");
+        let after = Instant::now();
+        let tx_dur = after - now;
+        trace!("[TX DURATION] {}", tx_dur);
 
         // NOTE: This might create a delay between transmitting something and being able to receive
         // again

@@ -24,7 +24,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use serde::{Deserialize, Serialize};
 
-const LORA_FREQUENCY_IN_HZ: u32 = 868_000_000; // warning: set this appropriately for the region
+const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000; // warning: set this appropriately for the region
 
 type Stm32wlLoRa<'d, CM> = LoRa<
     Sx126x<
