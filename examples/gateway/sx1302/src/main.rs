@@ -65,7 +65,7 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
 
     // 6. Build and Start
     Concentrator::open()?
-        .connect(spi_conn)?
+        .connect(board_conf.com_type.clone() as u32, spi_conn)?
         .set_config_board(board_conf)
         .set_rx_rfs(radios)
         .set_config_channels(channels)

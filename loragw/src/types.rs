@@ -195,25 +195,18 @@ pub struct BoardConf {
 
 impl From<BoardConf> for llg::lgw_conf_board_s {
     fn from(other: BoardConf) -> Self {
+        let mut com_path = [0u8; 64];
+
+        let bytes = other.spidev_path.as_bytes_with_nul();
+        for (dst, &src) in com_path.iter_mut().zip(bytes.iter()) {
+            *dst = src as u8;
+        }
         llg::lgw_conf_board_s {
             lorawan_public: other.lorawan_public,
             clksrc: other.clksrc as u8,
-            full_duplex: true,
-            // TODO: What should this be?
+            full_duplex: false,
             com_type: other.com_type as u32,
-            // TODO: What should this be?
-            com_path: [1u8; 64],
-            // spidev_path: {
-            //     let mut path = [0; 64];
-            //     // let other_path = other.spidev_path.as_bytes_with_nul();
-            //     for (dst, src) in path
-            //         .iter_mut()
-            //         .zip(other.spidev_path.as_bytes_with_nul().iter())
-            //     {
-            //         *dst = *src as ::std::os::raw::c_char
-            //     }
-            //     path
-            // },
+            com_path,
         }
     }
 }

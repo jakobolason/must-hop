@@ -87,10 +87,10 @@ impl<'a> Concentrator<Builder<'a>> {
     ///
     /// This function is intended to check if we the concentrator chip
     /// exists and is the correct version.
-    pub fn connect(mut self, spidev_path: &str) -> Result<Self> {
+    pub fn connect(mut self, com_type: u32, spidev_path: &str) -> Result<Self> {
         let c_str = CString::new(spidev_path).unwrap();
         // NOTE: 0 => SPI, 1 => USB
-        unsafe { hal_call!(lgw_connect(0u32, c_str.as_ptr())) }?;
+        unsafe { hal_call!(lgw_connect(com_type, c_str.as_ptr())) }?;
         self.state.connected = true;
         Ok(self)
     }
