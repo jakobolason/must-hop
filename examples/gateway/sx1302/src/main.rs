@@ -1,5 +1,5 @@
 use libloragw_sys::{lgw_get_eui, lgw_version_info};
-use loragw::{ChannelConf, Concentrator, Error, Running, RxRFConf, cfg::Config};
+use loragw::{cfg::Config, BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -30,27 +30,49 @@ fn reset_lgw() -> Result<(), Box<dyn std::error::Error>> {
 
 fn create_concentrator() -> Result<Concentrator<Running>, Error> {
     let spi_conn = "/dev/spidev0.0";
-    let conf = Config::from_str_or_default(None)?;
-    let radios = match conf.radios {
-        Some(vc) => vc,
-        None => Vec::new(),
-    };
-    let radios: Vec<RxRFConf> = radios.iter().try_for_each(|r| RxRFConf::try_from(*r));
-    let mr_chan = match conf.multirate_channels {
-        Some(mrc) => mrc,
-        None => Vec::new(),
-    };
-    let mr_chan = mr_chan.iter().map(|c| ChannelConf::try_from(c))?;
 
-    let tx_gains = match conf.tx_gains {
-        Some(g) => &g,
-        None => &[],
+    // 1. Load the configuration (owned data)
+    let conf = Config::from_str_or_default(None)?;
+
+    // 2. Convert Board Config
+    // We clone board because we need 'conf' to stay alive for tx_gains references later
+    let board_conf = BoardConf::try_from(conf.board.clone()).map_err(Error::from)?;
+
+    // 3. Convert Radios
+    // Map Config::Radio -> Types::RxRFConf
+    let radios: Vec<RxRFConf> = match &conf.radios {
+        Some(r_vec) => r_vec
+            .iter()
+            .map(|r| RxRFConf::try_from(r.clone()).map_err(Error::from))
+            .collect::<Result<Vec<_>, _>>()?,
+        None => Vec::new(),
     };
+
+    // 4. Convert Channels
+    // Map Config::MultirateLoraChannel -> (index, Types::ChannelConf)
+    // We use enumerate() to assign the chain index (0, 1, etc.)
+    let channels: Vec<(u8, ChannelConf)> = match &conf.multirate_channels {
+        Some(ch_vec) => ch_vec
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let conf = ChannelConf::try_from(c).map_err(Error::from)?;
+                Ok((i as u8, conf))
+            })
+            .collect::<Result<Vec<_>, Error>>()?,
+        None => Vec::new(),
+    };
+
+    // 5. Handle Tx Gains
+    // Returns a slice &[TxGain] derived from the owned 'conf'
+    let tx_gains = conf.tx_gains.as_deref().unwrap_or(&[]);
+
+    // 6. Build and Start
     Concentrator::open()?
         .connect(spi_conn)?
-        .set_config_board(conf.board.try_into()?)
+        .set_config_board(board_conf)
         .set_rx_rfs(radios)
-        .set_config_channels(mr_chan)
+        .set_config_channels(channels)
         .set_config_tx_gains(tx_gains)
         .start()
 }

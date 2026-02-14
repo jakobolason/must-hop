@@ -16,9 +16,6 @@ fn main() {
         .include("vendor/sx1302_hal/libtools/inc")
         .include("vendor/sx1302_hal_cfg")
         // For debug
-        .define("DEBUG_COM", Some("1"))
-        .define("DEBUG_REG", Some("1"))
-        .define("DEBUG_HAL", Some("1"))
         .file("vendor/sx1302_hal/libloragw/src/loragw_aux.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_cal.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_com.c")
@@ -35,6 +32,18 @@ fn main() {
         .file("vendor/sx1302_hal/libloragw/src/loragw_sx1302.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_sx1302_rx.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_sx1302_timestamp.c")
+        .file("vendor/sx1302_hal/libloragw/src/loragw_ad5338r.c")
+        .file("vendor/sx1302_hal/libloragw/src/loragw_sx1261.c")
+        .file("vendor/sx1302_hal/libloragw/src/sx1250_com.c")
+        .file("vendor/sx1302_hal/libloragw/src/sx1250_spi.c")
+        .file("vendor/sx1302_hal/libloragw/src/sx1250_usb.c")
+        .file("vendor/sx1302_hal/libloragw/src/sx125x_com.c")
+        .file("vendor/sx1302_hal/libloragw/src/sx125x_spi.c")
+        .file("vendor/sx1302_hal/libloragw/src/sx1261_com.c")
+        .file("vendor/sx1302_hal/libloragw/src/sx1261_spi.c")
+        .file("vendor/sx1302_hal/libloragw/src/sx1261_usb.c")
+        .file("vendor/sx1302_hal/libloragw/src/loragw_lbt.c")
+        .file("vendor/sx1302_hal/libloragw/src/loragw_mcu.c")
         .compile("loragw");
 
     let target = env::var("TARGET").expect("TARGET environment variable not set");
