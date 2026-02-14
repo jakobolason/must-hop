@@ -87,13 +87,15 @@ impl<'a> Concentrator<Builder<'a>> {
     ///
     /// This function is intended to check if we the concentrator chip
     /// exists and is the correct version.
-    pub fn connect(mut self, com_type: u32, spidev_path: &str) -> Result<Self> {
-        let c_str = CString::new(spidev_path).unwrap();
-        // NOTE: 0 => SPI, 1 => USB
-        unsafe { hal_call!(lgw_connect(com_type, c_str.as_ptr())) }?;
+    pub fn connect(mut self) -> Result<Self> {
+        let board_conf = self.state.board.take().ok_or(Error::BuilderError)?;
+        let com_type = board_conf.com_type;
+        let spidev_path = board_conf.spidev_path;
+        unsafe { hal_call!(lgw_connect(com_type as u32, spidev_path.as_ptr())) }?;
         self.state.connected = true;
         Ok(self)
     }
+
     /// Configure the gateway board.
     pub fn set_config_board(mut self, conf: BoardConf) -> Self {
         log::info!("conf: {:?}", conf);

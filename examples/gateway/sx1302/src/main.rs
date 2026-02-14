@@ -1,5 +1,5 @@
 use libloragw_sys::{lgw_get_eui, lgw_version_info};
-use loragw::{cfg::Config, BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain};
+use loragw::{BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain, cfg::Config};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -16,7 +16,7 @@ fn reset_lgw() -> Result<(), Box<dyn std::error::Error>> {
     // pinctrl set 17 op dh (Drive High)
     pin.set_high();
     thread::sleep(Duration::from_millis(100)); // sleep 0.1
-                                               // pinctrl set 17 op dl (Drive Low)
+    // pinctrl set 17 op dl (Drive Low)
     pin.set_low();
     thread::sleep(Duration::from_millis(100)); // sleep 0.1
 
@@ -25,7 +25,6 @@ fn reset_lgw() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn create_concentrator() -> Result<Concentrator<Running>, Error> {
-    let spi_conn = "/dev/spidev0.0";
     let conf = Config::from_str_or_default(None)?;
 
     let board_conf = BoardConf::try_from(conf.board.clone()).map_err(Error::from)?;
@@ -65,11 +64,11 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
 
     // 6. Build and Start
     Concentrator::open()?
-        .connect(board_conf.com_type.clone() as u32, spi_conn)?
         .set_config_board(board_conf)
         .set_rx_rfs(radios)
         .set_config_channels(channels)
         .set_config_tx_gains(&tx_gains)
+        .connect()?
         .start()
 }
 
