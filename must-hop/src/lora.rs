@@ -10,6 +10,16 @@ use lora_phy::{DelayNs, LoRa, RxMode};
 use defmt::{error, trace, warn};
 use embassy_time::{Instant, Timer};
 use postcard::{from_bytes, to_slice};
+use serde::{Deserialize, Serialize};
+
+/// Example of payload
+#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format)]
+pub struct SensorData {
+    pub device_id: u8,
+    pub temperate: f32,
+    pub voltage: f32,
+    pub acceleration_x: f32,
+}
 
 /// Parameters that define send and receive parameters
 #[derive(Clone, Copy)]
