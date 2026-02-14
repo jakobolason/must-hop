@@ -5,6 +5,8 @@ pub type Result<T = ()> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)] // Added some helpful standard derives
 pub enum BuilderError {
+    MissingBoard,
+    NotConnected,
     InvalidBoard,
     InvalidRxRFConf,
     InvalidTxGain,
@@ -24,7 +26,7 @@ pub enum Error {
     /// Represents an error when attempting to convert between this crate's high-level types
     /// and those defined in `libloragw`.
     Data,
-    BuilderError,
+    BuilderError(BuilderError),
     Toml(toml::de::Error),
 }
 
@@ -42,7 +44,15 @@ impl fmt::Display for Error {
             Error::HAL => write!(f, "concentrator HAL returned a generic error"),
             Error::Size => write!(f, "provided buffer is too large"),
             Error::Data => write!(f, "failure to convert hardware val to symbolic val"),
-            Error::BuilderError => write!(f, "builder error"),
+            Error::BuilderError(err) => match err {
+                BuilderError::InvalidBoard => write!(f, "builder error: invalid board"),
+                BuilderError::InvalidChain => write!(f, "builder error: invalid frequency"),
+                BuilderError::InvalidChannelConf => write!(f, "builder error: invalid channel"),
+                BuilderError::InvalidRxRFConf => write!(f, "builder error: invalid data rate"),
+                BuilderError::InvalidTxGain => write!(f, "builder error: invalid tx gain"),
+                BuilderError::MissingBoard => write!(f, "builder error: missing board"),
+                BuilderError::NotConnected => write!(f, "builder error: not connected"),
+            },
             Error::Toml(_err) => write!(f, "Error from toml"),
         }
     }

@@ -88,9 +88,14 @@ impl<'a> Concentrator<Builder<'a>> {
     /// This function is intended to check if we the concentrator chip
     /// exists and is the correct version.
     pub fn connect(mut self) -> Result<Self> {
-        let board_conf = self.state.board.take().ok_or(Error::BuilderError)?;
-        let com_type = board_conf.com_type;
-        let spidev_path = board_conf.spidev_path;
+        log::info!("self state: {:?}", self.state.board);
+        let board_conf = self
+            .state
+            .board
+            .as_ref()
+            .ok_or(Error::BuilderError(BuilderError::MissingBoard))?;
+        let com_type = board_conf.com_type.clone();
+        let spidev_path = board_conf.spidev_path.clone();
         unsafe { hal_call!(lgw_connect(com_type as u32, spidev_path.as_ptr())) }?;
         self.state.connected = true;
         Ok(self)
@@ -137,13 +142,13 @@ impl<'a> Concentrator<Builder<'a>> {
     /// according to previously set parameters.
     pub fn start(self) -> Result<Concentrator<Running>> {
         if !self.state.connected {
-            return Err(Error::BuilderError);
+            return Err(Error::BuilderError(BuilderError::NotConnected));
         }
         log::info!("starting concentrator");
         // board config
         let board = match self.state.board {
             Some(board) => board,
-            None => return Err(Error::BuilderError),
+            None => return Err(Error::BuilderError(BuilderError::MissingBoard)),
         };
         unsafe { hal_call!(lgw_board_setconf(&mut board.into())) }?;
 
@@ -205,6 +210,7 @@ impl Concentrator<Running> {
                 &mut rx_status
             ))
         }?;
+        log::info!("Received status: {:?}", rx_status);
         rx_status.try_into()
     }
 

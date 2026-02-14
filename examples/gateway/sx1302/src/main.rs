@@ -1,5 +1,5 @@
 use libloragw_sys::{lgw_get_eui, lgw_version_info};
-use loragw::{BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain, cfg::Config};
+use loragw::{cfg::Config, BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -16,7 +16,7 @@ fn reset_lgw() -> Result<(), Box<dyn std::error::Error>> {
     // pinctrl set 17 op dh (Drive High)
     pin.set_high();
     thread::sleep(Duration::from_millis(100)); // sleep 0.1
-    // pinctrl set 17 op dl (Drive Low)
+                                               // pinctrl set 17 op dl (Drive Low)
     pin.set_low();
     thread::sleep(Duration::from_millis(100)); // sleep 0.1
 
@@ -63,6 +63,7 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
         .unwrap_or_default();
 
     // 6. Build and Start
+    println!("Starting concentrator...");
     Concentrator::open()?
         .set_config_board(board_conf)
         .set_rx_rfs(radios)
@@ -73,6 +74,8 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
 }
 
 fn main() {
+    env_logger::init();
+
     // 1. Reset the concentrator hardware
     if let Err(e) = reset_lgw() {
         eprintln!("Failed to reset GPIO: {}", e);
@@ -106,4 +109,17 @@ fn main() {
             return;
         }
     };
+    println!("check receive status");
+    match conc.receive_status() {
+        Ok(status) => println!("Receive status: {:?}", status),
+        Err(e) => eprintln!("Error checking receive status: {:?}", e),
+    }
+    println!("now try receive!");
+    loop {
+        match conc.receive() {
+            Ok(Some(packet)) => println!("SUCCESS !!!! Received packet: {:?}", packet),
+            Ok(None) => {}
+            Err(e) => eprintln!("Error receiving packet: {:?}", e),
+        }
+    }
 }

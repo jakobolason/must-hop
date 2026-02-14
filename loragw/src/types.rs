@@ -666,6 +666,7 @@ impl TryFrom<u8> for TxStatus {
 #[repr(u8)]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum RxStatus {
+    Unknown = 0,
     /// RX modem is disabled, it will ignore commands.
     Off = 1,
     /// RX modem is receiving.
@@ -678,6 +679,7 @@ impl TryFrom<u8> for RxStatus {
     type Error = error::Error;
     fn try_from(other: u8) -> Result<Self, error::Error> {
         Ok(match other {
+            0 => RxStatus::Unknown,
             1 => RxStatus::Off,
             2 => RxStatus::On,
             3 => RxStatus::Suspended,
