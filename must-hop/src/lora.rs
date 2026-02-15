@@ -98,6 +98,7 @@ where
             // break;
         }
         // }
+        let before_tx = Instant::now();
         self.lora
             .prepare_for_tx(&self.mdltn_params, &mut tx_pkt_params, 20, used_slice)
             .await?;
@@ -106,7 +107,18 @@ where
         trace!("Transmit successfull!");
         let after = Instant::now();
         let tx_dur = after - now;
-        trace!("[TX DURATION] {}", tx_dur);
+        let only_tx = after - before_tx;
+        trace!(
+            "[TX DURATION] millis: {},\t ticks: {}",
+            tx_dur.as_millis(),
+            tx_dur
+        );
+        trace!(
+            "[TX DURATION] millis: {},\t ticks: {}",
+            only_tx.as_millis(),
+            only_tx
+        );
+        // Takes around 1.9 seconds for full transmit function, and 1.6 for just transmitting
 
         // NOTE: This might create a delay between transmitting something and being able to receive
         // again

@@ -2,10 +2,11 @@ use defmt::{error, info, trace};
 
 use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
+use serde::Serialize;
 
 use crate::{
     lora::{LoraNode, RadioState, TransmitParameters},
-    node::{MHNode, MHPacket},
+    node::{MHNode, MHPacket, NetworkManager},
 };
 
 use lora_phy::{DelayNs, LoRa};
@@ -22,12 +23,13 @@ pub async fn lora_task<RK, DLY, T, M, const MAX_PACK_LEN: usize>(
 ) where
     RK: RadioKind,
     DLY: DelayNs,
-    T: Into<MHPacket<MAX_PACK_LEN>>,
+    T: Into<MHPacket<MAX_PACK_LEN>> + Serialize + Copy,
     M: embassy_sync::blocking_mutex::raw::RawMutex,
 {
     let sf = SpreadingFactor::_12;
     let bw = Bandwidth::_125KHz;
     let cr = CodingRate::_4_8;
+    let mut nm = NetworkManager::<MAX_PACK_LEN>::new(1, 3, 3);
     loop {
         info!("In lora task loop");
         let tp: TransmitParameters = TransmitParameters {
@@ -61,10 +63,20 @@ pub async fn lora_task<RK, DLY, T, M, const MAX_PACK_LEN: usize>(
         let either = select(channel.receive(), node.listen(&mut receiving_buffer)).await;
         match either {
             Either::First(data) => {
-                // nm.send(packet).await
-                if let Err(e) = node.transmit(data.into()).await {
-                    error!("Error in transmitting: {:?}", e);
-                    continue;
+                // Now capture all pending packets from other nodes perhaps, and send 1 (Data) or
+                // multiple (Data stream)
+                let pkts = match nm.send_packet(data, 2) {
+                    Ok(pkts) => pkts,
+                    Err(e) => {
+                        error!("Error in getting packets to sen: {:?}", e);
+                        continue;
+                    }
+                };
+                for pkt in pkts {
+                    if let Err(e) = node.transmit(pkt).await {
+                        error!("Error in transmitting: {:?}", e);
+                        continue;
+                    }
                 }
             }
             Either::Second(conn) => {

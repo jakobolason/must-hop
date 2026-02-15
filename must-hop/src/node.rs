@@ -7,11 +7,11 @@ use postcard::{Error as PostError, to_slice};
 use serde::{Deserialize, Serialize};
 
 /// Either this packet
-/// It Data, and should get an ACK return
+/// Is Data, and should get an ACK return
 /// A Data stream, meaning it wants to send multiple packets(u8 amount). In this case, Node B will
 /// continue to listen, until it has receieved (u8) amount of packages
-/// Or it is to ACK another node's Data packet
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format, Clone)]
+/// ACK should only be sent by a GW, because they will not retransmit
+#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format, Clone, Copy)]
 pub enum PacketType {
     /// To send just a single packet
     Data,
@@ -50,7 +50,7 @@ pub struct PendingPacket {
     retries: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, defmt::Format)]
 pub enum NetworkManagerError {
     Hardware(RadioError),
     Serialization(PostError),
@@ -80,6 +80,15 @@ pub struct NetworkManager<const MAX_PACKET_SIZE: usize = 128> {
 }
 
 impl<const MAX_PACKET_SIZE: usize> NetworkManager<MAX_PACKET_SIZE> {
+    pub fn new(source_id: u8, timeout: u8, max_retries: u8) -> Self {
+        Self {
+            pending_acks: Vec::new(),
+            next_packet_id: 0,
+            source_id,
+            timeout,
+            max_retries,
+        }
+    }
     fn new_packet<T>(
         &mut self,
         payload: T,
@@ -101,33 +110,50 @@ impl<const MAX_PACKET_SIZE: usize> NetworkManager<MAX_PACKET_SIZE> {
         self.next_packet_id += 1;
         Ok(MHPacket {
             destination_id: destination,
-            packet_type: PacketType::Data,
+            packet_type,
             packet_id: self.next_packet_id,
             source_id: self.source_id,
             payload: payload_bytes,
             hop_count: 0,
         })
     }
-    pub fn send_packet<T>(&mut self, payload: T, destination: u8) -> Result<(), NetworkManagerError>
+    pub fn send_packet<T>(
+        &mut self,
+        payload: T,
+        destination: u8,
+    ) -> Result<Vec<MHPacket, MAX_AMOUNT_PACKETS>, NetworkManagerError>
     where
         T: Serialize,
     {
         let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
         // Look into pending packages,
-        let to_send: Vec<MHPacket, MAX_AMOUNT_PACKETS> = self
+        let mut to_send: Vec<MHPacket, MAX_AMOUNT_PACKETS> = self
             .pending_acks
             .iter()
             .filter(|p| p.timeout > curr_time)
+            .take(MAX_AMOUNT_PACKETS - 1) // Safety: To
+            // reserve a slot for payload
             .map(|p| p.packet.clone())
             .collect();
+
         let pkt_type = if to_send.is_empty() {
             PacketType::Data
         } else {
             PacketType::DataStream(to_send.len() as u8)
         };
         // first transform T into MHPacket
-        // let pkt = self.new_packet(payload, destination)?;
-        Ok(())
+        let pkt = self.new_packet(payload, destination, pkt_type)?;
+        for p in to_send.iter_mut() {
+            p.packet_type = pkt_type;
+        }
+        // This returns back to_send if unsuccessfull, but we are returning that anyway
+        // But this might be unwanted behaviour though
+        if to_send.push(pkt).is_err() {
+            trace!("[ERROR] to_send is somehow full ? This should never happen");
+            return Err(NetworkManagerError::InvalidPacket(0));
+        }
+
+        Ok(to_send)
     }
 }
 
