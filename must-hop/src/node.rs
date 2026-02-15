@@ -56,6 +56,7 @@ pub enum NetworkManagerError {
     Serialization(PostError),
     Timeout,
     InvalidPacket(u16),
+    BufferFull,
 }
 
 impl From<RadioError> for NetworkManagerError {
@@ -89,12 +90,8 @@ impl<const MAX_PACKET_SIZE: usize> NetworkManager<MAX_PACKET_SIZE> {
             max_retries,
         }
     }
-    fn new_packet<T>(
-        &mut self,
-        payload: T,
-        destination: u8,
-        packet_type: PacketType,
-    ) -> Result<MHPacket, PostError>
+
+    pub fn from_t<T>(&mut self, payload: T, destination: u8) -> Result<MHPacket, PostError>
     where
         T: Serialize,
     {
@@ -107,6 +104,25 @@ impl<const MAX_PACKET_SIZE: usize> NetworkManager<MAX_PACKET_SIZE> {
                 return Err(PostError::SerializeBufferFull);
             }
         };
+
+        self.next_packet_id += 1;
+        Ok(MHPacket {
+            destination_id: destination,
+            packet_type: PacketType::Data,
+            packet_id: self.next_packet_id,
+            source_id: self.source_id,
+            payload: payload_bytes,
+            hop_count: 0,
+        })
+    }
+
+    pub fn new_packet(
+        &mut self,
+        payload: &[u8],
+        destination: u8,
+        packet_type: PacketType,
+    ) -> Result<MHPacket, PostError> {
+        let payload_bytes = Vec::from_slice(payload).map_err(|_| PostError::SerializeBufferFull)?;
         self.next_packet_id += 1;
         Ok(MHPacket {
             destination_id: destination,
@@ -117,43 +133,65 @@ impl<const MAX_PACKET_SIZE: usize> NetworkManager<MAX_PACKET_SIZE> {
             hop_count: 0,
         })
     }
-    pub fn send_packet<T>(
+    pub fn send_packet(
         &mut self,
-        payload: T,
-        destination: u8,
-    ) -> Result<Vec<MHPacket, MAX_AMOUNT_PACKETS>, NetworkManagerError>
-    where
-        T: Serialize,
-    {
+        packet: MHPacket,
+    ) -> Result<Vec<MHPacket, MAX_AMOUNT_PACKETS>, NetworkManagerError> {
         let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
+        let pkt_timout = curr_time + Duration::from_secs(self.timeout as u64);
+        // First add this package to our vec
+        let pend_pkt = PendingPacket {
+            packet,
+            timeout: pkt_timout,
+            retries: 0,
+        };
+        if self.pending_acks.push(pend_pkt).is_err() {
+            return Err(NetworkManagerError::BufferFull);
+        }
+
         // Look into pending packages,
         let mut to_send: Vec<MHPacket, MAX_AMOUNT_PACKETS> = self
             .pending_acks
             .iter()
             .filter(|p| p.timeout > curr_time)
-            .take(MAX_AMOUNT_PACKETS - 1) // Safety: To
             // reserve a slot for payload
             .map(|p| p.packet.clone())
             .collect();
 
-        let pkt_type = if to_send.is_empty() {
+        let pkt_type = if to_send.len() == 1 {
             PacketType::Data
         } else {
             PacketType::DataStream(to_send.len() as u8)
         };
-        // first transform T into MHPacket
-        let pkt = self.new_packet(payload, destination, pkt_type)?;
         for p in to_send.iter_mut() {
             p.packet_type = pkt_type;
         }
-        // This returns back to_send if unsuccessfull, but we are returning that anyway
-        // But this might be unwanted behaviour though
-        if to_send.push(pkt).is_err() {
-            trace!("[ERROR] to_send is somehow full ? This should never happen");
-            return Err(NetworkManagerError::InvalidPacket(0));
+        Ok(to_send)
+    }
+
+    /// Manages actions which the pakcet might require from a network pov, and returns the packet
+    /// if none are required, otherwise returns none
+    pub fn receive_packet(
+        &mut self,
+        pkt: MHPacket,
+    ) -> Result<Option<MHPacket>, NetworkManagerError> {
+        // Check if it is one of our packets
+        if let Some(our_packet_index) = self
+            .pending_acks
+            .iter()
+            .position(|p| p.packet.packet_id == pkt.packet_id)
+        {
+            // Then remove it from our vec, and return
+            self.pending_acks.remove(our_packet_index);
+            return Ok(None);
+        }
+        // Perhaps it should be sent on?
+        if pkt.source_id != self.source_id {
+            self.send_packet(pkt);
+            return Ok(None);
         }
 
-        Ok(to_send)
+        Ok(Some(pkt))
     }
 }
 

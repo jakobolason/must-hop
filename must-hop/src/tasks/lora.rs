@@ -1,7 +1,10 @@
+use core::ops::ControlFlow;
+
 use defmt::{error, info, trace};
 
 use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
+use postcard::to_slice;
 use serde::Serialize;
 
 use crate::{
@@ -63,9 +66,16 @@ pub async fn lora_task<RK, DLY, T, M, const MAX_PACK_LEN: usize>(
         let either = select(channel.receive(), node.listen(&mut receiving_buffer)).await;
         match either {
             Either::First(data) => {
+                let mhpack = match nm.from_t(data, 2) {
+                    Ok(pack) => pack,
+                    Err(e) => {
+                        error!("Error creating MHPacket: {:?}", e);
+                        continue;
+                    }
+                };
                 // Now capture all pending packets from other nodes perhaps, and send 1 (Data) or
                 // multiple (Data stream)
-                let pkts = match nm.send_packet(data, 2) {
+                let pkts = match nm.send_packet(mhpack) {
                     Ok(pkts) => pkts,
                     Err(e) => {
                         error!("Error in getting packets to sen: {:?}", e);
@@ -81,10 +91,19 @@ pub async fn lora_task<RK, DLY, T, M, const MAX_PACK_LEN: usize>(
             }
             Either::Second(conn) => {
                 // nm.receive(packet).await
-                if let Err(e) = node.receive(conn, &receiving_buffer).await {
-                    error!("Error in receing information: {:?}", e);
-                    continue;
-                }
+                match node.receive(conn, &receiving_buffer).await {
+                    Ok(pkt) => match nm.receive_packet(pkt) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Error in Networkmanager receive packet: {:?}", e);
+                            continue;
+                        }
+                    },
+                    Err(e) => {
+                        error!("Error in receing information: {:?}", e);
+                        continue;
+                    }
+                };
             }
         }
     }
