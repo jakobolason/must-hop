@@ -15,7 +15,7 @@ The other example is using the RAK3272s board, which is a board for the RAK3172 
 - [x] Firmware for RAK3272s
 - [x] Nodes can communicate to eachother, with custom messages
 - [x] Each node sends and receives information
-- [ ] Communication with a gateway
+- [x] Communication with a gateway
   - [ ] Define gateway communication
   - [ ] Have a nice dashboard kind of, to see information
 - [ ] central, peripheral, runner abstraction for LoRa
