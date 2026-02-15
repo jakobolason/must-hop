@@ -91,19 +91,30 @@ pub async fn lora_task<RK, DLY, T, M, const MAX_PACK_LEN: usize>(
             }
             Either::Second(conn) => {
                 // nm.receive(packet).await
-                match node.receive(conn, &receiving_buffer).await {
-                    Ok(pkt) => match nm.receive_packet(pkt) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("Error in Networkmanager receive packet: {:?}", e);
-                            continue;
-                        }
-                    },
+                // TODO: should be able to receieve multiple packets
+                let pkt = match node.receive(conn, &receiving_buffer).await {
+                    Ok(pkt) => pkt,
                     Err(e) => {
                         error!("Error in receing information: {:?}", e);
                         continue;
                     }
                 };
+                match nm.receive_packet(pkt) {
+                    // If there is some, then it means that this was a DataStream
+                    Ok(Some(_)) => {}
+                    Ok(None) => continue,
+                    Err(e) => {
+                        error!("Error in Networkmanager receive packet: {:?}", e);
+                        continue;
+                    }
+                }
+                match node.listen(&mut receiving_buffer).await {
+                    Ok(conn) => todo!("The same loop as before (recursive?)"),
+                    Err(e) => {
+                        error!("Error in receiving_buffer: {:?}", e);
+                        continue;
+                    }
+                }
             }
         }
     }

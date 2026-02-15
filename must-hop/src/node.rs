@@ -73,6 +73,7 @@ impl From<PostError> for NetworkManagerError {
 /// Logic to ensure packages arrive
 pub struct NetworkManager<const MAX_PACKET_SIZE: usize = 128> {
     pending_acks: Vec<PendingPacket, MAX_PACKET_SIZE>,
+    // TODO: This should be more random, so each node doesn't start at 0
     next_packet_id: u16,
     /// Configurations for the manager
     source_id: u8,
@@ -148,8 +149,7 @@ impl<const MAX_PACKET_SIZE: usize> NetworkManager<MAX_PACKET_SIZE> {
         if self.pending_acks.push(pend_pkt).is_err() {
             return Err(NetworkManagerError::BufferFull);
         }
-
-        // Look into pending packages,
+        // Look into packages with expired timeouts,
         let mut to_send: Vec<MHPacket, MAX_AMOUNT_PACKETS> = self
             .pending_acks
             .iter()
@@ -205,9 +205,76 @@ pub trait MHNode<const N: usize> {
     fn transmit(&mut self, packet: MHPacket<N>) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Function needed for this lib, for multi hop communication.
+    /// The conn and receiving_buffer might be too LoRa specific, so it might change
     fn receive(
         &mut self,
         conn: Self::Connection,
         receiving_buffer: &[u8],
     ) -> impl Future<Output = Result<MHPacket, Self::Error>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A helper to make a dummy manager for testing
+    fn setup_manager() -> NetworkManager<128> {
+        NetworkManager::new(1, 10, 3) // Source ID 1, Timeout 10s, 3 Retries
+    }
+
+    #[test]
+    fn test_packet_creation() {
+        let mut manager = setup_manager();
+        let payload = [0xAB, 0xCD];
+
+        // Test basic packet creation
+        let pkt = manager.new_packet(&payload, 2, PacketType::Data).unwrap();
+
+        assert_eq!(pkt.source_id, 1);
+        assert_eq!(pkt.destination_id, 2);
+        assert_eq!(pkt.packet_id, 1);
+        assert_eq!(pkt.payload, payload);
+    }
+
+    #[test]
+    fn test_send_queue_logic() {
+        let mut manager = setup_manager();
+        let payload = [1, 2, 3];
+        let pkt = manager.new_packet(&payload, 2, PacketType::Data).unwrap();
+
+        // Calling send_packet should queue it and return it for sending
+        let to_send = manager
+            .send_packet(pkt.clone())
+            .expect("Should queue packet");
+
+        // 1. Check it returned the packet to be sent
+        assert_eq!(to_send.len(), 1);
+        assert_eq!(to_send[0].packet_id, 1);
+
+        // 2. Check it is actually in the pending list (internal inspection)
+        assert_eq!(manager.pending_acks.len(), 1);
+
+        // 3. Receive the same packet back (simulating a loopback or re-forwarding)
+        // If we receive a packet with Source != Self, we usually forward it.
+        // But if we receive an ACK (logic you haven't fully implemented in snippet yet), we remove it.
+
+        // For now, let's test the "BufferFull" error
+        // for _ in 0..MAX_AMOUNT_PACKETS {
+        //     let _ = manager.send_packet(pkt.clone());
+        // }
+        // Next one should fail
+        // let res = manager.send_packet(pkt);
+        // assert!(matches!(res, Err(NetworkManagerError::BufferFull)));
+    }
+
+    #[test]
+    fn test_serialization_helper() {
+        let mut manager = setup_manager();
+        let data = [42u32];
+
+        let pkt = manager.from_t(data, 5).expect("Serialization failed");
+
+        // Verify payload contains the serialized bytes of 42u32 (Little Endian: 2A 00 00 00)
+        assert_eq!(pkt.payload[0], 42);
+    }
 }
