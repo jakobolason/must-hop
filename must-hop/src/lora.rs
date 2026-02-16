@@ -8,9 +8,12 @@ use lora_phy::mod_traits::RadioKind;
 use lora_phy::{DelayNs, LoRa, RxMode};
 
 use defmt::{error, trace, warn};
-use embassy_time::{Instant, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
+
+// Approximately 1 second?
+const RECEIVE_TIMEOUT: u16 = 100;
 
 /// Example of payload
 #[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format)]
@@ -50,7 +53,7 @@ where
 {
     lora: &'a mut LoRa<RK, DLY>,
     tp: TransmitParameters,
-    rx_pkt_params: PacketParams,
+    pkt_params: PacketParams,
     mdltn_params: ModulationParams,
     radio_state: RadioState,
 }
@@ -62,18 +65,13 @@ where
 {
     type Error = RadioError;
     type Connection = Result<(u8, PacketStatus), RadioError>;
+    type Duration = u16;
 
     // Should transform to Tx if in Rx
     async fn transmit(&mut self, packet: MHPacket<N>) -> Result<(), RadioError> {
         // TODO: Is this necessary?
         let now = Instant::now();
-        let mut tx_pkt_params = self.lora.create_tx_packet_params(
-            self.tp.pre_amp,
-            self.tp.imp_hed,
-            self.tp.crc,
-            self.tp.iq,
-            &self.mdltn_params,
-        )?;
+
         // TODO: This should be the const generic max pack len
         let mut buffer = [0u8; 32];
         let used_slice = match to_slice(&packet, &mut buffer) {
@@ -86,21 +84,21 @@ where
         // Simple listen to talk logic
         // TODO: This crashes when in a loop
         // loop {
-        trace!("preparing for cad ...");
-        self.lora.prepare_for_cad(&self.mdltn_params).await?;
-        if self.lora.cad(&self.mdltn_params).await? {
-            warn!("cad successfull with activity detected");
-            // self.lora.sleep(false).await?;
-            Timer::after_millis(50).await;
-            // TODO: Get some random amount of time before continuing loop
-        } else {
-            trace!("cad successfull with NO activity detected");
-            // break;
-        }
+        // trace!("preparing for cad ...");
+        // self.lora.prepare_for_cad(&self.mdltn_params).await?;
+        // if self.lora.cad(&self.mdltn_params).await? {
+        //     warn!("cad successfull with activity detected");
+        //     // self.lora.sleep(false).await?;
+        //     Timer::after_millis(50).await;
+        //     // TODO: Get some random amount of time before continuing loop
+        // } else {
+        //     trace!("cad successfull with NO activity detected");
+        //     // break;
+        // }
         // }
         let before_tx = Instant::now();
         self.lora
-            .prepare_for_tx(&self.mdltn_params, &mut tx_pkt_params, 20, used_slice)
+            .prepare_for_tx(&self.mdltn_params, &mut self.pkt_params, 20, used_slice)
             .await?;
 
         self.lora.tx().await?;
@@ -163,6 +161,22 @@ where
 
         Ok(packet)
     }
+
+    async fn listen(
+        &mut self,
+        rec_buf: &mut [u8; N],
+        with_timeout: bool,
+    ) -> Result<Self::Connection, RadioError> {
+        // if let RadioState::Tx = self.radio_state {
+        //     self.prepare_for_rx().await?;
+        // }
+        let rec_mode = match with_timeout {
+            true => RxMode::Single(RECEIVE_TIMEOUT),
+            false => RxMode::Continuous,
+        };
+        self.prepare_for_rx(rec_mode).await?;
+        Ok(self.lora.rx(&self.pkt_params, rec_buf).await)
+    }
 }
 
 impl<'a, RK, DLY, const N: usize> LoraNode<'a, RK, DLY, N>
@@ -173,7 +187,7 @@ where
     pub fn new(lora: &'a mut LoRa<RK, DLY>, tp: TransmitParameters) -> Result<Self, RadioError> {
         let mdltn_params = lora.create_modulation_params(tp.sf, tp.bw, tp.cr, tp.lora_hz)?;
 
-        let rx_pkt_params = lora.create_rx_packet_params(
+        let pkt_params = lora.create_rx_packet_params(
             tp.pre_amp,
             tp.imp_hed,
             tp.max_pack_len as u8,
@@ -184,24 +198,17 @@ where
         Ok(Self {
             lora,
             tp,
-            rx_pkt_params,
+            pkt_params,
             mdltn_params,
             radio_state: RadioState::Rx,
         })
     }
 
-    pub async fn prepare_for_rx(&mut self) -> Result<(), RadioError> {
+    pub async fn prepare_for_rx(&mut self, rx_mode: RxMode) -> Result<(), RadioError> {
         // TODO: Is it a proble using single here? Should it be continouos to not get timeout
         // errors all the time? Can this listening be timed and synchronized for a TDMA?
         self.lora
-            .prepare_for_rx(RxMode::Continuous, &self.mdltn_params, &self.rx_pkt_params)
+            .prepare_for_rx(rx_mode, &self.mdltn_params, &self.pkt_params)
             .await
-    }
-
-    pub async fn listen(&mut self, rec_buf: &mut [u8]) -> Result<(u8, PacketStatus), RadioError> {
-        if let RadioState::Tx = self.radio_state {
-            self.prepare_for_rx().await?;
-        }
-        self.lora.rx(&self.rx_pkt_params, rec_buf).await
     }
 }

@@ -1,6 +1,9 @@
 use core::future::Future;
 use heapless::Vec;
-use must_hop::node::{MHNode, MHPacket, NetworkManager, NetworkManagerError, PacketType};
+use must_hop::node::{
+    MHNode, MHPacket, PacketType,
+    network_manager::{NetworkManager, NetworkManagerError},
+};
 use postcard::from_bytes;
 
 struct MockRadio {
@@ -21,6 +24,7 @@ impl MockRadio {
 impl MHNode<128> for MockRadio {
     type Error = NetworkManagerError;
     type Connection = ();
+    type Duration = u16;
 
     async fn transmit(&mut self, packet: MHPacket<128>) -> Result<(), Self::Error> {
         self.sent_packets.push(packet);
@@ -34,6 +38,15 @@ impl MHNode<128> for MockRadio {
     ) -> Result<MHPacket<128>, Self::Error> {
         from_bytes::<MHPacket>(receiving_buffer).map_err(|_| NetworkManagerError::InvalidPacket(0))
     }
+
+    async fn listen(
+        &mut self,
+        receiving_buffer: &[u8],
+        with_timeout: bool,
+    ) -> Result<Self::Connection, Self::Error> {
+        println!("listening!");
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -46,11 +59,11 @@ async fn test_node_to_node_logic() {
         .new_packet(msg_to_send, 2, PacketType::Data)
         .unwrap();
 
-    let packets_to_send = manager_a.send_packet(packet).unwrap();
+    let packets_to_send = manager_a.receive_packet(packet).unwrap().unwrap();
 
-    for p in packets_to_send {
-        radio_a.transmit(p).await.unwrap();
-    }
+    // for p in packets_to_send {
+    radio_a.transmit(packets_to_send.0).await.unwrap();
+    // }
 
     assert_eq!(radio_a.sent_packets.len(), 1);
     let sent = &radio_a.sent_packets[0];

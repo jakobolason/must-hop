@@ -35,7 +35,7 @@ type Stm32wlLoRa<'d, CM> = LoRa<
     Delay,
 >;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format, Copy, Clone)]
 pub struct SensorData {
     pub device_id: u8,
     pub temperate: f32,
