@@ -1,4 +1,4 @@
-use defmt::{error, info};
+use defmt::{error, info, trace};
 
 use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
@@ -12,34 +12,22 @@ use crate::{
 
 use lora_phy::{DelayNs, LoRa};
 
-use lora_phy::mod_params::{Bandwidth, CodingRate, SpreadingFactor};
 use lora_phy::mod_traits::RadioKind;
 
 // TODO: Ensure SIZE and MAX_PACKET_SIZE are the same
 pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
     lora: &mut LoRa<RK, DLY>,
     channel: channel::Receiver<'static, M, T, 3>,
-    lora_hz: u32,
+    tp: TransmitParameters,
+    source_id: u8,
+    timeout: u8,
+    max_retries: u8,
 ) where
     RK: RadioKind,
     DLY: DelayNs,
     T: Into<Vec<u8, SIZE>> + Serialize + Copy,
     M: embassy_sync::blocking_mutex::raw::RawMutex,
 {
-    let sf = SpreadingFactor::_12;
-    let bw = Bandwidth::_125KHz;
-    let cr = CodingRate::_4_8;
-    let tp: TransmitParameters = TransmitParameters {
-        sf,
-        bw,
-        cr,
-        lora_hz,
-        pre_amp: 8,
-        imp_hed: false,
-        max_pack_len: SIZE,
-        crc: true,
-        iq: false,
-    };
     let node = match LoraNode::new(lora, tp) {
         Ok(rx) => rx,
         Err(e) => {
@@ -47,7 +35,7 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
             return;
         }
     };
-    let nm = NetworkManager::<SIZE>::new(1, 3, 3);
+    let nm = NetworkManager::<SIZE>::new(source_id, timeout, max_retries);
     let mut router = MeshRouter::new(node, nm);
     loop {
         info!("In lora task loop");
@@ -59,12 +47,14 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
         let either = select(channel.receive(), router.listen(&mut receiving_buffer)).await;
         match either {
             Either::First(data) => {
+                info!("SENSOR DATA won");
                 if let Err(e) = router.send_payload(data.into()).await {
                     error!("Error in transmitting sensor data: {:?}", e);
                     continue;
                 }
             }
             Either::Second(conn) => {
+                info!("RECEIVER won, reading ...");
                 let conn = match conn {
                     Ok(conn) => conn,
                     Err(e) => {
@@ -72,10 +62,14 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
                         continue;
                     }
                 };
-                if let Err(e) = router.receive(conn, &receiving_buffer).await {
-                    error!("Error in receiving packet: {:?}", e);
-                    continue;
-                }
+                let my_pkts = match router.receive(conn, &receiving_buffer).await {
+                    Ok(pkts) => pkts,
+                    Err(e) => {
+                        error!("Error in receiving packet: {:?}", e);
+                        continue;
+                    }
+                };
+                info!("I got these pkts: {}", my_pkts.len());
             }
         }
     }

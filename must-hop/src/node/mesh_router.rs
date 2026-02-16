@@ -1,9 +1,9 @@
-use defmt::{error, trace};
+use defmt::trace;
 use heapless::Vec;
 
 use super::{
     MHNode, MHPacket, PacketType,
-    network_manager::{MAX_AMOUNT_PACKETS, NetworkManager, NetworkManagerError},
+    network_manager::{LEN, NetworkManager, NetworkManagerError},
 };
 
 #[derive(Debug, defmt::Format)]
@@ -61,7 +61,15 @@ where
     ) -> Result<(), MeshRouterError<Node::Error>> {
         let timeouted_pkts = self.manager.payload_to_send(payload, 2)?;
         trace!("Sending {} packets!", timeouted_pkts.len());
-        for pkt in timeouted_pkts {
+
+        self.send_packets(timeouted_pkts).await
+    }
+
+    async fn send_packets(
+        &mut self,
+        pkts: Vec<MHPacket<SIZE>, 8>,
+    ) -> Result<(), MeshRouterError<Node::Error>> {
+        for pkt in pkts {
             self.node
                 .transmit(pkt)
                 .await
@@ -74,7 +82,7 @@ where
         &mut self,
         conn: Node::Connection,
         receiving_buffer: &[u8],
-    ) -> Result<(), MeshRouterError<Node::Error>> {
+    ) -> Result<Vec<MHPacket<SIZE>, 8>, MeshRouterError<Node::Error>> {
         // TODO: should be able to receieve multiple packets
         let pkt = self
             .node
@@ -86,13 +94,13 @@ where
             PacketType::Ack => {
                 // This is only for Nodes close to a GW
                 // self.manager.receive_ack(pkt)
-                return Ok(());
+                return Ok(Vec::new());
             }
             PacketType::Data => Vec::from_array([pkt]),
             PacketType::DataStream(amount) => {
                 trace!("In Data Stream!");
                 // Loop for amount, and add packages to a vec of them
-                let mut incoming_pkts: Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS> = Vec::new();
+                let mut incoming_pkts: Vec<MHPacket<SIZE>, LEN> = Vec::new();
                 let mut rec_buf = [0u8; SIZE];
                 'rec_for: for idx in 1..amount {
                     trace!("Receiving packet nr {}", idx);
@@ -121,7 +129,9 @@ where
         // If 1 package or multiple packets should be sent on:
         // let NM get these logged, and perhaps add any timed out packets
         // self.manager.receive_multiple_packets(incoming_pkts)?;
-        self.manager.handle_packets(pkts)?;
-        Ok(())
+        let (to_send, my_pkt) = self.manager.handle_packets(pkts)?;
+        trace!("GOT {} packets for me!", my_pkt.len());
+        trace!("GOT {} packets which should be sent on!", to_send.len());
+        Ok(my_pkt)
     }
 }

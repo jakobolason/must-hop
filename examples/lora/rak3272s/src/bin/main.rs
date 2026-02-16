@@ -22,6 +22,7 @@ use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_time::{Delay, Timer};
 use heapless::Vec;
 use lora_phy::LoRa;
+use lora_phy::mod_params::{Bandwidth, CodingRate, SpreadingFactor};
 use lora_phy::sx126x;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
 use {defmt_rtt as _, panic_probe as _};
@@ -31,7 +32,7 @@ use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
 use embassy_stm32::spi::mode::Master;
 
 use embassy_stm32::mode::Async;
-use must_hop::tasks::lora;
+use must_hop::{lora::TransmitParameters, tasks::lora};
 use postcard::to_slice;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -124,7 +125,22 @@ pub async fn lora_task(
     mut lora: Stm32wlLoRa<'static, Master>,
     channel: channel::Receiver<'static, ThreadModeRawMutex, SensorData, 3>,
 ) {
-    lora::lora_task(&mut lora, channel, LORA_FREQUENCY_IN_HZ).await;
+    let sf = SpreadingFactor::_5;
+    let bw = Bandwidth::_125KHz;
+    let cr = CodingRate::_4_8;
+    let tp: TransmitParameters = TransmitParameters {
+        sf,
+        bw,
+        cr,
+        lora_hz: LORA_FREQUENCY_IN_HZ,
+        pre_amp: 8,
+        imp_hed: false,
+        max_pack_len: MAX_PACK_LEN,
+        crc: true,
+        iq: false,
+    };
+    let source_id = 3;
+    lora::lora_task(&mut lora, channel, tp, source_id, 3, 3).await;
 }
 
 // This creates the task which checks for sensor data

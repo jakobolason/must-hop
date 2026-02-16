@@ -52,10 +52,9 @@ where
     DLY: DelayNs,
 {
     lora: &'a mut LoRa<RK, DLY>,
-    tp: TransmitParameters,
+    _tp: TransmitParameters,
     pkt_params: PacketParams,
     mdltn_params: ModulationParams,
-    radio_state: RadioState,
 }
 
 impl<RK, DLY, const SIZE: usize> MHNode<SIZE> for LoraNode<'_, RK, DLY, SIZE>
@@ -82,6 +81,7 @@ where
                 return Err(RadioError::OpError(1));
             }
         };
+        trace!("used slice size is {}", used_slice.len());
         // Simple listen to talk logic
         // TODO: This crashes when in a loop
         // loop {
@@ -198,10 +198,9 @@ where
         )?;
         Ok(Self {
             lora,
-            tp,
+            _tp: tp,
             pkt_params,
             mdltn_params,
-            radio_state: RadioState::Rx,
         })
     }
 

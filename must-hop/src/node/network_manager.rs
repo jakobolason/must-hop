@@ -3,10 +3,9 @@ use defmt::{error, trace};
 use embassy_time::{Duration, Instant};
 use heapless::Vec;
 use lora_phy::mod_params::RadioError;
-use postcard::{Error as PostError, to_slice};
-use serde::Serialize;
+use postcard::Error as PostError;
 
-pub const MAX_AMOUNT_PACKETS: usize = 8;
+pub const LEN: usize = 8;
 /// Does not need to be serialized, because only MHPacket will be sent
 #[derive(Debug, PartialEq, defmt::Format)]
 pub struct PendingPacket<const SIZE: usize> {
@@ -46,14 +45,14 @@ pub enum PayloadType {
 
 /// Maintains record of packages sent, to ensure that they are received.
 /// Also handles that packets from other nodes should be sent on
-pub struct NetworkManager<const SIZE: usize = 128> {
-    pending_acks: Vec<PendingPacket<SIZE>, SIZE>,
+pub struct NetworkManager<const SIZE: usize> {
+    pending_acks: Vec<PendingPacket<SIZE>, LEN>,
     // TODO: This should be more random, so each node doesn't start at 0
     next_packet_id: u16,
     /// Configurations for the manager
     source_id: u8,
     timeout: u8,
-    max_retries: u8,
+    _max_retries: u8,
 }
 
 impl<const SIZE: usize> NetworkManager<SIZE> {
@@ -63,7 +62,7 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
             next_packet_id: 0,
             source_id,
             timeout,
-            max_retries,
+            _max_retries: max_retries,
         }
     }
 
@@ -115,14 +114,14 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u8,
-    ) -> Result<Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS>, NetworkManagerError> {
+    ) -> Result<Vec<MHPacket<SIZE>, LEN>, NetworkManagerError> {
         // Look into packages with expired timeouts,
         let pendings_len = self.pending_acks.len() as u8;
         trace!("pendings len: {}", pendings_len);
         let (mut to_send, pkt_type) = if pendings_len != 0 {
             let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
             let pkt_type = PacketType::DataStream(pendings_len);
-            let to_send: Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS> = self
+            let to_send: Vec<MHPacket<SIZE>, LEN> = self
                 .pending_acks
                 .iter_mut()
                 .filter(|p| p.timeout > curr_time)
@@ -132,7 +131,7 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
                 })
                 .collect();
 
-            // if self.pending_acks.len() == MAX_AMOUNT_PACKETS {
+            // if self.pending_acks.len() == LEN {
             //     // return Err(NetworkManagerError::BufferFull);
             //     trace!("BUFFER IS FULL, so data is not being send");
             //     return Ok(to_send);
@@ -176,12 +175,14 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
             .position(|p| p.packet.packet_id == pkt.packet_id)
         {
             // Then remove it from our vec, and return
+            trace!("RECEIVED KNOWN PACKAGE, REMOVING FROM LIST");
             self.pending_acks.remove(our_packet_index);
             return Ok(None);
         }
         // Perhaps it should be sent on?
         if pkt.source_id != self.source_id {
             self.add_packet(pkt.clone())?;
+            trace!("PACKAGE SHOULD BE SENT ON");
             Ok(Some((pkt, PayloadType::Data)))
         } else {
             // If this is actually for us, then it is probably a command that the underlying app
@@ -194,16 +195,10 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
 
     pub fn handle_packets(
         &mut self,
-        pkts: Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS>,
-    ) -> Result<
-        (
-            Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS>,
-            Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS>,
-        ),
-        NetworkManagerError,
-    > {
-        let mut to_send: Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS> = Vec::new();
-        let mut commands: Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS> = Vec::new();
+        pkts: Vec<MHPacket<SIZE>, LEN>,
+    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Vec<MHPacket<SIZE>, LEN>), NetworkManagerError> {
+        let mut to_send: Vec<MHPacket<SIZE>, LEN> = Vec::new();
+        let mut commands: Vec<MHPacket<SIZE>, LEN> = Vec::new();
         for pkt in pkts {
             let _ = match self.receive_packet(pkt) {
                 Ok(Some(packet)) => match packet.1 {
@@ -273,7 +268,7 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
 //         // But if we receive an ACK (logic you haven't fully implemented in snippet yet), we remove it.
 //
 //         // For now, let's test the "BufferFull" error
-//         // for _ in 0..MAX_AMOUNT_PACKETS {
+//         // for _ in 0..LEN {
 //         //     let _ = manager.send_packet(pkt.clone());
 //         // }
 //         // Next one should fail
