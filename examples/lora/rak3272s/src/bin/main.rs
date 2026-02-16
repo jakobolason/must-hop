@@ -20,6 +20,7 @@ use embassy_stm32::{
 use embassy_sync::channel;
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
 use embassy_time::{Delay, Timer};
+use heapless::Vec;
 use lora_phy::LoRa;
 use lora_phy::sx126x;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
@@ -146,10 +147,10 @@ pub struct SensorData {
 }
 
 // TODO: Shuold not use this, only for prototyping
-impl From<SensorData> for [u8; MAX_PACK_LEN] {
+impl From<SensorData> for Vec<u8, MAX_PACK_LEN> {
     fn from(data: SensorData) -> Self {
         let mut buffer = [0u8; MAX_PACK_LEN];
-        to_slice(&data, &mut buffer).expect("Could not serialize sensor data");
-        buffer
+        let slice = to_slice(&data, &mut buffer).expect("Could not serialize sensor data");
+        Vec::from_slice(slice).expect("buffer too small")
     }
 }

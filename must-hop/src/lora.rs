@@ -73,7 +73,8 @@ where
         let now = Instant::now();
 
         // TODO: This should be the const generic max pack len
-        let mut buffer = [0u8; 32];
+        let mut buffer = [0u8; SIZE];
+        trace!("BUFFER SIZE IS: {}", SIZE);
         let used_slice = match to_slice(&packet, &mut buffer) {
             Ok(slice) => slice,
             Err(e) => {

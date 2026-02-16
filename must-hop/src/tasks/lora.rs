@@ -2,6 +2,7 @@ use defmt::{error, info};
 
 use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
+use heapless::Vec;
 use serde::Serialize;
 
 use crate::{
@@ -22,7 +23,7 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
 ) where
     RK: RadioKind,
     DLY: DelayNs,
-    T: Into<[u8; SIZE]> + Serialize + Copy,
+    T: Into<Vec<u8, SIZE>> + Serialize + Copy,
     M: embassy_sync::blocking_mutex::raw::RawMutex,
 {
     let sf = SpreadingFactor::_12;
@@ -58,7 +59,7 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
         let either = select(channel.receive(), router.listen(&mut receiving_buffer)).await;
         match either {
             Either::First(data) => {
-                if let Err(e) = router.send_payload(&data.into()).await {
+                if let Err(e) = router.send_payload(data.into()).await {
                     error!("Error in transmitting sensor data: {:?}", e);
                     continue;
                 }

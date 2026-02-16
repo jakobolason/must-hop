@@ -48,6 +48,7 @@ where
         &mut self,
         rec_buf: &mut [u8; SIZE],
     ) -> Result<Node::Connection, MeshRouterError<Node::Error>> {
+        trace!("listening ...");
         self.node
             .listen(rec_buf, false)
             .await
@@ -56,9 +57,10 @@ where
 
     pub async fn send_payload(
         &mut self,
-        payload: &[u8],
+        payload: Vec<u8, SIZE>,
     ) -> Result<(), MeshRouterError<Node::Error>> {
         let timeouted_pkts = self.manager.payload_to_send(payload, 2)?;
+        trace!("Sending {} packets!", timeouted_pkts.len());
         for pkt in timeouted_pkts {
             self.node
                 .transmit(pkt)
@@ -76,9 +78,10 @@ where
         // TODO: should be able to receieve multiple packets
         let pkt = self
             .node
-            .receive(conn, &receiving_buffer)
+            .receive(conn, receiving_buffer)
             .await
             .map_err(MeshRouterError::Node)?;
+        trace!("Received packet: {:?}", pkt);
         let pkts = match pkt.packet_type {
             PacketType::Ack => {
                 // This is only for Nodes close to a GW
@@ -87,6 +90,7 @@ where
             }
             PacketType::Data => Vec::from_array([pkt]),
             PacketType::DataStream(amount) => {
+                trace!("In Data Stream!");
                 // Loop for amount, and add packages to a vec of them
                 let mut incoming_pkts: Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS> = Vec::new();
                 let mut rec_buf = [0u8; SIZE];
@@ -113,6 +117,7 @@ where
                 incoming_pkts
             }
         };
+        trace!("Done receiving, handling {} pkts", pkts.len());
         // If 1 package or multiple packets should be sent on:
         // let NM get these logged, and perhaps add any timed out packets
         // self.manager.receive_multiple_packets(incoming_pkts)?;
