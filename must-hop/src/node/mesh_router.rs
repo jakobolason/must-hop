@@ -40,10 +40,12 @@ impl<Node, const SIZE: usize> MeshRouter<Node, SIZE>
 where
     Node: MHNode<SIZE>,
 {
+    /// Takes ownership of a node and network manager, because this handles those
     pub fn new(node: Node, manager: NetworkManager<SIZE>) -> Self {
         Self { node, manager }
     }
 
+    /// Use to await another node's communication, and can be used in a select or join
     pub async fn listen(
         &mut self,
         rec_buf: &mut [u8; SIZE],
@@ -55,15 +57,16 @@ where
             .map_err(MeshRouterError::Node)
     }
 
-    pub async fn send_payload(
-        &mut self,
-        payload: Vec<u8, SIZE>,
-    ) -> Result<(), MeshRouterError<Node::Error>> {
-        let timeouted_pkts = self.manager.payload_to_send(payload, 2)?;
-        trace!("Sending {} packets!", timeouted_pkts.len());
-
-        self.send_packets(timeouted_pkts).await
-    }
+    // Use to send data over the network
+    // pub async fn send_payload(
+    //     &mut self,
+    //     payload: Vec<u8, SIZE>,
+    // ) -> Result<(), MeshRouterError<Node::Error>> {
+    //     let timeouted_pkts = self.manager.payload_to_send(payload, 2)?;
+    //     trace!("Sending {} packets!", timeouted_pkts.len());
+    //
+    //     self.send_packets(timeouted_pkts).await
+    // }
 
     async fn send_packets(
         &mut self,
@@ -78,6 +81,9 @@ where
         Ok(())
     }
 
+    /// Handles that when receiving, the packet type can be stream, therefore this keeps on
+    /// listening. Then adds packets to be sent on via the NetworkManager. Lastly, those packets
+    /// are sent again if not meant for this node
     pub async fn receive(
         &mut self,
         conn: Node::Connection,
@@ -132,6 +138,7 @@ where
         let (to_send, my_pkt) = self.manager.handle_packets(pkts)?;
         trace!("GOT {} packets for me!", my_pkt.len());
         trace!("GOT {} packets which should be sent on!", to_send.len());
+        self.send_packets(to_send).await?;
         Ok(my_pkt)
     }
 }

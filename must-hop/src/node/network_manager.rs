@@ -109,17 +109,23 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
         })
     }
 
-    // TODO: This is not a good function FIX
+    /// This removes retried packets, and checks the pending acks list. Given the data payload in bytes, it is made into a MHPacket
+    /// and added to internal acks list. It returns a list of packets to send, which includes the packet with the payload provided.
+    /// But it also returns all packets which haven't been ACK'ed before it's timeout.
     pub fn payload_to_send(
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u8,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, NetworkManagerError> {
+        // Clean up packets with too many retries
+        let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
+        self.pending_acks
+            .retain(|p| p.retries < self._max_retries && p.timeout > curr_time);
         // Look into packages with expired timeouts,
+
         let pendings_len = self.pending_acks.len() as u8;
         trace!("pendings len: {}", pendings_len);
         let (mut to_send, pkt_type) = if pendings_len != 0 {
-            let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
             let pkt_type = PacketType::DataStream(pendings_len);
             let to_send: Vec<MHPacket<SIZE>, LEN> = self
                 .pending_acks
@@ -127,6 +133,7 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
                 .filter(|p| p.timeout > curr_time)
                 .map(|p| {
                     p.packet.packet_type = PacketType::DataStream(pendings_len);
+                    p.retries += 1;
                     p.packet.clone()
                 })
                 .collect();
@@ -147,6 +154,7 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
         Ok(to_send)
     }
 
+    /// Adds the packet to the internal list
     pub fn add_packet(&mut self, packet: MHPacket<SIZE>) -> Result<(), NetworkManagerError> {
         let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
         let pkt_timout = curr_time + Duration::from_secs(self.timeout as u64);
@@ -193,6 +201,8 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
         // Ok(Some(pkt))
     }
 
+    /// To be used when receiving multiple packets, returns list of packets to send on, and the
+    /// other list is a list of packets to the user
     pub fn handle_packets(
         &mut self,
         pkts: Vec<MHPacket<SIZE>, LEN>,
