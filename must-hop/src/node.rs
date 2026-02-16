@@ -25,7 +25,7 @@ pub enum PacketType {
 
 /// MHPacket defines the package sent around the network
 #[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format, Clone)]
-pub struct MHPacket<const MAX_PACKET_SIZE: usize> {
+pub struct MHPacket<const SIZE: usize> {
     /// Destination identifier
     // TODO: Perhaps bigger than u8?
     pub destination_id: u8,
@@ -34,21 +34,22 @@ pub struct MHPacket<const MAX_PACKET_SIZE: usize> {
     pub source_id: u8,
     /// Your specificed data wanting to send
     // (DE)serialize is only available up to 32 bytes
-    pub payload: Vec<u8, MAX_PACKET_SIZE>,
+    pub payload: Vec<u8, SIZE>,
     /// The amount of hops this package has been on
     // TODO: Implement logic for this
     pub hop_count: u8,
 }
 
 /// Any radio wanting to be a node, has to be able to transmit and receive
-pub trait MHNode<const N: usize> {
+pub trait MHNode<const SIZE: usize> {
     type Error;
     type Connection;
     type Duration;
 
     /// Takes an MHPacket with a size for the user defined payload. This will be sent to the
     /// appropriate destination_id
-    fn transmit(&mut self, packet: MHPacket<N>) -> impl Future<Output = Result<(), Self::Error>>;
+    fn transmit(&mut self, packet: MHPacket<SIZE>)
+    -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Function needed for this lib, for multi hop communication.
     /// The conn and receiving_buffer might be too LoRa specific, so it might change
@@ -56,11 +57,11 @@ pub trait MHNode<const N: usize> {
         &mut self,
         conn: Self::Connection,
         receiving_buffer: &[u8],
-    ) -> impl Future<Output = Result<MHPacket<N>, Self::Error>>;
+    ) -> impl Future<Output = Result<MHPacket<SIZE>, Self::Error>>;
 
     fn listen(
         &mut self,
-        rec_buf: &mut [u8; N],
+        rec_buf: &mut [u8; SIZE],
         with_timeout: bool,
     ) -> impl Future<Output = Result<Self::Connection, Self::Error>>;
 }

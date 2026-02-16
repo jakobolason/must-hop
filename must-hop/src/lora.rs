@@ -7,8 +7,8 @@ use lora_phy::mod_params::{PacketStatus, RadioError};
 use lora_phy::mod_traits::RadioKind;
 use lora_phy::{DelayNs, LoRa, RxMode};
 
-use defmt::{error, trace, warn};
-use embassy_time::{Duration, Instant, Timer};
+use defmt::{error, trace};
+use embassy_time::Instant;
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +46,7 @@ pub enum RadioState {
 
 /// A node implementatino for lora, where a LoRa interface variant type has to be implemented to
 /// use. An IV for a SX126x is shown in `/examples`
-pub struct LoraNode<'a, RK, DLY, const N: usize>
+pub struct LoraNode<'a, RK, DLY, const SIZE: usize>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -58,7 +58,7 @@ where
     radio_state: RadioState,
 }
 
-impl<RK, DLY, const N: usize> MHNode<N> for LoraNode<'_, RK, DLY, N>
+impl<RK, DLY, const SIZE: usize> MHNode<SIZE> for LoraNode<'_, RK, DLY, SIZE>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -68,7 +68,7 @@ where
     type Duration = u16;
 
     // Should transform to Tx if in Rx
-    async fn transmit(&mut self, packet: MHPacket<N>) -> Result<(), RadioError> {
+    async fn transmit(&mut self, packet: MHPacket<SIZE>) -> Result<(), RadioError> {
         // TODO: Is this necessary?
         let now = Instant::now();
 
@@ -130,7 +130,7 @@ where
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
         receiving_buffer: &[u8],
-    ) -> Result<MHPacket, RadioError> {
+    ) -> Result<MHPacket<SIZE>, RadioError> {
         // First we check if we actually got something
         let (len, rx_pkt_status) = match conn {
             Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
@@ -146,7 +146,7 @@ where
 
         // Try to unpack the buffer into expected packet
         let valid_data = &receiving_buffer[..len as usize];
-        let packet = match from_bytes::<MHPacket>(valid_data) {
+        let packet = match from_bytes::<MHPacket<SIZE>>(valid_data) {
             Ok(packet) => packet,
             Err(e) => {
                 error!("Deserialization failed: {:?}", e);
@@ -164,7 +164,7 @@ where
 
     async fn listen(
         &mut self,
-        rec_buf: &mut [u8; N],
+        rec_buf: &mut [u8; SIZE],
         with_timeout: bool,
     ) -> Result<Self::Connection, RadioError> {
         // if let RadioState::Tx = self.radio_state {
