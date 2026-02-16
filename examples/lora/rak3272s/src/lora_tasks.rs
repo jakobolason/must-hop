@@ -11,14 +11,10 @@ use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel};
 use embassy_time::Delay;
 
 use embassy_stm32::mode::Async;
-use heapless::Vec;
 use lora_phy::LoRa;
 use lora_phy::sx126x::Stm32wl;
 use lora_phy::sx126x::Sx126x;
-use must_hop::{
-    node::{MHPacket, PacketType},
-    tasks::lora,
-};
+use must_hop::tasks::lora;
 use postcard::to_slice;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -44,21 +40,22 @@ pub struct SensorData {
 }
 
 // TODO: Shuold not use this, only for prototyping
-impl From<SensorData> for MHPacket {
+impl From<SensorData> for [u8; MAX_PACK_LEN] {
     fn from(data: SensorData) -> Self {
         let mut buffer = [0u8; MAX_PACK_LEN];
-        let used_slice = to_slice(&data, &mut buffer).expect("Coudl not serialize sensor data");
-        let payload_bytes =
-            Vec::from_slice(used_slice).expect("could not get vec, sensor data was too large");
-
-        Self {
-            destination_id: 1,
-            source_id: 2,
-            packet_id: 3,
-            packet_type: PacketType::Data,
-            payload: payload_bytes,
-            hop_count: 0,
-        }
+        to_slice(&data, &mut buffer).expect("Could not serialize sensor data");
+        buffer
+        // let payload_bytes =
+        //     Vec::from_slice(used_slice).expect("could not get vec, sensor data was too large");
+        //
+        // Self {
+        //     destination_id: 1,
+        //     source_id: 2,
+        //     packet_id: 3,
+        //     packet_type: PacketType::Data,
+        //     payload: payload_bytes,
+        //     hop_count: 0,
+        // }
     }
 }
 

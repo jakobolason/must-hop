@@ -204,10 +204,14 @@ impl<const SIZE: usize> NetworkManager<SIZE> {
         let mut to_send: Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS> = Vec::new();
         let mut commands: Vec<MHPacket<SIZE>, MAX_AMOUNT_PACKETS> = Vec::new();
         for pkt in pkts {
-            match self.receive_packet(pkt) {
+            let _ = match self.receive_packet(pkt) {
                 Ok(Some(packet)) => match packet.1 {
-                    PayloadType::Data => to_send.push(packet.0),
-                    PayloadType::Command => commands.push(packet.0),
+                    PayloadType::Data => to_send
+                        .push(packet.0)
+                        .map_err(|e| error!("Error pusing to to_send: {:?}", e)),
+                    PayloadType::Command => commands
+                        .push(packet.0)
+                        .map_err(|e| error!("Error pusing to commands: {:?}", e)),
                 },
                 Ok(None) => continue,
                 Err(e) => {
