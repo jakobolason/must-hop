@@ -7,7 +7,11 @@ use lora_phy::mod_params::{PacketStatus, RadioError};
 use lora_phy::mod_traits::RadioKind;
 use lora_phy::{DelayNs, LoRa, RxMode};
 
+#[cfg(not(feature = "in_std"))]
 use defmt::{error, trace};
+#[cfg(feature = "in_std")]
+use log::{error, trace};
+
 use embassy_time::Instant;
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
@@ -143,7 +147,7 @@ where
                 }
             },
         };
-        trace!("rx successful, pkt status: {:?}", rx_pkt_status);
+        // trace!("rx successful, pkt status: {:?}", rx_pkt_status);
 
         // Try to unpack the buffer into expected packet
         let valid_data = &receiving_buffer[..len as usize];

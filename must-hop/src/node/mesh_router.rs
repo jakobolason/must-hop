@@ -1,10 +1,13 @@
+#[cfg(not(feature = "in_std"))]
 use defmt::trace;
-use heapless::Vec;
+#[cfg(feature = "in_std")]
+use log::trace;
 
 use super::{
     MHNode, MHPacket, PacketType,
     network_manager::{LEN, NetworkManager, NetworkManagerError},
 };
+use heapless::Vec;
 
 #[derive(Debug, defmt::Format)]
 pub enum MeshRouterError<E> {
@@ -58,15 +61,16 @@ where
     }
 
     // Use to send data over the network
-    // pub async fn send_payload(
-    //     &mut self,
-    //     payload: Vec<u8, SIZE>,
-    // ) -> Result<(), MeshRouterError<Node::Error>> {
-    //     let timeouted_pkts = self.manager.payload_to_send(payload, 2)?;
-    //     trace!("Sending {} packets!", timeouted_pkts.len());
-    //
-    //     self.send_packets(timeouted_pkts).await
-    // }
+    pub async fn send_payload(
+        &mut self,
+        payload: Vec<u8, SIZE>,
+        destination: u8,
+    ) -> Result<(), MeshRouterError<Node::Error>> {
+        let timeouted_pkts = self.manager.payload_to_send(payload, destination)?;
+        trace!("Sending {} packets!", timeouted_pkts.len());
+
+        self.send_packets(timeouted_pkts).await
+    }
 
     async fn send_packets(
         &mut self,

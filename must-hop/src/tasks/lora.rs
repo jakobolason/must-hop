@@ -1,4 +1,7 @@
-use defmt::{error, info, trace};
+#[cfg(not(feature = "in_std"))]
+use defmt::{error, info};
+#[cfg(feature = "in_std")]
+use log::{error, info};
 
 use embassy_futures::select::{Either, select};
 use embassy_sync::channel;
@@ -48,7 +51,7 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
         match either {
             Either::First(data) => {
                 info!("SENSOR DATA won");
-                if let Err(e) = router.send_payload(data.into()).await {
+                if let Err(e) = router.send_payload(data.into(), 5).await {
                     error!("Error in transmitting sensor data: {:?}", e);
                     continue;
                 }

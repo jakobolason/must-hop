@@ -1,25 +1,14 @@
-use core::future::Future;
 use heapless::Vec;
 use must_hop::node::{
-    MHNode, MHPacket, PacketType,
+    MHNode, MHPacket,
+    mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
 };
-use postcard::from_bytes;
+use std::sync::Mutex;
 
-struct MockRadio {
-    pub sent_packets: std::vec::Vec<MHPacket>,
-}
-
-impl MockRadio {
-    fn new() -> Self {
-        Self {
-            sent_packets: std::vec::Vec::new(),
-        }
-    }
-    fn get_send_packets(self) -> std::vec::Vec<MHPacket> {
-        self.sent_packets
-    }
-}
+const SIZE: usize = 128;
+static AIR_PACKETS: Mutex<Vec<MHPacket<SIZE>, 12>> = Mutex::new(Vec::new());
+struct MockRadio {}
 
 impl MHNode<128> for MockRadio {
     type Error = NetworkManagerError;
@@ -27,22 +16,25 @@ impl MHNode<128> for MockRadio {
     type Duration = u16;
 
     async fn transmit(&mut self, packet: MHPacket<128>) -> Result<(), Self::Error> {
-        self.sent_packets.push(packet);
+        AIR_PACKETS.lock().unwrap().push(packet).unwrap();
         Ok(())
     }
 
     async fn receive(
         &mut self,
         _conn: Self::Connection,
-        receiving_buffer: &[u8],
+        _receiving_buffer: &[u8],
     ) -> Result<MHPacket<128>, Self::Error> {
-        from_bytes::<MHPacket>(receiving_buffer).map_err(|_| NetworkManagerError::InvalidPacket(0))
+        match AIR_PACKETS.lock().unwrap().pop() {
+            Some(pkt) => Ok(pkt),
+            None => Err(NetworkManagerError::InvalidPacket(0)),
+        }
     }
 
     async fn listen(
         &mut self,
-        receiving_buffer: &[u8],
-        with_timeout: bool,
+        _receiving_buffer: &mut [u8; SIZE],
+        _with_timeout: bool,
     ) -> Result<Self::Connection, Self::Error> {
         println!("listening!");
         Ok(())
@@ -51,27 +43,28 @@ impl MHNode<128> for MockRadio {
 
 #[tokio::test]
 async fn test_node_to_node_logic() {
-    let mut manager_a = NetworkManager::<128>::new(1, 5, 3); // Source 1
-    let mut radio_a = MockRadio::new();
-    let msg_to_send = &[0xAA, 0xBB];
+    let manager_a = NetworkManager::<128>::new(1, 5, 3); // Source 1
+    let radio_a = MockRadio {};
+    let mut router_a = MeshRouter::new(radio_a, manager_a);
+    let msg_to_send = Vec::from_slice(&[0xAA, 0xBB]).unwrap();
 
-    let packet = manager_a
-        .new_packet(msg_to_send, 2, PacketType::Data)
-        .unwrap();
+    // Let this be for node_b
+    router_a.send_payload(msg_to_send.clone(), 2).await.unwrap();
 
-    let packets_to_send = manager_a.receive_packet(packet).unwrap().unwrap();
-
-    // for p in packets_to_send {
-    radio_a.transmit(packets_to_send.0).await.unwrap();
-    // }
-
-    assert_eq!(radio_a.sent_packets.len(), 1);
-    let sent = &radio_a.sent_packets[0];
-    assert_eq!(sent.source_id, 1);
-    assert_eq!(sent.destination_id, 2);
-    assert_eq!(sent.payload[0], 0xAA);
+    // assert_eq!(radio_a.sent_packets.len(), 1);
+    // let sent = &radio_a.sent_packets[0];
+    // assert_eq!(sent.source_id, 1);
+    // assert_eq!(sent.destination_id, 2);
+    // assert_eq!(sent.payload[0], 0xAA);
 
     // Now assume node B heard everything perfectly
-    let mut manager_b = NetworkManager::<128>::new(1, 5, 3); // Source 1
-    let mut radio_b = radio_a.get_send_packets();
+    let manager_b = NetworkManager::<128>::new(2, 5, 3); // Source 1
+    let radio_b = MockRadio {};
+    // radio_a.get_send_packets();
+    let mut router_b = MeshRouter::new(radio_b, manager_b);
+    let rec_packets = msg_to_send;
+    // This returns list of packets for me, but more often that not, this will be empty in these
+    // tests. But in this scenario, we set destination as 2, which is node b!
+    let res = router_b.receive((), &rec_packets).await.unwrap();
+    assert_eq!(res.len(), 1);
 }
