@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{error, llg};
-use std::{convert::TryFrom, fmt, time};
+use std::{convert::TryFrom, fmt, os::raw::c_char, time};
 
 const MOD_LORA: u8 = 0x10;
 const MOD_FSK: u8 = 0x20;
@@ -206,7 +206,7 @@ impl From<BoardConf> for llg::lgw_conf_board_s {
             clksrc: other.clksrc as u8,
             full_duplex: false,
             com_type: other.com_type as u32,
-            com_path,
+            com_path: com_path.map(|b| b as c_char),
         }
     }
 }

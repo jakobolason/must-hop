@@ -1,0 +1,69 @@
+# Checks library code on PC 
+[jobs.check]
+command = [
+  "cargo",
+  "check",
+  "-p",
+  "must-hop",
+  "-p",
+  "must-gw",
+  "--features",
+  "in_std",
+]
+need_stdout = false
+
+# Runs lints on the Host
+[jobs.clippy]
+command = [
+  "cargo",
+  "clippy",
+  "-p",
+  "must-hop",
+  "-p",
+  "must-gw",
+  "--features",
+  "in_std",
+  "--",
+  "-D",
+  "warnings",
+]
+need_stdout = false
+
+#  Runs unit tests on Host
+[jobs.test]
+command = ["cargo", "test", "-p", "must-hop", "--features", "in_std"]
+need_stdout = true
+
+# 4. EXAMPLES (ESP32): strictly checks if the embedded example compiles
+# We do NOT use "in_std" here because we want to verify the firmware build.
+# We MUST use --target because cargo is running from root.
+[jobs.ble]
+command = [
+  "cargo",
+  "check",
+  "--manifest-path",
+  "examples/ble/esp32c6/Cargo.toml",
+  "--target",
+  "riscv32imac-unknown-none-elf",
+]
+need_stdout = false
+watch = ["examples/ble/esp32c6"]
+
+[jobs.lora]
+command = [
+  "cargo",
+  "check",
+  "--manifest-path",
+  "examples/lora/rak3272s/Cargo.toml",
+  "--target",
+  "thumbv7em-none-eabi",
+]
+need_stdout = false
+watch = ["examples/lora/rak3272s"]
+
+# Check Raspberry Pi Wrapper (loragw)
+# If you applied the `c_char` fix I mentioned in the previous turn,
+# you can actually check this on your PC now!
+[jobs.gw]
+command = ["cargo", "check", "-p", "loragw"]
+need_stdout = false

@@ -44,6 +44,8 @@ fn main() {
         .file("vendor/sx1302_hal/libloragw/src/sx1261_usb.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_lbt.c")
         .file("vendor/sx1302_hal/libloragw/src/loragw_mcu.c")
+        // NOTE: There are many warnings from this
+        .warnings(false)
         .compile("loragw");
 
     let target = env::var("TARGET").expect("TARGET environment variable not set");

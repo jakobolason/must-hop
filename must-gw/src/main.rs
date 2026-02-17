@@ -3,6 +3,8 @@ use loragw::{
 };
 use must_hop::{lora::SensorData, node::MHPacket};
 
+const SIZE: usize = 128;
+
 fn create_concentrator() -> Result<Concentrator<Running>, Error> {
     let conf = Config::from_str_or_default(None)?;
 
@@ -85,7 +87,7 @@ fn main() {
                 _ => continue,
             };
             let raw_bytes = pkt.payload;
-            let mh_pack = match postcard::from_bytes::<MHPacket>(&raw_bytes) {
+            let mh_pack = match postcard::from_bytes::<MHPacket<SIZE>>(&raw_bytes) {
                 Ok(packet) => packet,
                 Err(e) => {
                     eprintln!("Error deserializing MHPacket: {:?}", e);
