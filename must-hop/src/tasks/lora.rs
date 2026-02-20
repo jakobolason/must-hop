@@ -51,7 +51,8 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize, const LEN: usize>(
         match either {
             Either::First(data) => {
                 info!("SENSOR DATA won");
-                if let Err(e) = router.send_payload(data.into(), 5).await {
+                // destination 0 is the gateway
+                if let Err(e) = router.send_payload(data.into(), 0).await {
                     error!("Error in transmitting sensor data: {:?}", e);
                     continue;
                 }

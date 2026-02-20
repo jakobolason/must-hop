@@ -46,6 +46,7 @@ For more information, visit the [docs](https://probe.rs/docs/tools/#serve)
   - [x] MHNode and NetworkManager define some of the functionality required
 - [ ] medium-access-control somehow handled
   - [ ] use `lora.cad` for channel activity detection
+  - [ ] Perhaps TDMA to let nodes sleep for a duration
 - [ ] Messages can be passed on to another node
   - [x] Define how each packet looks (MHPacket)
   - [ ] Algorithm to determine what way to send it
@@ -57,8 +58,11 @@ This project should also be tested, to get some valuable measurements to provide
 - [ ] Testing functionality
   - [ ] Unit tests
     - [x] Initial ones for NetworkManager
+    - [ ] MeshRouter
   - [ ] Integration tests
     - [x] Initial tests for 1 node for now
+    - [x] Simulations of multiple nodes and how packages propagate
+    - [ ] Hardware-In-Loop (HIL) tests
   - [ ] Amount of errors over time
   - [ ] Durability test, can it run for a week straight?
   - [ ] How many messages per minute can be transmitted?
