@@ -1,7 +1,11 @@
+use core::marker::PhantomData;
+
 #[cfg(not(feature = "in_std"))]
 use defmt::trace;
 #[cfg(feature = "in_std")]
 use log::trace;
+
+use crate::node::policy::{NodePolicy, RoutingPolicy};
 
 use super::{
     MHNode, MHPacket,
@@ -31,21 +35,28 @@ impl<E> From<NetworkManagerError> for MeshRouterError<E> {
 /// managing the logic necessary to send and receive packets, but the user does not have to think
 /// about how packets are received and sent on, if they are not for them.
 /// Handles the flow of packets
-pub struct MeshRouter<Node, const SIZE: usize, const LEN: usize>
+pub struct MeshRouter<Node, const SIZE: usize, const LEN: usize, Policy = NodePolicy>
 where
     Node: MHNode<SIZE, LEN>,
+    Policy: RoutingPolicy<SIZE, LEN>,
 {
     node: Node,
     manager: NetworkManager<SIZE, LEN>,
+    policy: Policy,
 }
 
-impl<Node, const SIZE: usize, const LEN: usize> MeshRouter<Node, SIZE, LEN>
+impl<Node, Policy, const SIZE: usize, const LEN: usize> MeshRouter<Node, SIZE, LEN, Policy>
 where
     Node: MHNode<SIZE, LEN>,
+    Policy: RoutingPolicy<SIZE, LEN>,
 {
     /// Takes ownership of a node and network manager, because this handles those
-    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>) -> Self {
-        Self { node, manager }
+    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>, policy: Policy) -> Self {
+        Self {
+            node,
+            manager,
+            policy,
+        }
     }
 
     /// Use to await another node's communication, and can be used in a select or join
@@ -98,9 +109,7 @@ where
             .map_err(MeshRouterError::Node)?;
         trace!("Done receiving, handling {} pkts", pkts.len());
 
-        // If 1 package or multiple packets should be sent on:
-        // let NM get these logged, and perhaps add any timed out packets
-        let (to_send, my_pkt) = self.manager.handle_packets(pkts)?;
+        let (to_send, my_pkt) = Policy::process_packets(&mut self.manager, pkts)?;
         trace!("GOT {} packets for me!", my_pkt.len());
         trace!("GOT {} packets which should be sent on!", to_send.len());
         self.send_packets(to_send).await?;

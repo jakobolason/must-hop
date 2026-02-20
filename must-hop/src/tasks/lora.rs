@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::{
     lora::{LoraNode, TransmitParameters},
-    node::{mesh_router::MeshRouter, network_manager::NetworkManager},
+    node::{mesh_router::MeshRouter, network_manager::NetworkManager, policy::NodePolicy},
 };
 
 use lora_phy::{DelayNs, LoRa};
@@ -39,7 +39,7 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize, const LEN: usize>(
         }
     };
     let nm = NetworkManager::<SIZE, LEN>::new(source_id, timeout, max_retries);
-    let mut router = MeshRouter::new(node, nm);
+    let mut router = MeshRouter::new(node, nm, NodePolicy);
     loop {
         info!("In lora task loop");
 
