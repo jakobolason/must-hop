@@ -179,3 +179,39 @@ async fn test_multiple_packets_fifo_order() {
     // Third receive
     assert_eq!(res1[2].payload[0], 0x03, "Should receive msg3 third");
 }
+
+#[tokio::test]
+async fn test_send_and_ack() {
+    let air = create_air();
+    let mut router_a = MeshRouter::new(
+        MockRadio { air: air.clone() },
+        NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+    );
+    let mut router_b = MeshRouter::new(
+        MockRadio { air: air.clone() },
+        NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+    );
+    let msg1 = Vec::from_slice(&[0x01]).unwrap();
+    // let msg2 = Vec::from_slice(&[0x02]).unwrap();
+    // let msg3 = Vec::from_slice(&[0x03]).unwrap();
+
+    router_a.send_payload(msg1, 3).await.unwrap();
+    assert_eq!(router_a.get_pending_count(), 1);
+    // router_a.send_payload(msg2, 3).await.unwrap();
+    // assert_eq!(router_a.get_pending_count(), 2);
+    // router_a.send_payload(msg3, 3).await.unwrap();
+    // assert_eq!(router_a.get_pending_count(), 3);
+    //
+    // Node B now receives these
+    let res1 = router_b.receive((), &[]).await.unwrap();
+    // These packages were not meant for us, so we should not receive anything here
+    assert_eq!(res1.len(), 0);
+    // But router b should have send a new package, and have a pending ack
+    assert_eq!(router_b.get_pending_count(), 1);
+    // And shoul've also sent a package over the air, which router A can receive
+
+    let res2 = router_a.receive((), &[]).await.unwrap();
+    assert_eq!(res2.len(), 0);
+    // And node A should've removed the package now
+    assert_eq!(router_a.get_pending_count(), 0);
+}
