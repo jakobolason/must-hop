@@ -73,8 +73,18 @@ run-rak:
 remote-rak:
     @echo "Flashing remotely to Pi..."
     cd examples/lora/rak3272s && \
-    CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN" \
+    CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
+    --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN" \
     cargo run --release --bin main
+
+[group('examples')]
+attach-remote:
+    @echo "Attaching to remote"
+    cd examples/lora/rak3272s && probe-rs attach \
+        --chip STM32WLE5CC \
+        --host ws://100.71.152.5:3000 \
+        --token="$PROBE_TOKEN" \
+        target/thumbv7em-none-eabi/release/main
 
 # Build the SX1302 Gateway example (Host)
 [group('examples')]
