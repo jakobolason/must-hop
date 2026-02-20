@@ -18,7 +18,7 @@ use lora_phy::{DelayNs, LoRa};
 use lora_phy::mod_traits::RadioKind;
 
 // TODO: Ensure SIZE and MAX_PACKET_SIZE are the same
-pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
+pub async fn lora_task<RK, DLY, T, M, const SIZE: usize, const LEN: usize>(
     lora: &mut LoRa<RK, DLY>,
     channel: channel::Receiver<'static, M, T, 3>,
     tp: TransmitParameters,
@@ -38,7 +38,7 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize>(
             return;
         }
     };
-    let nm = NetworkManager::<SIZE>::new(source_id, timeout, max_retries);
+    let nm = NetworkManager::<SIZE, LEN>::new(source_id, timeout, max_retries);
     let mut router = MeshRouter::new(node, nm);
     loop {
         info!("In lora task loop");

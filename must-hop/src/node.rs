@@ -17,8 +17,6 @@ pub mod network_manager;
 pub enum PacketType {
     /// To send just a single packet
     Data,
-    /// u8 denotes the amount of packages (UP TO 8)
-    DataStream(u8),
     /// Payload should be bitmask of received packets
     Ack,
 }
@@ -41,15 +39,17 @@ pub struct MHPacket<const SIZE: usize> {
 }
 
 /// Any radio wanting to be a node, has to be able to transmit and receive
-pub trait MHNode<const SIZE: usize> {
+pub trait MHNode<const SIZE: usize, const LEN: usize> {
     type Error;
     type Connection;
     type Duration;
 
     /// Takes an MHPacket with a size for the user defined payload. This will be sent to the
     /// appropriate destination_id
-    fn transmit(&mut self, packet: MHPacket<SIZE>)
-    -> impl Future<Output = Result<(), Self::Error>>;
+    fn transmit(
+        &mut self,
+        packet: &[MHPacket<SIZE>],
+    ) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Function needed for this lib, for multi hop communication.
     /// The conn and receiving_buffer might be too LoRa specific, so it might change
@@ -57,7 +57,8 @@ pub trait MHNode<const SIZE: usize> {
         &mut self,
         conn: Self::Connection,
         receiving_buffer: &[u8],
-    ) -> impl Future<Output = Result<MHPacket<SIZE>, Self::Error>>;
+    ) -> impl Future<Output = Result<Vec<MHPacket<SIZE>, LEN>, Self::Error>>;
+    // TODO: Make the 5 a generic
 
     fn listen(
         &mut self,
