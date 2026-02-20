@@ -13,11 +13,14 @@ use defmt::{error, trace};
 use log::{error, trace};
 
 use embassy_time::Instant;
+use heapless::Vec;
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
 // Approximately 1 second?
 const RECEIVE_TIMEOUT: u16 = 100;
+// TODO: Should this be a const generic for the user to set? Perhaps a default value?
+const TRANSMISSION_BUFFER: usize = 256; // The radio can receive 256 bytes to transmit
 
 /// Example of payload
 #[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format)]
@@ -47,10 +50,9 @@ pub enum RadioState {
     Rx,
     Tx,
 }
-
 /// A node implementatino for lora, where a LoRa interface variant type has to be implemented to
 /// use. An IV for a SX126x is shown in `/examples`
-pub struct LoraNode<'a, RK, DLY, const SIZE: usize>
+pub struct LoraNode<'a, RK, DLY, const SIZE: usize, const LEN: usize>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -61,7 +63,8 @@ where
     mdltn_params: ModulationParams,
 }
 
-impl<RK, DLY, const SIZE: usize> MHNode<SIZE> for LoraNode<'_, RK, DLY, SIZE>
+impl<RK, DLY, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN>
+    for LoraNode<'_, RK, DLY, SIZE, LEN>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -70,15 +73,13 @@ where
     type Connection = Result<(u8, PacketStatus), RadioError>;
     type Duration = u16;
 
-    // Should transform to Tx if in Rx
-    async fn transmit(&mut self, packet: MHPacket<SIZE>) -> Result<(), RadioError> {
-        // TODO: Is this necessary?
+    async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {
         let now = Instant::now();
 
-        // TODO: This should be the const generic max pack len
-        let mut buffer = [0u8; SIZE];
+        // TODO: Can this be made opt-in? Such that individual transmission is possible?
+        let mut buffer = [0u8; TRANSMISSION_BUFFER];
         trace!("BUFFER SIZE IS: {}", SIZE);
-        let used_slice = match to_slice(&packet, &mut buffer) {
+        let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
             Err(e) => {
                 error!("Serialization failed: {:?}", e);
@@ -135,9 +136,9 @@ where
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
         receiving_buffer: &[u8],
-    ) -> Result<MHPacket<SIZE>, RadioError> {
+    ) -> Result<Vec<MHPacket<SIZE>, LEN>, RadioError> {
         // First we check if we actually got something
-        let (len, rx_pkt_status) = match conn {
+        let (len, _rx_pkt_status) = match conn {
             Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
             Err(err) => match err {
                 RadioError::ReceiveTimeout => return Err(err),
@@ -151,7 +152,7 @@ where
 
         // Try to unpack the buffer into expected packet
         let valid_data = &receiving_buffer[..len as usize];
-        let packet = match from_bytes::<MHPacket<SIZE>>(valid_data) {
+        let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(valid_data) {
             Ok(packet) => packet,
             Err(e) => {
                 error!("Deserialization failed: {:?}", e);
@@ -164,7 +165,7 @@ where
         // if (packet.to != me)
         // transmit(lora, packet, tp).await?;
 
-        Ok(packet)
+        Ok(packets)
     }
 
     async fn listen(
@@ -172,9 +173,6 @@ where
         rec_buf: &mut [u8; SIZE],
         with_timeout: bool,
     ) -> Result<Self::Connection, RadioError> {
-        // if let RadioState::Tx = self.radio_state {
-        //     self.prepare_for_rx().await?;
-        // }
         let rec_mode = match with_timeout {
             true => RxMode::Single(RECEIVE_TIMEOUT),
             false => RxMode::Continuous,
@@ -184,7 +182,7 @@ where
     }
 }
 
-impl<'a, RK, DLY, const N: usize> LoraNode<'a, RK, DLY, N>
+impl<'a, RK, DLY, const N: usize, const LEN: usize> LoraNode<'a, RK, DLY, N, LEN>
 where
     RK: RadioKind,
     DLY: DelayNs,

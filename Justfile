@@ -1,4 +1,5 @@
 set shell := ["bash", "-c"]
+set dotenv-load := true
 
 [group('Host builds')]
 build:
@@ -44,6 +45,7 @@ watch-test:
     bacon test
 
 # Build the ESP32C6 BLE example
+
 # Note: Requires riscv32imac-unknown-none-elf target installed
 [group('examples')]
 build-ble:
@@ -55,7 +57,7 @@ build-ble:
 flash-ble:
     cd examples/ble/esp32c6 && cargo espflash flash --monitor
 
-# Build the RAK3272s LoRa example 
+# Build the RAK3272s LoRa example
 [group('examples')]
 build-rak:
     @echo "Building RAK3272s LoRa example..."
@@ -66,6 +68,23 @@ build-rak:
 run-rak:
     @echo "Running RAK3272s LoRa example ..."
     cd examples/lora/rak3272s && cargo run --release --bin main
+
+[group('examples')]
+remote-rak:
+    @echo "Flashing remotely to Pi..."
+    cd examples/lora/rak3272s && \
+    CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
+    --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN" \
+    cargo run --release --bin main
+
+[group('examples')]
+attach-remote:
+    @echo "Attaching to remote"
+    cd examples/lora/rak3272s && probe-rs attach \
+        --chip STM32WLE5CC \
+        --host ws://100.71.152.5:3000 \
+        --token="$PROBE_TOKEN" \
+        target/thumbv7em-none-eabi/release/main
 
 # Build the SX1302 Gateway example (Host)
 [group('examples')]

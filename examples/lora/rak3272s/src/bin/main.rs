@@ -64,6 +64,7 @@ async fn main(spawner: Spawner) {
 
     let spi = Spi::new_subghz(p.SUBGHZSPI, p.DMA1_CH1, p.DMA1_CH2);
     let spi = SubghzSpiDevice(spi);
+    // TODO: Can it work wit low power?
     let use_high_power_pa = true;
     let config = sx126x::Config {
         chip: Stm32wl { use_high_power_pa },
@@ -118,7 +119,10 @@ async fn sensor_task(
     }
 }
 
-const MAX_PACK_LEN: usize = 128;
+/// From the study, sensor data will likely be between 20-40 bytes per transmission
+const MAX_PACK_LEN: usize = 40;
+// const MAX_RADIO_BUFFER: usize = 256; // kB
+const LEN: usize = 5; // floor(256/MAX_PACK_LEN)
 
 #[embassy_executor::task]
 pub async fn lora_task(
@@ -139,8 +143,8 @@ pub async fn lora_task(
         crc: true,
         iq: false,
     };
-    let source_id = 3;
-    lora::lora_task(&mut lora, channel, tp, source_id, 3, 3).await;
+    let source_id = 1;
+    lora::lora_task::<_, _, _, _, MAX_PACK_LEN, LEN>(&mut lora, channel, tp, source_id, 3, 3).await;
 }
 
 // This creates the task which checks for sensor data

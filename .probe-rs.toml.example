@@ -1,0 +1,6 @@
+[server]
+address = "100.0.0.0" # For a tailscale subnet
+
+[[server.users]]
+name= = "myname"
+token = "my-very-secret-token"

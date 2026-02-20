@@ -26,6 +26,13 @@ The goal is to have 2 working examples, one with the ESP32-C6 dev board, which u
 
 The other example is using the RAK3272s board, which is a board for the RAK3172 which has a STM32WLE5CC and a SemTech 1262 LoRa radio. Here, lora-rs packages are used to provide low-level drivers, and the goal is to create an implementation of the MHNode traits for LoRa without making MHNode to closely coupled to LoRa, perhaps impossible.
 
+A Justfile has been introduced to ease the use of handling the examples for this project, and to document the different ways of running the examples. To view all available options, run `just -l`, and then to run it, is `just run-rak` to run the RAK3272s example.
+
+### Probe-rs server
+
+Probe-rs is a very powerful tool, and by compiling probe-rs with the `server` feature flag, it is possible to run `probe-rs serve` on a remote host, and connect to that server on your local machine. With this, it is possible to launch programs and flash to a device, as if you were directly connected to it
+For more information, visit the [docs](https://probe.rs/docs/tools/#serve)
+
 ## Roadmap
 
 - [x] Firmware for RAK3272s
@@ -36,9 +43,10 @@ The other example is using the RAK3272s board, which is a board for the RAK3172 
   - [ ] Have a nice dashboard kind of, to see information
 - [ ] central, peripheral, runner abstraction for LoRa
   - [ ] Or, use traits to define a transmit and receive function
-  - [x] MHNode and NetworkManager define some of the functionlaity required
+  - [x] MHNode and NetworkManager define some of the functionality required
 - [ ] medium-access-control somehow handled
   - [ ] use `lora.cad` for channel activity detection
+  - [ ] Perhaps TDMA to let nodes sleep for a duration
 - [ ] Messages can be passed on to another node
   - [x] Define how each packet looks (MHPacket)
   - [ ] Algorithm to determine what way to send it
@@ -50,8 +58,11 @@ This project should also be tested, to get some valuable measurements to provide
 - [ ] Testing functionality
   - [ ] Unit tests
     - [x] Initial ones for NetworkManager
+    - [ ] MeshRouter
   - [ ] Integration tests
     - [x] Initial tests for 1 node for now
+    - [x] Simulations of multiple nodes and how packages propagate
+    - [ ] Hardware-In-Loop (HIL) tests
   - [ ] Amount of errors over time
   - [ ] Durability test, can it run for a week straight?
   - [ ] How many messages per minute can be transmitted?
