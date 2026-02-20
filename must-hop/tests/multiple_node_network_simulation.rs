@@ -122,7 +122,7 @@ async fn test_mesh_topology() {
 
     let mut router_a = MeshRouter::new(
         MockRadio {
-            node_id: 1,
+            node_id: node_a,
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
@@ -130,7 +130,7 @@ async fn test_mesh_topology() {
 
     let mut router_b = MeshRouter::new(
         MockRadio {
-            node_id: 2,
+            node_id: node_b,
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
@@ -138,7 +138,7 @@ async fn test_mesh_topology() {
 
     let mut router_c = MeshRouter::new(
         MockRadio {
-            node_id: 3,
+            node_id: node_c,
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(3, 5, 3),
@@ -148,6 +148,79 @@ async fn test_mesh_topology() {
 
     router_a.send_payload(msg1, 3).await.unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
+
+    // Node B now receives these
+    let res1 = router_b.receive((), &[]).await.unwrap();
+    // These packages were not meant for us, so we should not receive anything here
+    assert_eq!(res1.len(), 0);
+    // But router b should have send a new package, and have a pending ack
+    assert_eq!(router_b.get_pending_count(), 1);
+    // And shoul've also sent a package over the air, which router A can receive
+
+    let res2 = router_a.receive((), &[]).await.unwrap();
+    assert_eq!(res2.len(), 0);
+    // And node A should've removed the package now
+    assert_eq!(router_a.get_pending_count(), 0);
+
+    // Router C should've also received it, and since this is for it, it receives the data
+    let res3 = router_c.receive((), &[]).await.unwrap();
+    assert_eq!(res3.len(), 1);
+    // And does not send it on
+    assert_eq!(router_c.get_pending_count(), 0);
+}
+
+#[tokio::test]
+async fn test_node_b_to_node_d() {
+    let env = Arc::new(Mutex::new(SimulationEnv::new()));
+    let node_a = 1;
+    let node_b = 2;
+    let node_c = 3;
+    let node_d = 4;
+
+    {
+        let mut e = env.lock().unwrap();
+        // (A) <-> (B) <-> (C) <-> (D)
+        e.add_bidi_link(node_a, node_b);
+        e.add_bidi_link(node_b, node_c);
+        e.add_bidi_link(node_c, node_d);
+    }
+
+    let mut router_a = MeshRouter::new(
+        MockRadio {
+            node_id: node_a,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+    );
+
+    let mut router_b = MeshRouter::new(
+        MockRadio {
+            node_id: node_b,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+    );
+
+    let mut router_c = MeshRouter::new(
+        MockRadio {
+            node_id: node_c,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+    );
+
+    let mut router_d = MeshRouter::new(
+        MockRadio {
+            node_id: node_d,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+    );
+
+    let msg1 = Vec::from_slice(&[0x01]).unwrap();
+
+    router_b.send_payload(msg1, 3).await.unwrap();
+    assert_eq!(router_b.get_pending_count(), 1);
 
     // Node B now receives these
     let res1 = router_b.receive((), &[]).await.unwrap();

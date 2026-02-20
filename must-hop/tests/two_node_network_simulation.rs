@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex};
 
 const SIZE: usize = 40;
 const LEN: usize = 5;
-// static AIR_PACKETS: Mutex<Vec<MHPacket<SIZE>, 12>> = Mutex::new(Vec::new());
 struct MockRadio {
     air: Arc<Mutex<Vec<MHPacket<SIZE>, 12>>>,
 }
@@ -39,7 +38,6 @@ impl MHNode<SIZE, LEN> for MockRadio {
             if rec_vec.is_full() {
                 break;
             }
-            // FIFO: Remove the first element (oldest), shifting others down
             rec_vec.push(air.remove(0)).unwrap();
         }
         Ok(rec_vec)
@@ -81,65 +79,6 @@ async fn test_node_to_node_logic() {
     // tests. But in this scenario, we set destination as 2, which is node b!
     let res = router_b.receive((), &rec_packets).await.unwrap();
     assert_eq!(res.len(), 1);
-}
-
-#[tokio::test]
-async fn test_forwarding_and_passive_ack() {
-    let air = create_air();
-    // Scenario: Node A (1) -> Node B (2) -> Node C (3)
-    // Node A sends to C. B is the intermediate hop.
-
-    let mut router_a = MeshRouter::new(
-        MockRadio { air: air.clone() },
-        NetworkManager::<SIZE, LEN>::new(1, 5, 3),
-    );
-    let mut router_b = MeshRouter::new(
-        MockRadio { air: air.clone() },
-        NetworkManager::<SIZE, LEN>::new(2, 5, 3),
-    );
-
-    // 1. A sends packet to C (Destination 3)
-    let msg = Vec::from_slice(&[0xCA, 0xFE]).unwrap();
-    router_a.send_payload(msg.clone(), 3).await.unwrap();
-
-    // CHECK: A should have 1 pending packet waiting for confirmation
-    assert_eq!(
-        router_a.get_pending_count(),
-        1,
-        "Node A should have packet in pending"
-    );
-
-    // 2. B Receives
-    // B should see dest=3, source=1. Since B!=3, it should NOT return it as a message for B.
-    // Instead, it should automatically queue it for retransmission.
-    let res = router_b.receive((), &[]).await.unwrap();
-    assert_eq!(
-        res.len(),
-        0,
-        "Node B should not process data meant for Node C"
-    );
-
-    // CHECK: Did B put the packet back into the air (retransmit)?
-    {
-        let air = air.lock().unwrap();
-        assert_eq!(air.len(), 1, "B should have retransmitted the packet");
-        assert_eq!(air[0].destination_id, 3); // Dest is still C
-        // Note: Depending on your implementation, source might remain 1 or change to 2.
-        // Usually in mesh, the original source ID is preserved or tracked in a header.
-    }
-
-    // 3. A Listens (Passive ACK)
-    // A listens and hears the packet B just transmitted.
-    // A sees its own packet ID being re-broadcasted by someone else.
-    // This counts as an ACK, so A should remove it from pending.
-    let _ = router_a.receive((), &[]).await.unwrap();
-
-    // CHECK: A's pending list should now be empty
-    assert_eq!(
-        router_a.get_pending_count(),
-        0,
-        "Node A should clear pending after hearing retransmission"
-    );
 }
 
 #[tokio::test]
