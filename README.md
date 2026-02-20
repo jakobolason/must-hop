@@ -31,7 +31,7 @@ A Justfile has been introduced to ease the use of handling the examples for this
 ### Probe-rs server
 
 Probe-rs is a very powerful tool, and by compiling probe-rs with the `server` feature flag, it is possible to run `probe-rs serve` on a remote host, and connect to that server on your local machine. With this, it is possible to launch programs and flash to a device, as if you were directly connected to it
-For more information, visit the (docs)[https://probe.rs/docs/tools/#serve]
+For more information, visit the [docs](https://probe.rs/docs/tools/#serve)
 
 ## Roadmap
 
