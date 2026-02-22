@@ -30,7 +30,7 @@ A Justfile has been introduced to ease the use of handling the examples for this
 
 ### Probe-rs server
 
-Probe-rs is a very powerful tool, and by compiling probe-rs with the `server` feature flag, it is possible to run `probe-rs serve` on a remote host, and connect to that server on your local machine. With this, it is possible to launch programs and flash to a device, as if you were directly connected to it
+Probe-rs is a very powerful tool, and by compiling probe-rs with the `server` feature flag, it is possible to run `probe-rs serve` on a remote host, and connect to that server on your local machine. With this, it is possible to launch programs and flash to a device, as if you were directly connected to it. This is utilized in this project, where `just remote-rak` runs the RAK3272s example but connects to a Raspberry Pi using Tailscale and lets probe-rs handle the authentication and flashing of my request.
 For more information, visit the [docs](https://probe.rs/docs/tools/#serve)
 
 ## Roadmap
@@ -66,3 +66,8 @@ This project should also be tested, to get some valuable measurements to provide
   - [ ] Amount of errors over time
   - [ ] Durability test, can it run for a week straight?
   - [ ] How many messages per minute can be transmitted?
+
+### Tools to use later
+
+`cargo-bloab`: Find out what takes most of the space in your executable
+`cargo-call-stack`: Static, Analyze program stack usage

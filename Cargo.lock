@@ -738,6 +738,7 @@ dependencies = [
  "must-hop",
  "postcard",
  "rppal",
+ "tokio",
 ]
 
 [[package]]

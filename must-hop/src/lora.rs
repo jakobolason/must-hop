@@ -71,6 +71,7 @@ where
 {
     type Error = RadioError;
     type Connection = Result<(u8, PacketStatus), RadioError>;
+    type ReceiveBuffer = [u8; SIZE];
     type Duration = u16;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {
@@ -135,7 +136,7 @@ where
     async fn receive(
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
-        receiving_buffer: &[u8],
+        rec_buf: &[u8; SIZE],
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, RadioError> {
         // First we check if we actually got something
         let (len, _rx_pkt_status) = match conn {
@@ -151,7 +152,7 @@ where
         // trace!("rx successful, pkt status: {:?}", rx_pkt_status);
 
         // Try to unpack the buffer into expected packet
-        let valid_data = &receiving_buffer[..len as usize];
+        let valid_data = &rec_buf[..len as usize];
         let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(valid_data) {
             Ok(packet) => packet,
             Err(e) => {

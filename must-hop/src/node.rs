@@ -43,6 +43,7 @@ pub struct MHPacket<const SIZE: usize> {
 pub trait MHNode<const SIZE: usize, const LEN: usize> {
     type Error;
     type Connection;
+    type ReceiveBuffer;
     type Duration;
 
     /// Takes an MHPacket with a size for the user defined payload. This will be sent to the
@@ -57,13 +58,13 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     fn receive(
         &mut self,
         conn: Self::Connection,
-        receiving_buffer: &[u8],
+        rec_buf: &Self::ReceiveBuffer,
     ) -> impl Future<Output = Result<Vec<MHPacket<SIZE>, LEN>, Self::Error>>;
     // TODO: Make the 5 a generic
 
     fn listen(
         &mut self,
-        rec_buf: &mut [u8; SIZE],
+        rec_buf: &mut Self::ReceiveBuffer,
         with_timeout: bool,
     ) -> impl Future<Output = Result<Self::Connection, Self::Error>>;
 }

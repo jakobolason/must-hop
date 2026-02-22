@@ -30,7 +30,6 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
         None => Vec::new(),
     };
 
-    // 5. Handle Tx Gains
     // Returns a slice &[TxGain] derived from the owned 'conf'
     let tx_gains: Vec<TxGain> = conf
         .tx_gains
@@ -43,7 +42,6 @@ fn create_concentrator() -> Result<Concentrator<Running>, Error> {
         })
         .unwrap_or_default();
 
-    // 6. Build and Start
     println!("Starting concentrator...");
     Concentrator::open()?
         .set_config_board(board_conf)

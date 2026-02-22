@@ -42,7 +42,7 @@ where
 {
     node: Node,
     manager: NetworkManager<SIZE, LEN>,
-    policy: Policy,
+    policy: PhantomData<Policy>,
 }
 
 impl<Node, Policy, const SIZE: usize, const LEN: usize> MeshRouter<Node, SIZE, LEN, Policy>
@@ -51,18 +51,18 @@ where
     Policy: RoutingPolicy<SIZE, LEN>,
 {
     /// Takes ownership of a node and network manager, because this handles those
-    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>, policy: Policy) -> Self {
+    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>) -> Self {
         Self {
             node,
             manager,
-            policy,
+            policy: PhantomData,
         }
     }
 
     /// Use to await another node's communication, and can be used in a select or join
     pub async fn listen(
         &mut self,
-        rec_buf: &mut [u8; SIZE],
+        rec_buf: &mut Node::ReceiveBuffer,
     ) -> Result<Node::Connection, MeshRouterError<Node::Error>> {
         trace!("listening ...");
         self.node
@@ -99,7 +99,7 @@ where
     pub async fn receive(
         &mut self,
         conn: Node::Connection,
-        receiving_buffer: &[u8],
+        receiving_buffer: &Node::ReceiveBuffer,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
         // TODO: should be able to receieve multiple packets
         let pkts = self

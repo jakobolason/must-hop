@@ -1,6 +1,6 @@
 # Must-GW
 
-A gateway for LoRa written in Rust. This was made for the RAK2287, and uses `libloragw-sys` bindings from the `sx1302-hal` wrapped safely in `loragw` with the `Concentrator` struct.
+A gateway for LoRa written in std Rust. This was made for the RAK2287, and uses `libloragw-sys` bindings from the `sx1302-hal` wrapped safely in `loragw` with the `Concentrator` struct.
 
 The aim is to create a gateway which can listen to the nodes setup for this project, and forward those packets to a remote server.
 

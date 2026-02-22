@@ -1,6 +1,6 @@
 # Must Hop
 
-A multi hop network implementation in rust (rust multi hop).
+A multi hop network implementation in no_std rust (rust multi hop).
 
 Abstracts away from the hardware used, and just requires a send and receive function to be a must-hop node. To be used together with a must-gw such that data can be sent to a remote server.
 

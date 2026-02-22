@@ -242,15 +242,10 @@ impl Concentrator<Running> {
 
     // TODO: How to do this
     // /// Transmit `packet` over the air.
-    // pub fn transmit(self, packet: TxPacket) -> Result {
-    //     while self.transmit_status()? != TxStatus::Free {
-    //         const SLEEP_TIME: time::Duration = time::Duration::from_millis(5);
-    //         log::info!("transmitter is busy, sleeping for {:?}", SLEEP_TIME);
-    //         thread::sleep(SLEEP_TIME);
-    //     }
-    //     unsafe { hal_call!(lgw_send(&mut packet.try_into()?)) }?;
-    //     Ok(())
-    // }
+    pub fn transmit(self, packet: TxPacket) -> Result {
+        unsafe { hal_call!(lgw_send(&mut packet.try_into()?)) }?;
+        Ok(())
+    }
 
     /// Stop the LoRa concentrator and disconnect it.
     pub fn stop(self) -> Result<Concentrator<Closed>> {
@@ -268,7 +263,7 @@ impl Concentrator<Running> {
     /// We keep this private since `transmit` uses it internally, and
     /// it may lead to confusion about who's responsibility it is to
     /// check TX status.
-    fn transmit_status(&self) -> Result<TxStatus> {
+    pub fn transmit_status(&self) -> Result<TxStatus> {
         const TX_STATUS: u8 = 1;
         let mut tx_status = 0xFE;
         unsafe {
