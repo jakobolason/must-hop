@@ -1,13 +1,10 @@
-use loragw::{
-    BoardConf, ChannelConf, Concentrator, Error, Running, RxPacket, RxRFConf, TxGain, cfg::Config,
-};
-use must_hop::{lora::SensorData, node::MHPacket};
+use loragw::{BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain, cfg::Config};
 
-const SIZE: usize = 128;
+pub const SIZE: usize = 128;
 
 pub mod node;
 
-fn create_concentrator() -> Result<Concentrator<Running>, Error> {
+pub fn create_concentrator() -> Result<Concentrator<Running>, Error> {
     let conf = Config::from_str_or_default(None)?;
 
     let board_conf = BoardConf::try_from(conf.board.clone()).map_err(Error::from)?;
