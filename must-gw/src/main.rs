@@ -25,13 +25,10 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
 
     loop {
         let mut rec_buf: Vec<RxPacket> = Vec::new(); // Make sure RxPacket is imported
-
-        // The ? operator works here because the function returns a Result
+        println!("listening again ...");
         node.listen(&mut rec_buf, false).await?;
         let pkt = node.receive((), &rec_buf).await?;
         println!("got pkts: {:?} ", pkt);
-
-        // Process _conn and rec_buf here...
     }
 }
 

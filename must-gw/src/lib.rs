@@ -1,4 +1,7 @@
-use loragw::{BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain, cfg::Config};
+use loragw::{
+    BoardConf, ChannelConf, Concentrator, Error, Running, RxRFConf, TxGain, cfg::Config,
+    raspberrypi,
+};
 
 pub const SIZE: usize = 128;
 
@@ -40,9 +43,12 @@ pub fn create_concentrator() -> Result<Concentrator<Running>, Error> {
                 .collect()
         })
         .unwrap_or_default();
+    println!("Resetting board first ...");
+    let token = loragw::ResetToken::generate(|| raspberrypi::reset_lgw())
+        .expect("Failed to generate reset token");
 
     println!("Starting concentrator...");
-    Concentrator::open()?
+    Concentrator::open(&token)?
         .set_config_board(board_conf)
         .set_rx_rfs(radios)
         .set_config_channels(channels)

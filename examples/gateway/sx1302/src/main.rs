@@ -127,30 +127,34 @@ fn main() {
                 continue;
             }
         };
+        println!("Received {} packets", pkts.len());
         for pkt in pkts {
             let pkt = match pkt {
                 RxPacket::LoRa(rx_packet) => rx_packet,
                 _ => continue,
             };
             let raw_bytes = pkt.payload;
-            let mh_pack = match postcard::from_bytes::<MHPacket>(&raw_bytes) {
+            let mh_pack = match postcard::from_bytes::<heapless::Vec<MHPacket<40>, 5>>(&raw_bytes) {
                 Ok(packet) => packet,
                 Err(e) => {
                     eprintln!("Error deserializing MHPacket: {:?}", e);
                     continue;
                 }
             };
-            println!("SUCCESS !!!! Received packet: {:?}", mh_pack);
-
-            let raw_bytes = mh_pack.payload;
-            let sensor_data = match postcard::from_bytes::<SensorData>(&raw_bytes) {
-                Ok(packet) => packet,
-                Err(e) => {
-                    eprintln!("Error deserializing SensorData: {:?}", e);
-                    continue;
-                }
-            };
-            println!("SUCCESS !!!! Received packet: {:?}", sensor_data);
+            println!("SUCCESS !!!! Received packet: {:?}", mh_pack.len());
+            for pack in mh_pack {
+                let raw_bytes = pack.payload;
+                let sensor_data = match postcard::from_bytes::<SensorData>(&raw_bytes) {
+                    Ok(packet) => packet,
+                    Err(e) => {
+                        eprintln!("Error deserializing SensorData: {:?}", e);
+                        continue;
+                    }
+                };
+                println!("SUCCESS !!!! Received packet: {:?}", sensor_data);
+            }
         }
     }
 }
+// heapless::Vec<MHPacket<40>, 5>
+//

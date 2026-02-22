@@ -16,6 +16,7 @@ use std::{
 };
 
 pub mod cfg;
+pub mod raspberrypi;
 // pub(crate) use libloragw_sys as llg;
 pub(crate) use libloragw_sys as llg;
 
@@ -57,9 +58,29 @@ pub struct Concentrator<State> {
     state: State,
 }
 
+/// To ensure the concentrator is reset before use. Otherwise a HAL error will occur.
+pub struct ResetToken {
+    _priv: (),
+}
+
+impl ResetToken {
+    pub fn generate<F, E>(reset_routine: F) -> std::result::Result<Self, E>
+    where
+        F: FnOnce() -> std::result::Result<(), E>,
+    {
+        reset_routine()?;
+        Ok(ResetToken { _priv: () })
+    }
+
+    /// Unsafe bypass if you are sure the concentrator is reset before use
+    pub unsafe fn bypass() -> Self {
+        ResetToken { _priv: () }
+    }
+}
+
 impl Concentrator<Closed> {
     // Open the spidev-connected concentrator.
-    pub fn open<'a>() -> Result<Concentrator<Builder<'a>>> {
+    pub fn open<'a>(_token: &ResetToken) -> Result<Concentrator<Builder<'a>>> {
         // We expect `false`, and want to swap to `true`.
         // If it fails (is_err), the lock is already held.
         if GW_IS_OPEN
@@ -216,16 +237,18 @@ impl Concentrator<Running> {
     /// Perform a non-blocking read of up to 16 packets from
     /// concentrator's FIFO.
     pub fn receive(&self) -> Result<Option<Vec<RxPacket>>> {
+        log::info!("Setting up receive!");
         let mut tmp_buf: [std::mem::MaybeUninit<llg::lgw_pkt_rx_s>; 16] =
             unsafe { std::mem::MaybeUninit::uninit().assume_init() };
 
+        log::info!("Now calling");
         let len = unsafe {
             hal_call!(lgw_receive(
                 tmp_buf.len() as u8,
                 tmp_buf.as_mut_ptr() as *mut llg::lgw_pkt_rx_s
             ))
         }?;
-
+        log::info!("Received {} packets", len);
         if len > 0 {
             let mut out = Vec::with_capacity(len as usize);
             for i in 0..(len as usize) {
