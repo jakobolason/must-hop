@@ -28,6 +28,8 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
 
         // The ? operator works here because the function returns a Result
         node.listen(&mut rec_buf, false).await?;
+        let pkt = node.receive((), &rec_buf).await?;
+        println!("got pkts: {:?} ", pkt);
 
         // Process _conn and rec_buf here...
     }
