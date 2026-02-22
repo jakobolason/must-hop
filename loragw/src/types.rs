@@ -542,6 +542,29 @@ pub enum TxPacket {
     FSK(TxPacketFSK),
 }
 
+impl TryFrom<TxPacket> for llg::lgw_pkt_tx_s {
+    // Make sure this matches the Error type expected by your `transmit` function
+    type Error = crate::error::Error;
+
+    fn try_from(packet: TxPacket) -> Result<Self, Self::Error> {
+        match packet {
+            TxPacket::LoRa(lora_packet) => {
+                // Call the TryFrom<TxPacketLoRa> implementation we made earlier!
+                // If your TryFrom<TxPacketLoRa> returns a different error type (like &'static str),
+                // you will need to map it to your crate's main Error type here.
+                llg::lgw_pkt_tx_s::try_from(lora_packet)
+                    // Example of mapping the error, adjust to fit your actual Error variants
+                    .map_err(|_e| crate::error::Error::from(error::Error::Data))
+            }
+            TxPacket::FSK(_) => {
+                // Immediately reject FSK packets without wasting time on them
+                // Adjust this to match whatever generic error variant you have available
+                Err(crate::error::Error::from(error::Error::Data))
+            }
+        }
+    }
+}
+
 /// A transmittable LoRa packet.
 #[derive(Debug, Clone)]
 pub struct TxPacketLoRa {
@@ -571,6 +594,56 @@ pub struct TxPacketLoRa {
     pub implicit_header: bool,
     /// Arbitrary user-defined payload to transmit.
     pub payload: Vec<u8>,
+}
+impl TryFrom<TxPacketLoRa> for llg::lgw_pkt_tx_s {
+    type Error = error::Error;
+
+    fn try_from(packet: TxPacketLoRa) -> Result<Self, Self::Error> {
+        if packet.payload.len() > 256 {
+            return Err(error::Error::Size);
+        }
+        // TODO: Remove hardcoded size
+        let mut payload_buf = [0u8; 256];
+        payload_buf[..packet.payload.len()].copy_from_slice(&packet.payload);
+
+        let (tx_mode, count_us) = match packet.mode {
+            _ => (0, 0), // TODO: Need more here?
+        };
+        let rf_chain = 0; // TODO: CHeck config?
+        let bandwidth = 0x04; // Check config?
+        let datarate = 7; // TODO: Check config?
+        let coderate = 1; // Check config?
+
+        Ok(llg::lgw_pkt_tx_s {
+            freq_hz: packet.freq,
+            freq_offset: 0,
+            tx_mode,
+            count_us,
+            rf_chain,
+            rf_power: packet.power,
+
+            // Modulation is hardcoded to LoRa (usually 0x10 in Semtech libs)
+            // modulation: llg::MOD_LORA as u8,
+            modulation: 0x10 as u8,
+
+            bandwidth,
+            datarate,
+            coderate,
+            invert_pol: packet.invert_polarity,
+
+            // f_dev is Frequency Deviation, which is ONLY used for FSK modulation
+            f_dev: 0,
+
+            // Standard LoRa preamble is 8 symbols if not specified
+            preamble: packet.preamble.unwrap_or(8),
+
+            no_crc: packet.omit_crc,
+            no_header: packet.implicit_header,
+
+            size: packet.payload.len() as u16,
+            payload: payload_buf,
+        })
+    }
 }
 
 /// A transmittable LoRa packet.

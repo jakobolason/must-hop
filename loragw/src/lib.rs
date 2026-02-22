@@ -8,7 +8,6 @@ mod error;
 mod types;
 pub use crate::error::*;
 pub use crate::types::*;
-use std::ffi::CString;
 use std::{
     cell::Cell,
     convert::{TryFrom, TryInto},
@@ -242,7 +241,7 @@ impl Concentrator<Running> {
 
     // TODO: How to do this
     // /// Transmit `packet` over the air.
-    pub fn transmit(self, packet: TxPacket) -> Result {
+    pub fn transmit(&self, packet: TxPacket) -> Result {
         unsafe { hal_call!(lgw_send(&mut packet.try_into()?)) }?;
         Ok(())
     }

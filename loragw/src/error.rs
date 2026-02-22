@@ -3,7 +3,7 @@ use std::fmt;
 /// A common result type for this crate.
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)] // Added some helpful standard derives
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderError {
     MissingBoard,
     NotConnected,
@@ -77,9 +77,9 @@ impl From<AppError> for Error {
     fn from(err: AppError) -> Self {
         match err {
             AppError::Concentrator(err) => err,
-            AppError::IO(err) => Error::Data,
+            AppError::IO(_err) => Error::Data,
             AppError::Config(err) => Error::Toml(err),
-            AppError::Generic(err) => Error::Data,
+            AppError::Generic(_err) => Error::Data,
         }
     }
 }
@@ -90,7 +90,7 @@ impl From<AppError> for Error {
 #[macro_export] // Optional: exposes the macro if you need it outside this module
 macro_rules! hal_call {
     ( $fn:ident ( $($arg:expr),* ) ) => {
-        match crate::llg::$fn ( $($arg),* ) {
+        match $crate::llg::$fn ( $($arg),* ) {
             -1 => {
                 eprintln!("HAL call {} returned an error", stringify!($fn));
                 Err($crate::error::Error::HAL)
