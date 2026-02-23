@@ -145,10 +145,12 @@ impl MHNode<SIZE, LEN> for GWNode {
                 _ => continue,
             };
             let raw_bytes = &pkt.payload;
-            match postcard::from_bytes::<MHPacket<SIZE>>(raw_bytes) {
-                Ok(packet) => {
-                    println!("SUCCESS !!!! Received packet: {:?}", packet);
-                    rec_packets.push(packet).map_err(|_| loragw::Error::Data)?
+            match postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes) {
+                Ok(packets) => {
+                    println!("SUCCESS !!!! Received packet: {:?}", packets.len());
+                    for packet in packets {
+                        rec_packets.push(packet).map_err(|_| loragw::Error::Data)?
+                    }
                 }
                 Err(e) => {
                     eprintln!("Error deserializing MHPacket: {:?}", e);

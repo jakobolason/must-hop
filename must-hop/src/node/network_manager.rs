@@ -148,10 +148,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         let new_pkt: MHPacket<SIZE> = self.new_packet(payload, destination)?;
         if to_send.push(new_pkt.clone()).is_err() {
             error!("Buffer was too full");
+        } else {
+            // NOTE: Only do this if buffer was not full, otherwise this just errors out
+            // Now we add the new_pkt to pending_acks
+            self.add_packet(new_pkt)?;
         }
-        // Now we add the new_pkt to pending_acks
-        self.add_packet(new_pkt)?;
-
         Ok(to_send)
     }
 

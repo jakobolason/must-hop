@@ -82,6 +82,8 @@ where
             .map_err(MeshRouterError::Node)
     }
 
+    // TODO: If an error like buffer overflow occurs, then this should be handled by the NM. I
+    // think the payload received should be dropped, and the current packages retransmitted
     // Use to send data over the network
     pub async fn send_payload(
         &mut self,

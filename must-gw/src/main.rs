@@ -38,7 +38,9 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         let mut rec_buf = Vec::new();
         let conn = router.listen(&mut rec_buf).await?;
         let pkts = router.receive(conn, &rec_buf).await?;
-        println!("got pkts! : {:?}", pkts);
+        if pkts.len() > 0 {
+            println!("got pkts! : {:?}", pkts);
+        }
     }
 }
 
