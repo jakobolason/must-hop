@@ -62,7 +62,7 @@ where
     Policy: RoutingPolicy<SIZE, LEN>,
 {
     /// Takes ownership of a node and network manager, because this handles those
-    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>) -> Self {
+    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>, _policy: Policy) -> Self {
         Self {
             node,
             manager,

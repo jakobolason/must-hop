@@ -8,6 +8,8 @@ Meant as the source code for my bachelor's thesis, which explores the emerging w
 
 - `must-hop`:
   Provides traits for nodes, a NetworkManager to handle the multi hop logic, and a MeshRouter to handle the flow of receiving and retransmitting packages.
+  - `MeshRouter` handles a `MHNode` and a `NetworkManager`, then given a policy for replying to messages handles how a node should receive and transmit to create the multi hop network
+  - `NetworkManager` Is the brains maintaining a record of sent packets which have not been acknowledged yet. The acknowledgement is handled by the policy given to the `MeshRouter`
 
 - `libloragw-sys`:
   Rust bindings for the sx1302-hal to use the RAK2287 board on a raspberry Pi and communicate to it with a rust program.
@@ -16,9 +18,9 @@ Meant as the source code for my bachelor's thesis, which explores the emerging w
   Rust wrappers around `libloragw-sys` to be able to interface with it safely, uses a typestate pattern to guide users to a safe API.
 
 - `must-gw`:
-  Will be: A Lora Gateway to retrieve sensor data from nodes and send them to a remote server. Will use `must-hop` to act as a node on the network, but being special because it replies with ACK's instead of retransmitting packages.
+  A Lora Gateway to retrieve sensor data from nodes and send them to a remote server. Will use `must-hop` to act as a node on the network, but being special because it replies with ACK's instead of retransmitting packages.
   - [x] Can listen to nodes
-  - [ ] Send ACK's back to nodes
+  - [x] Send ACK's back to nodes
 
 ## Examples
 

@@ -32,13 +32,12 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     println!("got pkts: {:?} ", pkt);
 
     println!("Now making mes router ...");
-    let mut router: MeshRouter<_, _, _, GatewayPolicy> =
-        MeshRouter::new(node, NetworkManager::new(0, 10, 3));
+    let mut router = MeshRouter::new(node, NetworkManager::new(0, 10, 3), GatewayPolicy);
     loop {
         let mut rec_buf = Vec::new();
         let conn = router.listen(&mut rec_buf).await?;
         let pkts = router.receive(conn, &rec_buf).await?;
-        if pkts.len() > 0 {
+        if !pkts.is_empty() {
             println!("got pkts! : {:?}", pkts);
         }
     }

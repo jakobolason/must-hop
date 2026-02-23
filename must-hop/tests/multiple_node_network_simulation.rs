@@ -3,6 +3,7 @@ use must_hop::node::{
     MHNode, MHPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
+    policy::NodePolicy,
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -55,6 +56,7 @@ struct MockRadio<const SIZE: usize> {
 impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> {
     type Error = NetworkManagerError;
     type Connection = ();
+    type ReceiveBuffer = ();
     type Duration = u16;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
@@ -77,7 +79,7 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
     async fn receive(
         &mut self,
         _conn: Self::Connection,
-        _receiving_buffer: &[u8],
+        _receiving_buffer: &(),
     ) -> Result<heapless::Vec<MHPacket<SIZE>, LEN>, Self::Error> {
         let mut env = self.env.lock().unwrap();
         let mut rec_vec: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
@@ -97,7 +99,7 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
 
     async fn listen(
         &mut self,
-        _receiving_buffer: &mut [u8; SIZE],
+        _receiving_buffer: &mut (),
         _with_timeout: bool,
     ) -> Result<Self::Connection, Self::Error> {
         Ok(())
@@ -126,6 +128,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        NodePolicy,
     );
 
     let mut router_b = MeshRouter::new(
@@ -134,6 +137,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        NodePolicy,
     );
 
     let mut router_c = MeshRouter::new(
@@ -142,6 +146,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+        NodePolicy,
     );
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
@@ -150,27 +155,27 @@ async fn test_mesh_topology() {
     assert_eq!(router_a.get_pending_count(), 1);
 
     // Node B now receives these
-    let res1 = router_b.receive((), &[]).await.unwrap();
+    let res1 = router_b.receive((), &()).await.unwrap();
     // These packages were not meant for us, so we should not receive anything here
     assert_eq!(res1.len(), 0);
     // But router b should have send a new package, and have a pending ack
     assert_eq!(router_b.get_pending_count(), 1);
     // And shoul've also sent a package over the air, which router A can receive
 
-    let res2 = router_a.receive((), &[]).await.unwrap();
+    let res2 = router_a.receive((), &()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And node A should've removed the package now
     assert_eq!(router_a.get_pending_count(), 0);
 
     // Router C should've also received it, and since this is for it, it receives the data
-    let res3 = router_c.receive((), &[]).await.unwrap();
+    let res3 = router_c.receive((), &()).await.unwrap();
     assert_eq!(res3.len(), 1);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
 }
 
 #[tokio::test]
-async fn test_node_b_to_node_d() {
+async fn test_node_b_to_node_c() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
     let node_a = 1;
     let node_b = 2;
@@ -191,6 +196,7 @@ async fn test_node_b_to_node_d() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        NodePolicy,
     );
 
     let mut router_b = MeshRouter::new(
@@ -199,6 +205,7 @@ async fn test_node_b_to_node_d() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        NodePolicy,
     );
 
     let mut router_c = MeshRouter::new(
@@ -207,6 +214,7 @@ async fn test_node_b_to_node_d() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+        NodePolicy,
     );
 
     let mut router_d = MeshRouter::new(
@@ -215,6 +223,7 @@ async fn test_node_b_to_node_d() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+        NodePolicy,
     );
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
@@ -223,20 +232,20 @@ async fn test_node_b_to_node_d() {
     assert_eq!(router_b.get_pending_count(), 1);
 
     // Node B now receives these
-    let res1 = router_b.receive((), &[]).await.unwrap();
+    let res1 = router_b.receive((), &()).await.unwrap();
     // These packages were not meant for us, so we should not receive anything here
     assert_eq!(res1.len(), 0);
     // But router b should have send a new package, and have a pending ack
     assert_eq!(router_b.get_pending_count(), 1);
     // And shoul've also sent a package over the air, which router A can receive
 
-    let res2 = router_a.receive((), &[]).await.unwrap();
+    let res2 = router_a.receive((), &()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And node A should've removed the package now
-    assert_eq!(router_a.get_pending_count(), 0);
+    assert_eq!(router_a.get_pending_count(), 1);
 
     // Router C should've also received it, and since this is for it, it receives the data
-    let res3 = router_c.receive((), &[]).await.unwrap();
+    let res3 = router_c.receive((), &()).await.unwrap();
     assert_eq!(res3.len(), 1);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);

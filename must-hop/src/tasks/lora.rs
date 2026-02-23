@@ -38,7 +38,7 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize, const LEN: usize>(
         }
     };
     let nm = NetworkManager::<SIZE, LEN>::new(source_id, timeout, max_retries);
-    let mut router: MeshRouter<_, _, _, NodePolicy> = MeshRouter::new(node, nm);
+    let mut router = MeshRouter::new(node, nm, NodePolicy);
     loop {
         info!("In lora task loop");
 
