@@ -1,5 +1,8 @@
 set shell := ["bash", "-c"]
 set dotenv-load := true
+PI_HOST := env_var_or_default("HOST_URL", "localhost")
+PI_USER := env_var_or_default("PI_USER", "pi")
+PI_TARGET_DIR := "/home/" + PI_USER + "/must-hop"
 
 [group('Host builds')]
 build:
@@ -82,7 +85,7 @@ attach-remote:
     @echo "Attaching to remote"
     cd examples/lora/rak3272s && probe-rs attach \
         --chip STM32WLE5CC \
-        --host ws://100.71.152.5:3000 \
+        --host ws://"$HOST_URL":3000 \
         --token="$PROBE_TOKEN" \
         target/thumbv7em-none-eabi/release/main
 
@@ -91,6 +94,23 @@ attach-remote:
 build-gw-ex:
     @echo "Building SX1302 Gateway example..."
     cd examples/gateway/sx1302 && cargo build
+
+[group('Pi deployments')]
+build-gw-pi:
+  @echo "Cross compiling must-gw for Pi 4B"
+  cross build --target aarch64-unknown-linux-gnu -p must-gw --release
+
+[group('Pi deployments')]
+deploy-gw-pi: build-gw-pi
+  @echo "Copying binary GW to pi"
+  ssh {{PI_USER}}@{{PI_HOST}} 'mkdir -p {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release'
+  scp target/aarch64-unknown-linux-gnu/release/must-gw {{PI_USER}}@{{PI_HOST}}:{{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw
+
+[group('Pi deployments')]
+run-gw: deploy-gw-pi
+  @echo "Running GW on pi"
+  ssh {{PI_USER}}@{{PI_HOST}} 'chmod +x {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw \
+    && {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 # Format all code in the workspace
 [group('utils')]

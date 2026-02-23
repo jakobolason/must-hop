@@ -33,6 +33,10 @@ A Justfile has been introduced to ease the use of handling the examples for this
 Probe-rs is a very powerful tool, and by compiling probe-rs with the `server` feature flag, it is possible to run `probe-rs serve` on a remote host, and connect to that server on your local machine. With this, it is possible to launch programs and flash to a device, as if you were directly connected to it. This is utilized in this project, where `just remote-rak` runs the RAK3272s example but connects to a Raspberry Pi using Tailscale and lets probe-rs handle the authentication and flashing of my request.
 For more information, visit the [docs](https://probe.rs/docs/tools/#serve)
 
+### cross-rs
+
+Using cross-rs, a cross compilation of the `must-gw` binary can be compiled and deployed to a remote host (configured for a Raspberry Pi) given a host url and user as environment variables.
+
 ## Roadmap
 
 - [x] Firmware for RAK3272s
