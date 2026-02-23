@@ -4,6 +4,7 @@ PI_HOST := env_var_or_default("HOST_URL", "localhost")
 PI_USER := env_var_or_default("PI_USER", "pi")
 PI_TARGET_DIR := "/home/" + PI_USER + "/must-hop"
 
+# Build must-hop and must-gw
 [group('Host builds')]
 build:
     echo "Building host crates..."
@@ -47,8 +48,6 @@ watch:
 watch-test:
     bacon test
 
-# Build the ESP32C6 BLE example
-
 # Note: Requires riscv32imac-unknown-none-elf target installed
 [group('examples')]
 build-ble:
@@ -72,16 +71,20 @@ run-rak:
     @echo "Running RAK3272s LoRa example ..."
     cd examples/lora/rak3272s && cargo run --release --bin main
 
-[group('examples')]
-remote-rak:
+# --- Runs remotely on Pi
+
+# Runs the RAK3272s example ona  remote probe-rs server
+[group('probe-rs')]
+remote-run:
     @echo "Flashing remotely to Pi..."
     cd examples/lora/rak3272s && \
     CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
     --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN" \
     cargo run --release --bin main
 
-[group('examples')]
-attach-remote:
+# Attach to a remote probe-rs server
+[group('probe-rs')]
+remote-attach:
     @echo "Attaching to remote"
     cd examples/lora/rak3272s && probe-rs attach \
         --chip STM32WLE5CC \
@@ -94,6 +97,8 @@ attach-remote:
 build-gw-ex:
     @echo "Building SX1302 Gateway example..."
     cd examples/gateway/sx1302 && cargo build
+
+# --- Deployments ---
 
 [group('Pi deployments')]
 build-gw-pi:
