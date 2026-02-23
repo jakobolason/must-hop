@@ -132,12 +132,14 @@ impl MHNode<SIZE, LEN> for GWNode {
         rec_buf: &Self::ReceiveBuffer,
     ) -> Result<heapless::Vec<MHPacket<SIZE>, LEN>, Self::Error> {
         // Check if any packets came in whilst transitioning from listen to receive
-        let pkts: Vec<RxPacket> = match self.radio.receive() {
-            Ok(Some(packet)) => packet,
-            _ => Vec::new(),
-        };
+        // let pkts: Vec<RxPacket> = match self.radio.receive() {
+        //     Ok(Some(packet)) => packet,
+        //     _ => Vec::new(),
+        // };
         let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
-        for pkt in rec_buf.iter().chain(pkts.iter()) {
+        for pkt in rec_buf
+        /*.iter().chain(pkts.iter())*/
+        {
             let pkt = match pkt {
                 RxPacket::LoRa(rx_packet) => rx_packet,
                 _ => continue,

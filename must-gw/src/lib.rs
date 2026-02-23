@@ -7,6 +7,7 @@ pub const SIZE: usize = 128;
 
 pub mod node;
 
+/// Default constructor when using the SX1302 on top of a Raspberry pi 4B
 pub fn create_concentrator() -> Result<Concentrator<Running>, Error> {
     let conf = Config::from_str_or_default(None)?;
 

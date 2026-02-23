@@ -1,5 +1,5 @@
+use core::fmt;
 use core::marker::PhantomData;
-
 #[cfg(not(feature = "in_std"))]
 use defmt::trace;
 #[cfg(feature = "in_std")]
@@ -24,6 +24,17 @@ impl<E> From<NetworkManagerError> for MeshRouterError<E> {
         MeshRouterError::Manager(err)
     }
 }
+impl<E: fmt::Debug> fmt::Display for MeshRouterError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // A simple implementation just delegates to the Debug output,
+        // but you can customize this to be more human-readable.
+        write!(f, "Mesh Router Error: {:?}", self)
+    }
+}
+
+// 3. Implement the Error trait.
+// We bound E to also implement Error so the inner error is valid too.
+impl<E: fmt::Debug + core::error::Error> core::error::Error for MeshRouterError<E> {}
 
 // impl<E> From<E> for MeshRouterError<E> {
 //     fn from(err: E) -> Self {
