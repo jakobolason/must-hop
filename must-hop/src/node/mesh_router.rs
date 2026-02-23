@@ -125,7 +125,9 @@ where
         let (to_send, my_pkt) = Policy::process_packets(&mut self.manager, pkts)?;
         trace!("GOT {} packets for me!", my_pkt.len());
         trace!("GOT {} packets which should be sent on!", to_send.len());
-        self.send_packets(to_send).await?;
+        if !to_send.is_empty() {
+            self.send_packets(to_send).await?;
+        }
         Ok(my_pkt)
     }
 
