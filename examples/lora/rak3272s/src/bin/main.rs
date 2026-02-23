@@ -129,7 +129,7 @@ pub async fn lora_task(
     mut lora: Stm32wlLoRa<'static, Master>,
     channel: channel::Receiver<'static, ThreadModeRawMutex, SensorData, 3>,
 ) {
-    let sf = SpreadingFactor::_12;
+    let sf = SpreadingFactor::_7;
     let bw = Bandwidth::_125KHz;
     let cr = CodingRate::_4_8;
     let tp: TransmitParameters = TransmitParameters {

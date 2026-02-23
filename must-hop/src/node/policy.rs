@@ -36,6 +36,8 @@ impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for GatewayPo
     ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Vec<MHPacket<SIZE>, LEN>), NetworkManagerError> {
         let to_send = pkts
             .iter()
+            // Filter out GW's own ACKS
+            .filter(|pkt| pkt.packet_type != PacketType::Ack && pkt.source_id != 0)
             .map(|pkt| {
                 // The rest of the fields don't really matter, because the pid is the first thing that
                 // NM checks
