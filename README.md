@@ -37,14 +37,17 @@ For more information, visit the [docs](https://probe.rs/docs/tools/#serve)
 
 Using cross-rs, a cross compilation of the `must-gw` binary can be compiled and deployed to a remote host (configured for a Raspberry Pi) given a host url and user as environment variables.
 
+Thus everything can be compiled and then the binaries can be copied to a remote host to be run there instead of using hardwired connections, improving the developer experience.
+
 ## Roadmap
 
 - [x] Firmware for RAK3272s
 - [x] Nodes can communicate to eachother, with custom messages
 - [x] Each node sends and receives information
 - [x] Communication with a gateway
-  - [ ] Define gateway communication
+  - [x] Define gateway communication
   - [ ] Have a nice dashboard kind of, to see information
+        could use Ratatui for this perhaps
 - [ ] central, peripheral, runner abstraction for LoRa
   - [ ] Or, use traits to define a transmit and receive function
   - [x] MHNode and NetworkManager define some of the functionality required
@@ -54,6 +57,7 @@ Using cross-rs, a cross compilation of the `must-gw` binary can be compiled and 
 - [ ] Messages can be passed on to another node
   - [x] Define how each packet looks (MHPacket)
   - [ ] Algorithm to determine what way to send it
+        Will mainly be handled in `NetworkManager`
 
 ### Testing
 
@@ -73,5 +77,5 @@ This project should also be tested, to get some valuable measurements to provide
 
 ### Tools to use later
 
-`cargo-bloab`: Find out what takes most of the space in your executable
-`cargo-call-stack`: Static, Analyze program stack usage
+- `cargo-bloab`: Find out what takes most of the space in your executable
+- `cargo-call-stack`: Static, Analyze program stack usage
