@@ -42,10 +42,42 @@ impl From<PostError> for NetworkManagerError {
     }
 }
 
+/// Ring buffer to hold recently ACK'ed messages, to avoid retransmitting them
+pub struct RecentSeen<const N: usize> {
+    buffer: [Option<(u8, u16)>; N],
+    cursor: usize,
+}
+
+impl<const N: usize> RecentSeen<N> {
+    pub const fn new() -> Self {
+        Self {
+            buffer: [None; N],
+            cursor: 0,
+        }
+    }
+    /// Takes tuple (source_id, packet_id)
+    pub fn push(&mut self, pid: (u8, u16)) {
+        self.buffer[self.cursor] = Some(pid);
+        self.cursor = (self.cursor + 1) % N;
+    }
+
+    /// Checks if an entry matches (source_id, packet_id)
+    pub fn contains(&self, pid: (u8, u16)) -> bool {
+        self.buffer.contains(&Some(pid))
+    }
+}
+
+impl<const N: usize> Default for RecentSeen<N> {
+    fn default() -> Self {
+        RecentSeen::new()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum PayloadType {
     Data,
     Command,
+    ACK,
 }
 
 /// Maintains record of packages sent, to ensure that they are received.
@@ -54,6 +86,8 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
     pending_acks: Vec<PendingPacket<SIZE>, LEN>,
     // TODO: This should be more random, so each node doesn't start at 0
     next_packet_id: u16,
+    /// Uses the passed in LEN for a ring buffer
+    recent_seen: RecentSeen<LEN>,
     /// Configurations for the manager
     source_id: u8,
     timeout: u8,
@@ -65,36 +99,12 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Self {
             pending_acks: Vec::new(),
             next_packet_id: 0,
+            recent_seen: RecentSeen::default(),
             source_id,
             timeout,
             _max_retries: max_retries,
         }
     }
-
-    // pub fn from_t<T>(&mut self, payload: T, destination: u8) -> Result<MHPacket<SIZE>, PostError>
-    // where
-    //     T: Serialize,
-    // {
-    //     let mut buffer = [0u8; SIZE];
-    //     let used_slice = to_slice(&payload, &mut buffer)?;
-    //     let payload_bytes = match Vec::from_slice(used_slice) {
-    //         Ok(vec) => vec,
-    //         Err(e) => {
-    //             trace!("[ERROR] Capacity error: {:?}", e);
-    //             return Err(PostError::SerializeBufferFull);
-    //         }
-    //     };
-    //
-    //     self.next_packet_id += 1;
-    //     Ok(MHPacket {
-    //         destination_id: destination,
-    //         packet_type: PacketType::Data,
-    //         packet_id: self.next_packet_id,
-    //         source_id: self.source_id,
-    //         payload: payload_bytes,
-    //         hop_count: 0,
-    //     })
-    // }
 
     pub fn new_packet(
         &mut self,
@@ -179,18 +189,33 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
         // Check if it is one of our packets
-        if let Some(our_packet_index) = self
-            .pending_acks
-            .iter()
-            .position(|p| p.packet.packet_id == pkt.packet_id)
-        {
+        if let Some(our_packet_index) = self.pending_acks.iter().position(|p| {
+            // shortcircuit here
+            p.packet.packet_id == pkt.packet_id
+                && (p.packet.source_id == pkt.source_id
+                    || (pkt.packet_type == PacketType::Ack
+                        && pkt.destination_id == p.packet.source_id))
+        }) {
             // Then remove it from our vec, and return
             trace!("RECEIVED KNOWN PACKAGE, REMOVING FROM LIST");
             self.pending_acks.remove(our_packet_index);
+            // self.recent_seen.push((pkt.source_id, pkt.packet_id));
             return Ok(None);
         }
+        // So we aren't waiting for pkt, perhaps we've seen it before?
+        if self.recent_seen.contains((pkt.source_id, pkt.packet_id)) {
+            // We do not ACK an ACK
+            if pkt.packet_type == PacketType::Ack {
+                return Ok(None);
+            }
+            // A duplicate which we should ACK, but not care about
+            return Ok(Some((pkt, PayloadType::ACK)));
+        }
+        self.recent_seen.push((pkt.source_id, pkt.packet_id));
+
         // Perhaps it should be sent on?
-        if pkt.destination_id != self.source_id {
+        let to_us = pkt.destination_id == self.source_id;
+        if !to_us {
             self.add_packet(pkt.clone())?;
             trace!("PACKAGE SHOULD BE SENT ON");
             Ok(Some((pkt, PayloadType::Data)))
@@ -199,8 +224,6 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             // wants, so this gives it back
             Ok(Some((pkt, PayloadType::Command)))
         }
-
-        // Ok(Some(pkt))
     }
 
     /// To be used when receiving multiple packets, returns list of packets to send on, and the
@@ -212,20 +235,32 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         let mut to_send: Vec<MHPacket<SIZE>, LEN> = Vec::new();
         let mut commands: Vec<MHPacket<SIZE>, LEN> = Vec::new();
         for pkt in pkts {
-            let _ = match self.receive_packet(pkt) {
-                Ok(Some(packet)) => match packet.1 {
-                    PayloadType::Data => to_send
-                        .push(packet.0)
-                        .map_err(|e| error!("Error pusing to to_send: {:?}", e)),
-                    PayloadType::Command => commands
-                        .push(packet.0)
-                        .map_err(|e| error!("Error pusing to commands: {:?}", e)),
-                },
+            let (packet, ptype) = match self.receive_packet(pkt) {
+                Ok(Some(p)) => p,
                 Ok(None) => continue,
                 Err(e) => {
                     error!("Error in managing packet: {:?}", e);
                     continue;
                 }
+            };
+            let err_closure = |e| {
+                error!("Error pushing to commands: {:?}", e);
+                NetworkManagerError::BufferFull
+            };
+            match ptype {
+                PayloadType::Data => to_send.push(packet).map_err(err_closure)?,
+                PayloadType::Command => commands.push(packet).map_err(err_closure)?,
+                PayloadType::ACK => to_send
+                    .push(MHPacket {
+                        destination_id: packet.source_id,
+                        packet_type: PacketType::Ack,
+                        packet_id: packet.packet_id,
+                        source_id: self.source_id,
+                        payload: Vec::from_slice(&[0u8])
+                            .map_err(|_| NetworkManagerError::BufferFull)?,
+                        hop_count: 0,
+                    })
+                    .map_err(err_closure)?,
             };
         }
         Ok((to_send, commands))
@@ -274,7 +309,7 @@ mod tests {
         assert_eq!(to_send.packet_id, 1);
         assert_eq!(payload_type, PayloadType::Data);
 
-        // Check it is actually in the pending list (internal inspection)
+        // Check it is actually in the pending list
         assert_eq!(manager.pending_acks.len(), 1);
 
         // now act as if we transmitted this, and listened, and another node now transmits this.

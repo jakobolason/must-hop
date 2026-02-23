@@ -151,7 +151,7 @@ async fn test_mesh_topology() {
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
 
-    router_a.send_payload(msg1, 3).await.unwrap();
+    router_a.send_payload(msg1, node_c).await.unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
 
     // Node B now receives these
@@ -228,25 +228,107 @@ async fn test_node_b_to_node_c() {
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
 
-    router_b.send_payload(msg1, 3).await.unwrap();
+    router_b.send_payload(msg1, node_c).await.unwrap();
     assert_eq!(router_b.get_pending_count(), 1);
 
-    // Node B now receives these
-    let res1 = router_b.receive((), &()).await.unwrap();
-    // These packages were not meant for us, so we should not receive anything here
-    assert_eq!(res1.len(), 0);
-    // But router b should have send a new package, and have a pending ack
-    assert_eq!(router_b.get_pending_count(), 1);
-    // And shoul've also sent a package over the air, which router A can receive
-
+    // both node A and C are in range of B, so they both receive the packet
     let res2 = router_a.receive((), &()).await.unwrap();
     assert_eq!(res2.len(), 0);
-    // And node A should've removed the package now
+    // And since it is not for node a, then it sends it on
+    // TODO: How should we handle this?
     assert_eq!(router_a.get_pending_count(), 1);
 
     // Router C should've also received it, and since this is for it, it receives the data
     let res3 = router_c.receive((), &()).await.unwrap();
     assert_eq!(res3.len(), 1);
+    // And does not send it on
+    assert_eq!(router_c.get_pending_count(), 0);
+}
+
+#[tokio::test]
+async fn testing_multiple_nodes_can_hear_a() {
+    let env = Arc::new(Mutex::new(SimulationEnv::new()));
+    let node_a = 1;
+    let node_b = 2;
+    let node_c = 3;
+    let node_d = 4;
+
+    {
+        let mut e = env.lock().unwrap();
+        //           /<-----------.>\
+        // (A) <-> (B) <-> (C) <-> (D)
+        //   \<----------->/
+        e.add_bidi_link(node_a, node_b);
+        e.add_bidi_link(node_a, node_c);
+        e.add_bidi_link(node_b, node_c);
+        e.add_bidi_link(node_b, node_d);
+        e.add_bidi_link(node_c, node_d);
+    }
+
+    let mut router_a = MeshRouter::new(
+        MockRadio {
+            node_id: node_a,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        NodePolicy,
+    );
+
+    let mut router_b = MeshRouter::new(
+        MockRadio {
+            node_id: node_b,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        NodePolicy,
+    );
+
+    let mut router_c = MeshRouter::new(
+        MockRadio {
+            node_id: node_c,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        NodePolicy,
+    );
+
+    let mut router_d = MeshRouter::new(
+        MockRadio {
+            node_id: node_d,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        NodePolicy,
+    );
+
+    let msg1 = Vec::from_slice(&[0x01]).unwrap();
+
+    router_a.send_payload(msg1, node_c).await.unwrap();
+    assert_eq!(router_a.get_pending_count(), 1);
+
+    // both nodes B and C are in range of A, so they both receive the packet
+    let res2 = router_b.receive((), &()).await.unwrap();
+    assert_eq!(res2.len(), 0);
+    // And since it is not for node B, then it sends it on
+    // TODO: How should we handle this?
+    assert_eq!(router_b.get_pending_count(), 1);
+
+    // Router C should've also received it, and since this is for it, it receives the data
+    let res3 = router_c.receive((), &()).await.unwrap();
+    println!("res: {:?}", res3);
+    assert_eq!(res3.len(), 1);
+    // And does not send it on
+    assert_eq!(router_c.get_pending_count(), 0);
+
+    // The problem comes again, if D can hear B:
+    let d = router_d.receive((), &()).await.unwrap();
+    assert_eq!(d.len(), 0);
+    assert_eq!(router_d.get_pending_count(), 1);
+
+    // Router C should've also received it, and since this is for it, it receives the data
+    let res3 = router_c.receive((), &()).await.unwrap();
+    // And node C should've already got this, so it doesnt care
+    assert_eq!(res3.len(), 0);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
 }
