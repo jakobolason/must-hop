@@ -20,6 +20,8 @@ pub enum PacketType {
     Data,
     /// Payload should be bitmask of received packets
     Ack,
+    /// When GW boots up, it sends this out
+    BootUp,
 }
 
 /// MHPacket defines the package sent around the network
@@ -37,6 +39,8 @@ pub struct MHPacket<const SIZE: usize> {
     /// The amount of hops this package has been on
     // TODO: Implement logic for this
     pub hop_count: u8,
+    /// Amount of hops the current node has to GW
+    pub hop_to_gw: u8,
 }
 
 /// Any radio wanting to be a node, has to be able to transmit and receive

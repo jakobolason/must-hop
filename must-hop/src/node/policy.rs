@@ -48,6 +48,7 @@ impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for GatewayPo
                     payload: Vec::new(),
                     packet_id: pkt.packet_id,
                     hop_count: 0,
+                    hop_to_gw: 0,
                 }
             })
             .collect();

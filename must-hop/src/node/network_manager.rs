@@ -1,4 +1,5 @@
 use super::{MHPacket, PacketType};
+use core::cmp::{max, min};
 
 #[cfg(not(feature = "in_std"))]
 use defmt::{error, trace};
@@ -78,6 +79,7 @@ pub enum PayloadType {
     Data,
     Command,
     ACK,
+    Bootup,
 }
 
 /// Maintains record of packages sent, to ensure that they are received.
@@ -88,6 +90,8 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
     next_packet_id: u16,
     /// Uses the passed in LEN for a ring buffer
     recent_seen: RecentSeen<LEN>,
+    /// Hops to gateway, handled by manager
+    gw_hops: u8,
     /// Configurations for the manager
     source_id: u8,
     timeout: u8,
@@ -100,6 +104,8 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             pending_acks: Vec::new(),
             next_packet_id: 0,
             recent_seen: RecentSeen::default(),
+            // Default to 0, only have a count if GW present
+            gw_hops: 0,
             source_id,
             timeout,
             _max_retries: max_retries,
@@ -120,6 +126,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             source_id: self.source_id,
             payload,
             hop_count: 0,
+            hop_to_gw: self.gw_hops,
         })
     }
 
@@ -188,12 +195,19 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         &mut self,
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
+        if pkt.packet_type == PacketType::BootUp {
+            // GW sends 0, first node has 1 hop, therefore:
+            self.gw_hops = pkt.hop_count + 1;
+            // Fire and forget
+            return Ok(Some((pkt, PayloadType::Bootup)));
+        }
         // Check if it is one of our packets
         if let Some(our_packet_index) = self.pending_acks.iter().position(|p| {
             // shortcircuit here
             p.packet.packet_id == pkt.packet_id
                 && (p.packet.source_id == pkt.source_id
                     || (pkt.packet_type == PacketType::Ack
+            // TODO: Shouldn't this be flipped?
                         && pkt.destination_id == p.packet.source_id))
         }) {
             // Then remove it from our vec, and return
@@ -216,9 +230,28 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         // Perhaps it should be sent on?
         let to_us = pkt.destination_id == self.source_id;
         if !to_us {
-            self.add_packet(pkt.clone())?;
+            let is_gw_bound = pkt.destination_id == 1;
+            let should_forward = if is_gw_bound {
+                // Are we closer to GW?
+                self.gw_hops < pkt.hop_to_gw
+            } else {
+                // Are we in between source and destination?
+                (min(pkt.source_id, pkt.destination_id) <= self.source_id)
+                    && (self.source_id <= max(pkt.destination_id, pkt.source_id))
+            };
+
+            if !should_forward {
+                // If NOT, then we are not in the path of the packet, and do not rebroadcast
+                return Ok(None);
+            }
+            let increased_gw_hops = {
+                let mut temp = pkt.clone();
+                temp.hop_to_gw = self.gw_hops;
+                temp
+            };
+            self.add_packet(increased_gw_hops.clone())?;
             trace!("PACKAGE SHOULD BE SENT ON");
-            Ok(Some((pkt, PayloadType::Data)))
+            Ok(Some((increased_gw_hops, PayloadType::Data)))
         } else {
             // If this is actually for us, then it is probably a command that the underlying app
             // wants, so this gives it back
@@ -259,6 +292,19 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                         payload: Vec::from_slice(&[0u8])
                             .map_err(|_| NetworkManagerError::BufferFull)?,
                         hop_count: 0,
+                        hop_to_gw: self.gw_hops,
+                    })
+                    .map_err(err_closure)?,
+                PayloadType::Bootup => to_send
+                    .push(MHPacket {
+                        destination_id: packet.destination_id,
+                        packet_type: PacketType::BootUp,
+                        packet_id: packet.packet_id,
+                        source_id: self.source_id,
+                        payload: Vec::from_slice(&[0u8])
+                            .map_err(|_| NetworkManagerError::BufferFull)?,
+                        hop_count: packet.hop_count + 1,
+                        hop_to_gw: self.gw_hops,
                     })
                     .map_err(err_closure)?,
             };

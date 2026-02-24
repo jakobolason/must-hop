@@ -234,9 +234,8 @@ async fn test_node_b_to_node_c() {
     // both node A and C are in range of B, so they both receive the packet
     let res2 = router_a.receive((), &()).await.unwrap();
     assert_eq!(res2.len(), 0);
-    // And since it is not for node a, then it sends it on
-    // TODO: How should we handle this?
-    assert_eq!(router_a.get_pending_count(), 1);
+    // And since A < B < C meaning not in between, it does not retransmit
+    assert_eq!(router_a.get_pending_count(), 0);
 
     // Router C should've also received it, and since this is for it, it receives the data
     let res3 = router_c.receive((), &()).await.unwrap();
@@ -310,7 +309,6 @@ async fn testing_multiple_nodes_can_hear_a() {
     let res2 = router_b.receive((), &()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And since it is not for node B, then it sends it on
-    // TODO: How should we handle this?
     assert_eq!(router_b.get_pending_count(), 1);
 
     // Router C should've also received it, and since this is for it, it receives the data
@@ -320,10 +318,10 @@ async fn testing_multiple_nodes_can_hear_a() {
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
 
-    // The problem comes again, if D can hear B:
+    // Now because C < D, D is not in between sender and reciever
     let d = router_d.receive((), &()).await.unwrap();
     assert_eq!(d.len(), 0);
-    assert_eq!(router_d.get_pending_count(), 1);
+    assert_eq!(router_d.get_pending_count(), 0);
 
     // Router C should've also received it, and since this is for it, it receives the data
     let res3 = router_c.receive((), &()).await.unwrap();
