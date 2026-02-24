@@ -104,8 +104,8 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             pending_acks: Vec::new(),
             next_packet_id: 0,
             recent_seen: RecentSeen::default(),
-            // Default to 0, only have a count if GW present
-            gw_hops: 0,
+            // Default to max, only have a reasonable count if GW present
+            gw_hops: 255,
             source_id,
             timeout,
             _max_retries: max_retries,
@@ -196,6 +196,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
         if pkt.packet_type == PacketType::BootUp {
+            if pkt.hop_count >= self.gw_hops {
+                // If incoming route has the same length, then discard this
+                return Ok(None);
+            }
             // GW sends 0, first node has 1 hop, therefore:
             self.gw_hops = pkt.hop_count + 1;
             // Fire and forget
