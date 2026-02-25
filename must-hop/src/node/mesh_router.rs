@@ -5,7 +5,7 @@ use defmt::trace;
 #[cfg(feature = "in_std")]
 use log::trace;
 
-use crate::node::policy::{NodePolicy, RoutingPolicy};
+use crate::node::policy::{GatewayPolicy, NodePolicy, RoutingPolicy};
 
 use super::{
     MHNode, MHPacket,
@@ -92,15 +92,16 @@ where
     ) -> Result<(), MeshRouterError<Node::Error>> {
         let timeouted_pkts = self.manager.payload_to_send(payload, destination)?;
         trace!("Sending {} packets!", timeouted_pkts.len());
-        self.send_packets(timeouted_pkts).await
+        self.send_packets(&timeouted_pkts).await
     }
 
     async fn send_packets(
         &mut self,
-        pkts: Vec<MHPacket<SIZE>, LEN>,
+        // pkts: Vec<MHPacket<SIZE>, LEN>,
+        pkts: &[MHPacket<SIZE>],
     ) -> Result<(), MeshRouterError<Node::Error>> {
         self.node
-            .transmit(&pkts)
+            .transmit(pkts)
             .await
             .map_err(MeshRouterError::Node)?;
         Ok(())
@@ -126,7 +127,7 @@ where
         trace!("GOT {} packets for me!", my_pkt.len());
         trace!("GOT {} packets which should be sent on!", to_send.len());
         if !to_send.is_empty() {
-            self.send_packets(to_send).await?;
+            self.send_packets(&to_send).await?;
         }
         Ok(my_pkt)
     }
@@ -135,5 +136,17 @@ where
     #[doc(hidden)]
     pub fn get_pending_count(&self) -> usize {
         self.manager.get_pending_count()
+    }
+}
+
+impl<Node, const SIZE: usize, const LEN: usize> MeshRouter<Node, SIZE, LEN, GatewayPolicy>
+where
+    Node: MHNode<SIZE, LEN>,
+{
+    /// When gateway starts up, it should annonce itself, such that the nodes know their distance
+    /// to GW and retransmits messages if they are closer.
+    pub async fn bootup(&mut self) -> Result<(), MeshRouterError<Node::Error>> {
+        let bootup_pkt = self.manager.handle_bootup()?;
+        self.send_packets(&[bootup_pkt]).await
     }
 }

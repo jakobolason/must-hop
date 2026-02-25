@@ -315,6 +315,19 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         }
         Ok((to_send, commands))
     }
+
+    pub fn handle_bootup(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError> {
+        self.next_packet_id += 1;
+        Ok(MHPacket {
+            destination_id: 0, // broadcast id
+            packet_type: PacketType::BootUp,
+            packet_id: self.next_packet_id,
+            source_id: self.source_id,
+            payload: Vec::from_slice(&[]).map_err(|_| NetworkManagerError::BufferFull)?,
+            hop_count: 0,
+            hop_to_gw: 0,
+        })
+    }
 }
 
 #[cfg(test)]
