@@ -71,7 +71,7 @@ where
 {
     type Error = RadioError;
     type Connection = Result<(u8, PacketStatus), RadioError>;
-    type ReceiveBuffer = [u8; SIZE];
+    type ReceiveBuffer = [u8; TRANSMISSION_BUFFER];
     type Duration = u16;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {
@@ -136,7 +136,7 @@ where
     async fn receive(
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
-        rec_buf: &[u8; SIZE],
+        rec_buf: &[u8; TRANSMISSION_BUFFER],
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, RadioError> {
         // First we check if we actually got something
         let (len, _rx_pkt_status) = match conn {
@@ -171,7 +171,7 @@ where
 
     async fn listen(
         &mut self,
-        rec_buf: &mut [u8; SIZE],
+        rec_buf: &mut [u8; TRANSMISSION_BUFFER],
         with_timeout: bool,
     ) -> Result<Self::Connection, RadioError> {
         let rec_mode = match with_timeout {

@@ -14,7 +14,8 @@ pub mod policy;
 /// A Data stream, meaning it wants to send multiple packets(u8 amount). In this case, Node B will
 /// continue to listen, until it has receieved (u8) amount of packages
 /// ACK should only be sent by a GW, because they will not retransmit
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub enum PacketType {
     /// To send just a single packet
     Data,
@@ -25,7 +26,8 @@ pub enum PacketType {
 }
 
 /// MHPacket defines the package sent around the network
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub struct MHPacket<const SIZE: usize> {
     /// Destination identifier
     // TODO: Perhaps bigger than u8?

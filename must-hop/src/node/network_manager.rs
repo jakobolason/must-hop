@@ -13,7 +13,8 @@ use postcard::Error as PostError;
 
 // pub const LEN: usize = 5;
 /// Does not need to be serialized, because only MHPacket will be sent
-#[derive(Debug, PartialEq, defmt::Format)]
+#[derive(Debug, PartialEq)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub struct PendingPacket<const SIZE: usize> {
     /// We keep the whole packet so it can be retransmitted
     packet: MHPacket<SIZE>,
@@ -23,7 +24,8 @@ pub struct PendingPacket<const SIZE: usize> {
     retries: u8,
 }
 
-#[derive(Debug, defmt::Format)]
+#[derive(Debug)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub enum NetworkManagerError {
     Hardware(RadioError),
     Serialization(PostError),
@@ -191,17 +193,20 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
 
     /// Manages actions which the pakcet might require from a network pov, and returns the packet
     /// if none are required, otherwise returns none
-    pub fn receive_packet(
+    fn receive_packet(
         &mut self,
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
         if pkt.packet_type == PacketType::BootUp {
+            // TODO: What about GW failure/node failure, altering this?
             if pkt.hop_count >= self.gw_hops {
                 // If incoming route has the same length, then discard this
                 return Ok(None);
             }
             // GW sends 0, first node has 1 hop, therefore:
             self.gw_hops = pkt.hop_count + 1;
+            // Add to recent seen, to compare later
+            self.recent_seen.push((pkt.source_id, pkt.packet_id));
             // Fire and forget
             return Ok(Some((pkt, PayloadType::Bootup)));
         }

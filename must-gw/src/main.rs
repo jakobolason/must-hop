@@ -1,7 +1,10 @@
 use loragw::RxPacket;
 use must_gw::{create_concentrator, node};
 use must_hop::node::{
-    MHNode, mesh_router::MeshRouter, network_manager::NetworkManager, policy::GatewayPolicy,
+    MHNode,
+    mesh_router::MeshRouter,
+    network_manager::NetworkManager,
+    policy::{GatewayPolicy, NodePolicy},
 };
 
 async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -32,7 +35,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     println!("got pkts: {:?} ", pkt);
 
     println!("Now making mes router ...");
-    let mut router = MeshRouter::new(node, NetworkManager::new(0, 10, 3), GatewayPolicy);
+    let mut router = MeshRouter::new(node, NetworkManager::new(0, 10, 3), NodePolicy);
     loop {
         let mut rec_buf = Vec::new();
         let conn = router.listen(&mut rec_buf).await?;

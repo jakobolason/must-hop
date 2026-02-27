@@ -13,7 +13,8 @@ use super::{
 };
 use heapless::Vec;
 
-#[derive(Debug, defmt::Format)]
+#[derive(Debug)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub enum MeshRouterError<E> {
     Manager(NetworkManagerError),
     Node(E),

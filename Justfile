@@ -38,14 +38,15 @@ test:
 test-sim:
     cargo test --test network_simulation --features "in_std"
 
+# Use these to hint at using bacon, because this just takes more to type
 # Start Bacon for live feedback
 [group('Tests')]
-watch:
+bacon:
     bacon
 
 # Start Bacon for testing
 [group('Tests')]
-watch-test:
+bacon-test:
     bacon test
 
 # Note: Requires riscv32imac-unknown-none-elf target installed
