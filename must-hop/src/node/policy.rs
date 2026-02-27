@@ -1,4 +1,4 @@
-use crate::node::PacketType;
+use crate::node::{MHNode, PacketType};
 
 use super::{
     MHPacket,
@@ -54,5 +54,38 @@ impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for GatewayPo
             .collect();
 
         Ok((to_send, pkts))
+    }
+}
+
+pub trait MacPolicy<Node, const SIZE: usize, const LEN: usize>
+where
+    Node: MHNode<SIZE, LEN>,
+{
+    fn run_mac(
+        &mut self,
+        node: &mut Node,
+        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        rx_buffer: &mut Node::ReceiveBuffer,
+    ) -> impl Future<Output = Result<Vec<MHPacket<SIZE>, LEN>, Node::Error>>;
+}
+
+pub struct RandomAccessMac;
+
+impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for RandomAccessMac
+where
+    Node: MHNode<SIZE, LEN>,
+{
+    async fn run_mac(
+        &mut self,
+        node: &mut Node,
+        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        rx_buffer: &mut Node::ReceiveBuffer,
+    ) -> Result<Vec<MHPacket<SIZE>, LEN>, Node::Error> {
+        if !tx_queue.is_empty() {
+            node.transmit(tx_queue).await?;
+            tx_queue.clear();
+        }
+        let conn = node.listen(rx_buffer, false).await?;
+        node.receive(conn, rx_buffer).await
     }
 }
