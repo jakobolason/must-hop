@@ -97,6 +97,25 @@ where
         Ok(())
     }
 
+    pub async fn tick(
+        &mut self,
+        rx_buf: &mut Node::ReceiveBuffer,
+    ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
+        let received_pkts = self
+            .mac_policy
+            .run_mac(&mut self.node, &mut self.tx_queue, rx_buf)
+            .await
+            .map_err(MeshRouterError::Node)?;
+        let (to_forward, to_me) = Routing::process_packets(&mut self.manager, received_pkts)?;
+
+        for pkt in to_forward {
+            self.tx_queue
+                .push(pkt)
+                .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
+        }
+        Ok(to_me)
+    }
+
     /// Use to await another node's communication, and can be used in a select or join
     pub async fn listen(
         &mut self,
