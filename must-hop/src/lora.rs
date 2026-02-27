@@ -23,7 +23,8 @@ const RECEIVE_TIMEOUT: u16 = 100;
 const TRANSMISSION_BUFFER: usize = 256; // The radio can receive 256 bytes to transmit
 
 /// Example of payload
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub struct SensorData {
     pub device_id: u8,
     pub temperate: f32,

@@ -5,7 +5,7 @@ use defmt::trace;
 #[cfg(feature = "in_std")]
 use log::trace;
 
-use crate::node::policy::{GatewayPolicy, NodePolicy, RoutingPolicy};
+use crate::node::policy::{GatewayPolicy, MacPolicy, RoutingPolicy};
 
 use super::{
     MHNode, MHPacket,
@@ -47,28 +47,54 @@ impl<E: fmt::Debug + core::error::Error> core::error::Error for MeshRouterError<
 /// managing the logic necessary to send and receive packets, but the user does not have to think
 /// about how packets are received and sent on, if they are not for them.
 /// Handles the flow of packets
-pub struct MeshRouter<Node, const SIZE: usize, const LEN: usize, Policy = NodePolicy>
+pub struct MeshRouter<Node, Mac, Routing, const SIZE: usize, const LEN: usize>
 where
     Node: MHNode<SIZE, LEN>,
-    Policy: RoutingPolicy<SIZE, LEN>,
+    Routing: RoutingPolicy<SIZE, LEN>,
+    Mac: MacPolicy<Node, SIZE, LEN>,
 {
     node: Node,
     manager: NetworkManager<SIZE, LEN>,
-    policy: PhantomData<Policy>,
+    routing_policy: PhantomData<Routing>,
+    mac_policy: Mac,
+    tx_queue: Vec<MHPacket<SIZE>, LEN>,
 }
 
-impl<Node, Policy, const SIZE: usize, const LEN: usize> MeshRouter<Node, SIZE, LEN, Policy>
+impl<Node, Mac, Routing, const SIZE: usize, const LEN: usize>
+    MeshRouter<Node, Mac, Routing, SIZE, LEN>
 where
     Node: MHNode<SIZE, LEN>,
-    Policy: RoutingPolicy<SIZE, LEN>,
+    Routing: RoutingPolicy<SIZE, LEN>,
+    Mac: MacPolicy<Node, SIZE, LEN>,
 {
     /// Takes ownership of a node and network manager, because this handles those
-    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>, _policy: Policy) -> Self {
+    pub fn new(
+        node: Node,
+        manager: NetworkManager<SIZE, LEN>,
+        mac_policy: Mac,
+        _routing: Routing,
+    ) -> Self {
         Self {
             node,
             manager,
-            policy: PhantomData,
+            mac_policy,
+            routing_policy: PhantomData,
+            tx_queue: Vec::new(),
         }
+    }
+
+    pub fn queu_payload(
+        &mut self,
+        payload: Vec<u8, SIZE>,
+        destination: u8,
+    ) -> Result<(), MeshRouterError<Node::Error>> {
+        let pkts = self.manager.payload_to_send(payload, destination)?;
+        for pkt in pkts {
+            self.tx_queue
+                .push(pkt)
+                .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
+        }
+        Ok(())
     }
 
     /// Use to await another node's communication, and can be used in a select or join
@@ -124,7 +150,7 @@ where
             .map_err(MeshRouterError::Node)?;
         trace!("Done receiving, handling {} pkts", pkts.len());
 
-        let (to_send, my_pkt) = Policy::process_packets(&mut self.manager, pkts)?;
+        let (to_send, my_pkt) = Routing::process_packets(&mut self.manager, pkts)?;
         trace!("GOT {} packets for me!", my_pkt.len());
         trace!("GOT {} packets which should be sent on!", to_send.len());
         if !to_send.is_empty() {
@@ -140,9 +166,10 @@ where
     }
 }
 
-impl<Node, const SIZE: usize, const LEN: usize> MeshRouter<Node, SIZE, LEN, GatewayPolicy>
+impl<Node, Mac, const SIZE: usize, const LEN: usize> MeshRouter<Node, Mac, GatewayPolicy, SIZE, LEN>
 where
     Node: MHNode<SIZE, LEN>,
+    Mac: MacPolicy<Node, SIZE, LEN>,
 {
     /// When gateway starts up, it should annonce itself, such that the nodes know their distance
     /// to GW and retransmits messages if they are closer.

@@ -10,7 +10,11 @@ use serde::Serialize;
 
 use crate::{
     lora::{LoraNode, TransmitParameters},
-    node::{mesh_router::MeshRouter, network_manager::NetworkManager, policy::NodePolicy},
+    node::{
+        mesh_router::MeshRouter,
+        network_manager::NetworkManager,
+        policy::{NodePolicy, RandomAccessMac},
+    },
 };
 
 use lora_phy::mod_traits::RadioKind;
@@ -41,7 +45,7 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize, const LEN: usize>(
         }
     };
     let nm = NetworkManager::<SIZE, LEN>::new(source_id, timeout, max_retries);
-    let mut router = MeshRouter::new(node, nm, NodePolicy);
+    let mut router = MeshRouter::new(node, nm, RandomAccessMac, NodePolicy);
     loop {
         info!("In lora task loop");
 
