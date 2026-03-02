@@ -74,8 +74,9 @@ This project should also be tested, to get some valuable measurements to provide
     - [x] Initial ones for NetworkManager
     - [ ] MeshRouter
   - [ ] Integration tests
-    - [x] Initial tests for 1 node for now
+    - [x] 2 Node simulation communication
     - [x] Simulations of multiple nodes and how packages propagate
+    - [ ] Tests with MAC
     - [ ] Hardware-In-Loop (HIL) tests
   - [ ] Amount of errors over time
   - [ ] Durability test, can it run for a week straight?
