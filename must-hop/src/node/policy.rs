@@ -85,7 +85,7 @@ where
             node.transmit(tx_queue).await?;
             tx_queue.clear();
         }
-        let conn = node.listen(rx_buffer, false).await?;
+        let conn = node.listen(rx_buffer, true).await?;
         node.receive(conn, rx_buffer).await
     }
 }

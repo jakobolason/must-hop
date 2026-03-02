@@ -3,7 +3,7 @@ use must_hop::node::{
     MHNode, MHPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
-    policy::{GatewayPolicy, NodePolicy},
+    policy::{GatewayPolicy, NodePolicy, RandomAccessMac},
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -128,6 +128,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -137,6 +138,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -146,6 +148,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -196,6 +199,7 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -205,6 +209,7 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -214,6 +219,7 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -261,6 +267,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -270,6 +277,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -279,6 +287,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -288,6 +297,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -350,6 +360,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -359,6 +370,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -368,6 +380,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -377,6 +390,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -386,6 +400,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(gw, 5, 3),
+        RandomAccessMac,
         GatewayPolicy,
     );
     // First GW sends out Bootup

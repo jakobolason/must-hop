@@ -46,22 +46,18 @@ pub async fn lora_task<RK, DLY, T, M, const SIZE: usize, const LEN: usize>(
     let nm = NetworkManager::<SIZE, LEN>::new(source_id, timeout, max_retries);
     let mut router = MeshRouter::new(node, nm, RandomAccessMac, NodePolicy);
     loop {
-        info!("In lora task loop");
-
         let mut receiving_buffer = [00u8; TRANSMISSION_BUFFER];
 
         info!("Waiting for packet or sensor data to send");
-        // Either sensor data should be sent, or a packet is ready to be received
+        // Before letting router do its thing, we check if we want to send something
         match channel.try_receive() {
             Ok(data) => {
-                if let Err(e) = router.queu_payload(data.into(), 0) {
+                if let Err(e) = router.queue_payload(data.into(), 0) {
                     error!("Error queing sensor data: {:?}", e);
-                    continue;
                 }
             }
             Err(e) => {
                 error!("error in receinv sensor data: {:?}", e);
-                continue;
             }
         }
         match router.tick(&mut receiving_buffer).await {

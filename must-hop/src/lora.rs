@@ -18,7 +18,7 @@ use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
 // Approximately 1 second?
-const RECEIVE_TIMEOUT: u16 = 100;
+const RECEIVE_TIMEOUT: u16 = 255;
 // TODO: Should this be a const generic for the user to set? Perhaps a default value?
 const TRANSMISSION_BUFFER: usize = 256; // The radio can receive 256 bytes to transmit
 

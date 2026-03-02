@@ -83,7 +83,7 @@ where
         }
     }
 
-    pub fn queu_payload(
+    pub fn queue_payload(
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u8,

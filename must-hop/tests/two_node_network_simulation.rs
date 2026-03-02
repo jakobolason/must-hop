@@ -3,7 +3,7 @@ use must_hop::node::{
     MHNode, MHPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
-    policy::NodePolicy,
+    policy::{NodePolicy, RandomAccessMac},
 };
 use std::sync::{Arc, Mutex};
 
@@ -89,11 +89,13 @@ async fn test_multiple_packets_fifo_order() {
     let mut router_a = MeshRouter::new(
         MockRadio { air: air.clone() },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
     let mut router_b = MeshRouter::new(
         MockRadio { air: air.clone() },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
 
@@ -126,14 +128,16 @@ async fn test_multiple_packets_fifo_order() {
 #[tokio::test]
 async fn test_send_and_ack() {
     let air = create_air();
-    let mut router_a: MeshRouter<_, _, _, NodePolicy> = MeshRouter::new(
+    let mut router_a = MeshRouter::new(
         MockRadio { air: air.clone() },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
-    let mut router_b: MeshRouter<_, _, _, NodePolicy> = MeshRouter::new(
+    let mut router_b = MeshRouter::new(
         MockRadio { air: air.clone() },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        RandomAccessMac,
         NodePolicy,
     );
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
