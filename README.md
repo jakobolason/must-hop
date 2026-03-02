@@ -50,15 +50,19 @@ Thus everything can be compiled and then the binaries can be copied to a remote 
   - [x] Define gateway communication
   - [ ] Have a nice dashboard kind of, to see information
         could use Ratatui for this perhaps
-- [ ] central, peripheral, runner abstraction for LoRa
-  - [ ] Or, use traits to define a transmit and receive function
+- [] central, peripheral, runner abstraction for LoRa
+  Still unsure if this will actually be needed, since MHNode defines what this lib needs and therefore it might be unecessary to do this.
+  - [x] Or, use traits to define a transmit and receive function
   - [x] MHNode and NetworkManager define some of the functionality required
 - [ ] medium-access-control somehow handled
   - [ ] use `lora.cad` for channel activity detection
-  - [ ] Perhaps TDMA to let nodes sleep for a duration
-- [ ] Messages can be passed on to another node
+  - [x] MacPolicy trait passed to meshrouter, letting the user choose one of the provided implementations or make their own.
+  - [x] `RandomAccessMac` defines a naive and simple MAC implementation.
+  - [ ] `TDMAMac` should define how MAC is handled if TDMA is chosen.
+
+- [x] Messages can be passed on to another node
   - [x] Define how each packet looks (MHPacket)
-  - [ ] Algorithm to determine what way to send it
+  - [x] Algorithm to determine what way to send it
         Will mainly be handled in `NetworkManager`
 
 ### Testing
