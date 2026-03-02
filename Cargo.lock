@@ -761,6 +761,7 @@ dependencies = [
 name = "loragw"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "libloragw-sys",
  "log",
  "rppal 0.14.1",

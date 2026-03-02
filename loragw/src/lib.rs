@@ -47,6 +47,7 @@ pub struct Builder<'a> {
 }
 pub struct Running {
     gps_fd: Option<std::os::raw::c_int>,
+    gps_buffer: Vec<u8>,
 }
 
 /// A LoRa concentrator.
@@ -216,7 +217,10 @@ impl<'a> Concentrator<Builder<'a>> {
         Ok(Concentrator {
             _prevent_sync: PhantomData,
             _guard: self._guard,
-            state: Running { gps_fd: None },
+            state: Running {
+                gps_fd: None,
+                gps_buffer: Vec::new(),
+            },
         })
     }
 }
@@ -299,13 +303,102 @@ impl Concentrator<Running> {
 
         unsafe {
             hal_call!(lgw_gps_enable(
-                tty.as_ptr() as *mut i8,
-                family.as_ptr() as *mut i8,
+                tty.as_ptr() as *mut _,
+                family.as_ptr() as *mut _,
                 0,
                 &mut fd
             ))
         }?;
         self.state.gps_fd = Some(fd);
+        Ok(())
+    }
+
+    pub fn process_gps_frames(&mut self) -> Result<()> {
+        let fd = match self.state.gps_fd {
+            Some(fd) => fd,
+            None => return Ok(()),
+        };
+
+        // 1. Set the file descriptor to non-blocking mode
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+
+        // 2. Read available bytes
+        let mut read_buf = [0u8; 128];
+        let bytes_read = unsafe {
+            libc::read(
+                fd,
+                read_buf.as_mut_ptr() as *mut libc::c_void,
+                read_buf.len(),
+            )
+        };
+
+        if bytes_read > 0 {
+            self.state
+                .gps_buffer
+                .extend_from_slice(&read_buf[..bytes_read as usize]);
+        }
+
+        // 3. Scan the buffer
+        let mut rd_idx = 0;
+        let mut frame_end_idx = 0;
+        let wr_idx = self.state.gps_buffer.len();
+
+        while rd_idx < wr_idx {
+            let mut frame_size: usize = 0;
+            let sync_char = self.state.gps_buffer[rd_idx];
+
+            if sync_char == llg::LGW_GPS_UBX_SYNC_CHAR as u8 {
+                let msg_type = unsafe {
+                    llg::lgw_parse_ubx(
+                        self.state.gps_buffer[rd_idx..].as_ptr() as *const _,
+                        wr_idx - rd_idx,
+                        &mut frame_size,
+                    )
+                };
+
+                // FIX 1: If the expected frame size is larger than the available data,
+                // the message is incomplete. Break out of the loop and wait for more data.
+                if frame_size > (wr_idx - rd_idx) {
+                    break;
+                }
+
+                // FIX 2: If the checksum failed, don't consume the corrupted frame size.
+                // Just skip the sync char by setting frame_size to 0.
+                // (Checking `== 2` safely maps to the C enum `INVALID` value)
+                if msg_type as u32 == 2 {
+                    frame_size = 0;
+                }
+            } else if sync_char == llg::LGW_GPS_NMEA_SYNC_CHAR as u8 {
+                if let Some(end_offset) = self.state.gps_buffer[rd_idx..wr_idx]
+                    .iter()
+                    .position(|&b| b == 0x0A)
+                {
+                    frame_size = end_offset + 1;
+                    let _msg_type = unsafe {
+                        llg::lgw_parse_nmea(
+                            self.state.gps_buffer[rd_idx..].as_ptr() as *const _,
+                            frame_size as std::os::raw::c_int,
+                        )
+                    };
+                }
+            }
+
+            if frame_size > 0 {
+                rd_idx += frame_size;
+                frame_end_idx = rd_idx;
+            } else {
+                rd_idx += 1;
+            }
+        }
+
+        // 4. Remove safely processed bytes, leaving incomplete fragments for next time
+        if frame_end_idx > 0 {
+            self.state.gps_buffer.drain(..frame_end_idx);
+        }
+
         Ok(())
     }
 
