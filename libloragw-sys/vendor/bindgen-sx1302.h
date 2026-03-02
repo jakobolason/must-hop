@@ -6,6 +6,7 @@
 // `loragw_reg.h` fails to include `stdio.h`.
 #include "loragw_hal.h"
 #include "loragw_reg.h"
+#include "loragw_gps.h"
 // TODO: Perhaps lgw_gps_enable can be included here?
 
 #endif /* BINDGEN_6BFD5782 */

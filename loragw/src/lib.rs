@@ -45,7 +45,9 @@ pub struct Builder<'a> {
     gains: &'a [TxGain],
     channel_conf: Vec<(u8, ChannelConf)>,
 }
-pub struct Running {}
+pub struct Running {
+    gps_fd: Option<std::os::raw::c_int>,
+}
 
 /// A LoRa concentrator.
 pub struct Concentrator<State> {
@@ -73,6 +75,10 @@ impl ResetToken {
     }
 
     /// Unsafe bypass if you are sure the concentrator is reset before use
+    ///
+    /// # Safety
+    /// This is unsafe because if this token is not a proper reset of the board,
+    /// then it will crash upon starting it.
     pub unsafe fn bypass() -> Self {
         ResetToken { _priv: () }
     }
@@ -210,7 +216,7 @@ impl<'a> Concentrator<Builder<'a>> {
         Ok(Concentrator {
             _prevent_sync: PhantomData,
             _guard: self._guard,
-            state: Running {},
+            state: Running { gps_fd: None },
         })
     }
 }
@@ -272,12 +278,50 @@ impl Concentrator<Running> {
     /// Stop the LoRa concentrator and disconnect it.
     pub fn stop(self) -> Result<Concentrator<Closed>> {
         log::info!("stopping concentrator");
+        if let Some(fd) = self.state.gps_fd {
+            unsafe {
+                let _ = hal_call!(lgw_gps_disable(fd));
+            }
+        }
+
         unsafe { hal_call!(lgw_stop()) }?;
         Ok(Concentrator {
             _prevent_sync: PhantomData,
             _guard: self._guard,
             state: Closed {},
         })
+    }
+
+    pub fn enable_gps(&mut self, tty_path: &str, gps_family: &str) -> Result<()> {
+        let tty = std::ffi::CString::new(tty_path).map_err(|_| Error::Data)?;
+        let family = std::ffi::CString::new(gps_family).map_err(|_| Error::Data)?;
+        let mut fd: std::os::raw::c_int = -1;
+
+        unsafe {
+            hal_call!(lgw_gps_enable(
+                tty.as_ptr() as *mut i8,
+                family.as_ptr() as *mut i8,
+                0,
+                &mut fd
+            ))
+        }?;
+        self.state.gps_fd = Some(fd);
+        Ok(())
+    }
+
+    pub fn get_gps(&self) -> Result<(Coordinates, std::time::Duration)> {
+        let mut utc = unsafe { std::mem::MaybeUninit::<llg::timespec>::zeroed().assume_init() };
+        let mut gps_time =
+            unsafe { std::mem::MaybeUninit::<llg::timespec>::zeroed().assume_init() };
+        let mut loc = unsafe { std::mem::MaybeUninit::<llg::coord_s>::zeroed().assume_init() };
+        let mut err = unsafe { std::mem::MaybeUninit::<llg::coord_s>::zeroed().assume_init() };
+
+        unsafe { hal_call!(lgw_gps_get(&mut utc, &mut gps_time, &mut loc, &mut err)) }?;
+
+        let coords = Coordinates::from(loc);
+        let duration = std::time::Duration::new(utc.tv_sec as u64, utc.tv_nsec as u32);
+
+        Ok((coords, duration))
     }
 
     /// Returns the concentrators current transmit status.

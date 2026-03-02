@@ -143,7 +143,7 @@ pub async fn lora_task(
         crc: true,
         iq: false,
     };
-    let source_id = 1;
+    let source_id = 2;
     lora::lora_task::<_, _, _, _, MAX_PACK_LEN, LEN>(&mut lora, channel, tp, source_id, 3, 3).await;
 }
 

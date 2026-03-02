@@ -9,7 +9,7 @@ Meant as the source code for my bachelor's thesis, which explores the emerging w
 - `must-hop`:
   Provides traits for nodes, a NetworkManager to handle the multi hop logic, and a MeshRouter to handle the flow of receiving and retransmitting packages.
   - `MeshRouter` handles a `MHNode` and a `NetworkManager`, then given a policy for replying to messages handles how a node should receive and transmit to create the multi hop network
-  - `NetworkManager` Is the brains maintaining a record of sent packets which have not been acknowledged yet. The acknowledgement is handled by the policy given to the `MeshRouter`
+  - `NetworkManager` Is the brains maintaining a record of sent packets which have not been acknowledged yet. The acknowledgement is handled by the routing policy given to the `MeshRouter`
 
 - `libloragw-sys`:
   Rust bindings for the sx1302-hal to use the RAK2287 board on a raspberry Pi and communicate to it with a rust program.
@@ -64,6 +64,9 @@ Thus everything can be compiled and then the binaries can be copied to a remote 
   - [x] Define how each packet looks (MHPacket)
   - [x] Algorithm to determine what way to send it
         Will mainly be handled in `NetworkManager`
+
+- [ ] Research power consumption
+  - [ ] Look into TDMA to reduce the amount of time the radio is listening, drawing power
 
 ### Testing
 
