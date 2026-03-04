@@ -32,7 +32,7 @@ graph TD
     IsForMe -- Yes --> RetCommand([Return PayloadType::Command])
 
     %% Forwarding logic
-    IsForMe -- No --> IsGWBound{Is destination_id <br> == 1 (GW)?}
+    IsForMe -- No --> IsGWBound{Is destination_id <br> == 1 ?}
     IsGWBound -- Yes --> CloserToGW{self.gw_hops < <br> pkt.hop_to_gw?}
     IsGWBound -- No --> InBetween{Am I between <br> source & dest?}
 
