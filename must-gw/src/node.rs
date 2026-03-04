@@ -145,6 +145,10 @@ impl MHNode<SIZE, LEN> for GWNode {
                 _ => continue,
             };
             let raw_bytes = &pkt.payload;
+            println!(
+                "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
+                pkt.spreading, pkt.bandwidth, pkt.freq, pkt.rssi, pkt.snr
+            );
             match postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes) {
                 Ok(packets) => {
                     println!("SUCCESS !!!! Received packet: {:?}", packets.len());

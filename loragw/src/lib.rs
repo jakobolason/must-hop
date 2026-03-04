@@ -319,13 +319,11 @@ impl Concentrator<Running> {
             None => return Ok(()),
         };
 
-        // 1. Set the file descriptor to non-blocking mode
         unsafe {
             let flags = libc::fcntl(fd, libc::F_GETFL, 0);
             libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
         }
 
-        // 2. Read available bytes
         let mut read_buf = [0u8; 128];
         let bytes_read = unsafe {
             libc::read(
@@ -341,7 +339,6 @@ impl Concentrator<Running> {
                 .extend_from_slice(&read_buf[..bytes_read as usize]);
         }
 
-        // 3. Scan the buffer
         let mut rd_idx = 0;
         let mut frame_end_idx = 0;
         let wr_idx = self.state.gps_buffer.len();
@@ -359,15 +356,10 @@ impl Concentrator<Running> {
                     )
                 };
 
-                // FIX 1: If the expected frame size is larger than the available data,
-                // the message is incomplete. Break out of the loop and wait for more data.
                 if frame_size > (wr_idx - rd_idx) {
                     break;
                 }
 
-                // FIX 2: If the checksum failed, don't consume the corrupted frame size.
-                // Just skip the sync char by setting frame_size to 0.
-                // (Checking `== 2` safely maps to the C enum `INVALID` value)
                 if msg_type as u32 == 2 {
                     frame_size = 0;
                 }
@@ -394,7 +386,6 @@ impl Concentrator<Running> {
             }
         }
 
-        // 4. Remove safely processed bytes, leaving incomplete fragments for next time
         if frame_end_idx > 0 {
             self.state.gps_buffer.drain(..frame_end_idx);
         }
@@ -412,7 +403,7 @@ impl Concentrator<Running> {
         unsafe { hal_call!(lgw_gps_get(&mut utc, &mut gps_time, &mut loc, &mut err)) }?;
 
         let coords = Coordinates::from(loc);
-        let duration = std::time::Duration::new(utc.tv_sec as u64, utc.tv_nsec as u32);
+        let duration = std::time::Duration::new(gps_time.tv_sec as u64, gps_time.tv_nsec as u32);
 
         Ok((coords, duration))
     }

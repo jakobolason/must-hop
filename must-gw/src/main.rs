@@ -37,27 +37,28 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         }
     }
 
-    loop {
-        if let Err(e) = conc.process_gps_frames() {
-            eprintln!("Error processing GPS frames: {:?}", e);
-            sleep(Duration::from_millis(500)).await;
-            continue;
-        }
-        match conc.get_gps() {
-            Ok((coords, duration)) => {
-                println!(
-                    "GPS Fix -> Lat: {:.6}, Lon: {:.6}, Alt: {}m",
-                    coords.lat, coords.lon, coords.alt
-                );
-                println!("dur: {:?}", duration);
-            }
-            Err(_) => {
-                // Ignore the error! It just means the GPS is still searching for satellites
-                // or we haven't read enough valid frames yet.
-            }
-        }
-        sleep(Duration::from_millis(500)).await;
-    }
+    // loop {
+    //     if let Err(e) = conc.process_gps_frames() {
+    //         eprintln!("Error processing GPS frames: {:?}", e);
+    //         sleep(Duration::from_millis(500)).await;
+    //         continue;
+    //     }
+    //     match conc.get_gps() {
+    //         Ok((coords, duration)) => {
+    //             println!(
+    //                 "GPS Fix -> Lat: {:.6}, Lon: {:.6}, Alt: {}m",
+    //                 coords.lat, coords.lon, coords.alt
+    //             );
+    //             println!("dur: {:?}", duration.as_millis());
+    //         }
+    //         Err(_) => {
+    //             // Ignore the error! It just means the GPS is still searching for satellites
+    //             // or we haven't read enough valid frames yet.
+    //         }
+    //     }
+    //     sleep(Duration::from_millis(500)).await;
+    // }
+
     println!("now try receive!");
     let mut node = node::GWNode::new(conc);
 
