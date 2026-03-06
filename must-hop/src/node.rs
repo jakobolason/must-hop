@@ -21,8 +21,8 @@ pub enum PacketType {
     Data,
     /// Payload should be bitmask of received packets
     Ack,
-    /// When GW boots up, it sends this out
-    BootUp,
+    /// The GW should send out periodic heartbeats
+    HeartBeat,
 }
 
 /// MHPacket defines the package sent around the network

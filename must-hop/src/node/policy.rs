@@ -1,4 +1,4 @@
-use crate::node::{MHNode, PacketType};
+use crate::node::MHNode;
 
 #[cfg(not(feature = "in_std"))]
 use defmt::{error, info};
@@ -9,57 +9,61 @@ use super::{
     MHPacket,
     network_manager::{NetworkManager, NetworkManagerError},
 };
+
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
 pub trait RoutingPolicy<const SIZE: usize, const LEN: usize> {
-    /// Takes received packets and decides what to send on (TX) and what to keep (RX)
-    fn process_packets(
+    fn check_heartbeat(
+        &mut self,
         manager: &mut NetworkManager<SIZE, LEN>,
-        pkts: Vec<MHPacket<SIZE>, LEN>,
-    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Vec<MHPacket<SIZE>, LEN>), NetworkManagerError>;
+    ) -> Result<Option<MHPacket<SIZE>>, NetworkManagerError>;
 }
 
 pub struct NodePolicy;
 impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for NodePolicy {
-    fn process_packets(
-        manager: &mut NetworkManager<SIZE, LEN>,
-        pkts: Vec<MHPacket<SIZE>, LEN>,
-    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Vec<MHPacket<SIZE>, LEN>), NetworkManagerError> {
-        // If 1 package or multiple packets should be sent on:
-        // let NM get these logged, and perhaps add any timed out packets
-        manager.handle_packets(pkts)
+    fn check_heartbeat(
+        &mut self,
+        _manager: &mut NetworkManager<SIZE, LEN>,
+    ) -> Result<Option<MHPacket<SIZE>>, NetworkManagerError> {
+        Ok(None)
     }
 }
 
-/// A gateway responds with an ACK to all packages, but the node application should also receive
-/// the packet as well
-pub struct GatewayPolicy;
-impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for GatewayPolicy {
-    fn process_packets(
-        _manager: &mut NetworkManager<SIZE, LEN>,
-        pkts: Vec<MHPacket<SIZE>, LEN>,
-    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Vec<MHPacket<SIZE>, LEN>), NetworkManagerError> {
-        let to_send = pkts
-            .iter()
-            // Filter out GW's own ACKS
-            .filter(|pkt| pkt.packet_type != PacketType::Ack && pkt.source_id != 0)
-            .map(|pkt| {
-                // The rest of the fields don't really matter, because the pid is the first thing that
-                // NM checks
-                MHPacket {
-                    destination_id: pkt.source_id,
-                    source_id: pkt.destination_id,
-                    packet_type: PacketType::Ack,
-                    payload: Vec::new(),
-                    packet_id: pkt.packet_id,
-                    hop_count: 0,
-                    hop_to_gw: 0,
-                }
-            })
-            .collect();
+/// A gateway sends out periodic heartbeats
+#[cfg(feature = "in_std")]
+pub struct GatewayPolicy {
+    pub last_heartbeat: Option<Instant>,
+    pub timeout: u64,
+}
+#[cfg(feature = "in_std")]
+impl GatewayPolicy {
+    pub fn new(timeout: u64) -> Self {
+        Self {
+            last_heartbeat: None,
+            timeout,
+        }
+    }
+}
 
-        Ok((to_send, pkts))
+#[cfg(feature = "in_std")]
+impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for GatewayPolicy {
+    fn check_heartbeat(
+        &mut self,
+        manager: &mut NetworkManager<SIZE, LEN>,
+    ) -> Result<Option<MHPacket<SIZE>>, NetworkManagerError> {
+        let now = Instant::now();
+        let should_send = match self.last_heartbeat {
+            None => true,
+            Some(last) => now.duration_since(last) >= Duration::from_secs(self.timeout),
+        };
+        if should_send {
+            self.last_heartbeat = Some(now);
+            let pkt = manager.add_heartbeat()?;
+            Ok(Some(pkt))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -72,7 +76,7 @@ where
         node: &mut Node,
         tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
-    ) -> impl Future<Output = Result<Vec<MHPacket<SIZE>, LEN>, Node::Error>>;
+    ) -> impl Future<Output = Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error>>;
 }
 
 pub struct RandomAccessMac;
@@ -86,13 +90,21 @@ where
         node: &mut Node,
         tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
-    ) -> Result<Vec<MHPacket<SIZE>, LEN>, Node::Error> {
+    ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
         if !tx_queue.is_empty() {
             node.transmit(tx_queue).await?;
             tx_queue.clear();
         }
-        let conn = node.listen(rx_buffer, true).await?;
-        node.receive(conn, rx_buffer).await
+        match node.listen(rx_buffer, true).await {
+            Ok(conn) => match node.receive(conn, rx_buffer).await {
+                Ok(pkts) => Ok(Some(pkts)),
+                Err(e) => Err(e),
+            },
+            Err(e) => {
+                // error!("Error in listening: {:?}", e);
+                Ok(None)
+            }
+        }
     }
 }
 
@@ -136,7 +148,7 @@ where
         node: &mut Node,
         tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
-    ) -> Result<Vec<MHPacket<SIZE>, LEN>, Node::Error> {
+    ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
         let now = Instant::now();
         let slot = self.current_slot(now);
 
@@ -163,6 +175,6 @@ where
             }
             Timer::at(next_slot_time).await;
         }
-        Ok(received_packets)
+        Ok(Some(received_packets))
     }
 }

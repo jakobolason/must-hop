@@ -97,11 +97,11 @@ impl GWNode {
     }
     fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<TxPacket, Error> {
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
-        println!("BUFFER SIZE IS: {}", SIZE);
+        log::info!("BUFFER SIZE IS: {}", SIZE);
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
             Err(e) => {
-                eprintln!("Serialization failed: {:?}", e);
+                log::error!("Serialization failed: {:?}", e);
                 return Err(Error::Data);
             }
         };
@@ -145,19 +145,23 @@ impl MHNode<SIZE, LEN> for GWNode {
                 _ => continue,
             };
             let raw_bytes = &pkt.payload;
-            println!(
+            log::info!(
                 "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
-                pkt.spreading, pkt.bandwidth, pkt.freq, pkt.rssi, pkt.snr
+                pkt.spreading,
+                pkt.bandwidth,
+                pkt.freq,
+                pkt.rssi,
+                pkt.snr
             );
             match postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes) {
                 Ok(packets) => {
-                    println!("SUCCESS !!!! Received packet: {:?}", packets.len());
+                    log::info!("SUCCESS !!!! Received packet: {:?}", packets.len());
                     for packet in packets {
                         rec_packets.push(packet).map_err(|_| loragw::Error::Data)?
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error deserializing MHPacket: {:?}", e);
+                    log::error!("Error deserializing MHPacket: {:?}", e);
                     continue;
                 }
             };
@@ -185,7 +189,8 @@ impl MHNode<SIZE, LEN> for GWNode {
             }
             if with_timeout && start_time.elapsed() > timeout {
                 // TODO: Need better error type here
-                return Err(loragw::Error::Busy);
+                // return Err(loragw::Error::Busy);
+                return Ok(());
             }
             time::sleep(Duration::from_millis(10)).await;
         }

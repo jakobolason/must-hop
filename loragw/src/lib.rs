@@ -247,18 +247,18 @@ impl Concentrator<Running> {
     /// Perform a non-blocking read of up to 16 packets from
     /// concentrator's FIFO.
     pub fn receive(&self) -> Result<Option<Vec<RxPacket>>> {
-        log::info!("Setting up receive!");
+        log::debug!("Setting up receive!");
         let mut tmp_buf: [std::mem::MaybeUninit<llg::lgw_pkt_rx_s>; 16] =
             unsafe { std::mem::MaybeUninit::uninit().assume_init() };
 
-        log::info!("Now calling");
+        log::debug!("Now calling");
         let len = unsafe {
             hal_call!(lgw_receive(
                 tmp_buf.len() as u8,
                 tmp_buf.as_mut_ptr() as *mut llg::lgw_pkt_rx_s
             ))
         }?;
-        log::info!("Received {} packets", len);
+        log::debug!("Received {} packets", len);
         if len > 0 {
             let mut out = Vec::with_capacity(len as usize);
             for i in 0..(len as usize) {
@@ -419,7 +419,7 @@ impl Concentrator<Running> {
         unsafe {
             hal_call!(lgw_status(
                 {
-                    log::info!("[WARN] remove hardcoded RF chain argument from status calls");
+                    log::error!("[WARN] remove hardcoded RF chain argument from status calls");
                     0u8
                 },
                 TX_STATUS,

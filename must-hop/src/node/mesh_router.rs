@@ -1,11 +1,10 @@
 use core::fmt;
-use core::marker::PhantomData;
 #[cfg(not(feature = "in_std"))]
 use defmt::trace;
 #[cfg(feature = "in_std")]
 use log::trace;
 
-use crate::node::policy::{GatewayPolicy, MacPolicy, RoutingPolicy};
+use crate::node::policy::{MacPolicy, RoutingPolicy};
 
 use super::{
     MHNode, MHPacket,
@@ -55,7 +54,7 @@ where
 {
     node: Node,
     manager: NetworkManager<SIZE, LEN>,
-    routing_policy: PhantomData<Routing>,
+    routing_policy: Routing,
     mac_policy: Mac,
     tx_queue: Vec<MHPacket<SIZE>, LEN>,
 }
@@ -72,13 +71,13 @@ where
         node: Node,
         manager: NetworkManager<SIZE, LEN>,
         mac_policy: Mac,
-        _routing: Routing,
+        routing_policy: Routing,
     ) -> Self {
         Self {
             node,
             manager,
             mac_policy,
-            routing_policy: PhantomData,
+            routing_policy,
             tx_queue: Vec::new(),
         }
     }
@@ -101,12 +100,27 @@ where
         &mut self,
         rx_buf: &mut Node::ReceiveBuffer,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
+        // Heartbeats, only for GW
+        if let Some(heartbeat_pkt) = self.routing_policy.check_heartbeat(&mut self.manager)? {
+            trace!("SENDING OUT HEARTBEAT!!");
+            self.tx_queue
+                .push(heartbeat_pkt)
+                .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
+        }
+        trace!("now running mac ...");
         let received_pkts = self
             .mac_policy
             .run_mac(&mut self.node, &mut self.tx_queue, rx_buf)
             .await
             .map_err(MeshRouterError::Node)?;
-        let (to_forward, to_me) = Routing::process_packets(&mut self.manager, received_pkts)?;
+        // Short circuit if no packets received
+        if received_pkts.is_none() {
+            return Ok(Vec::new());
+        }
+        trace!("Got packets to send or receiving");
+        let (to_forward, to_me) = self
+            .manager
+            .handle_packets(received_pkts.expect("Has checked for it being none just above"))?;
 
         for pkt in to_forward {
             self.tx_queue
@@ -169,7 +183,7 @@ where
             .map_err(MeshRouterError::Node)?;
         trace!("Done receiving, handling {} pkts", pkts.len());
 
-        let (to_send, my_pkt) = Routing::process_packets(&mut self.manager, pkts)?;
+        let (to_send, my_pkt) = self.manager.handle_packets(pkts)?;
         trace!("GOT {} packets for me!", my_pkt.len());
         trace!("GOT {} packets which should be sent on!", to_send.len());
         if !to_send.is_empty() {
@@ -185,15 +199,15 @@ where
     }
 }
 
-impl<Node, Mac, const SIZE: usize, const LEN: usize> MeshRouter<Node, Mac, GatewayPolicy, SIZE, LEN>
-where
-    Node: MHNode<SIZE, LEN>,
-    Mac: MacPolicy<Node, SIZE, LEN>,
-{
-    /// When gateway starts up, it should annonce itself, such that the nodes know their distance
-    /// to GW and retransmits messages if they are closer.
-    pub async fn bootup(&mut self) -> Result<(), MeshRouterError<Node::Error>> {
-        let bootup_pkt = self.manager.handle_bootup()?;
-        self.send_packets(&[bootup_pkt]).await
-    }
-}
+// impl<Node, Mac, const SIZE: usize, const LEN: usize> MeshRouter<Node, Mac, GatewayPolicy, SIZE, LEN>
+// where
+//     Node: MHNode<SIZE, LEN>,
+//     Mac: MacPolicy<Node, SIZE, LEN>,
+// {
+//     /// When gateway starts up, it should annonce itself, such that the nodes know their distance
+//     /// to GW and retransmits messages if they are closer.
+//     pub async fn bootup(&mut self) -> Result<(), MeshRouterError<Node::Error>> {
+//         let bootup_pkt = self.manager.handle_bootup()?;
+//         self.send_packets(&[bootup_pkt]).await
+//     }
+// }

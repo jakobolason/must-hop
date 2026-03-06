@@ -109,14 +109,14 @@ build-gw-pi:
 [group('Pi deployments')]
 deploy-gw-pi: build-gw-pi
   @echo "Copying binary GW to pi"
-  ssh {{PI_USER}}@{{PI_HOST}} 'mkdir -p {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release'
+  ssh {{PI_USER}}@{{PI_HOST}} 'mkdir -p {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release && rm -f {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
   scp target/aarch64-unknown-linux-gnu/release/must-gw {{PI_USER}}@{{PI_HOST}}:{{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw
 
 [group('Pi deployments')]
 run-gw: deploy-gw-pi
   @echo "Running GW on pi"
   ssh {{PI_USER}}@{{PI_HOST}} 'chmod +x {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw \
-    && {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
+    && RUST_LOG=info,must_hop=trace {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 # Format all code in the workspace
 [group('utils')]

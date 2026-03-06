@@ -81,7 +81,7 @@ pub enum PayloadType {
     Data,
     Command,
     ACK,
-    Bootup,
+    HeartBeat,
 }
 
 /// Maintains record of packages sent, to ensure that they are received.
@@ -148,8 +148,9 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         // Clean up packets with too many retries
         // TODO: Shuold switch SF if this happens
         let curr_time = Instant::now();
-        self.pending_acks
-            .retain(|p| p.retries < self._max_retries || p.timeout < curr_time);
+        self.pending_acks.retain(
+            |p| p.retries < self._max_retries, /*|| p.timeout < curr_time*/
+        );
 
         // Look into packages with expired timeouts,
         let pendings_len = self.pending_acks.len() as u8;
@@ -160,6 +161,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             .filter(|p| p.timeout < curr_time)
             .map(|p| {
                 p.retries += 1;
+                p.timeout = curr_time + Duration::from_secs(self.timeout as u64);
                 p.packet.clone()
             })
             .collect();
@@ -197,18 +199,22 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         &mut self,
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
-        if pkt.packet_type == PacketType::BootUp {
+        if pkt.packet_type == PacketType::HeartBeat {
+            trace!("!!! RECEIVED A HEARTBEAT {} !!!", pkt.packet_id);
             // TODO: What about GW failure/node failure, altering this?
-            if pkt.hop_count >= self.gw_hops {
+            if pkt.hop_count >= self.gw_hops
+                || self.recent_seen.contains((pkt.source_id, pkt.packet_id))
+            {
                 // If incoming route has the same length, then discard this
                 return Ok(None);
             }
+            trace!("!!! SENDING HEARTBEAT ON {}", pkt.packet_id);
             // GW sends 0, first node has 1 hop, therefore:
             self.gw_hops = pkt.hop_count + 1;
             // Add to recent seen, to compare later
             self.recent_seen.push((pkt.source_id, pkt.packet_id));
             // Fire and forget
-            return Ok(Some((pkt, PayloadType::Bootup)));
+            return Ok(Some((pkt, PayloadType::HeartBeat)));
         }
         // Check if it is one of our packets
         if let Some(our_packet_index) = self.pending_acks.iter().position(|p| {
@@ -216,7 +222,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             p.packet.packet_id == pkt.packet_id
                 && (p.packet.source_id == pkt.source_id
                     || (pkt.packet_type == PacketType::Ack
-            // TODO: Shouldn't this be flipped?
+            // TODO: Shouldn't this be flipped? I don't think so
                         && pkt.destination_id == p.packet.source_id))
         }) {
             // Then remove it from our vec, and return
@@ -291,7 +297,25 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             };
             match ptype {
                 PayloadType::Data => to_send.push(packet).map_err(err_closure)?,
-                PayloadType::Command => commands.push(packet).map_err(err_closure)?,
+                PayloadType::Command => {
+                    // Then we give it back to the app, but also send an ACK back to the sender
+                    commands.push(packet.clone()).map_err(err_closure)?;
+                    if packet.packet_type == PacketType::Data {
+                        to_send
+                            .push(MHPacket {
+                                destination_id: packet.source_id,
+                                packet_type: PacketType::Ack,
+                                packet_id: packet.packet_id,
+                                source_id: self.source_id,
+                                payload: Vec::from_slice(&[0u8])
+                                    .map_err(|_| NetworkManagerError::BufferFull)?,
+                                hop_count: 0,
+                                hop_to_gw: self.gw_hops,
+                            })
+                            .map_err(err_closure)?
+                    }
+                }
+                // Mainly here to stop repeating packets TODO: Check if this ever happens
                 PayloadType::ACK => to_send
                     .push(MHPacket {
                         destination_id: packet.source_id,
@@ -304,14 +328,13 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                         hop_to_gw: self.gw_hops,
                     })
                     .map_err(err_closure)?,
-                PayloadType::Bootup => to_send
+                PayloadType::HeartBeat => to_send
                     .push(MHPacket {
                         destination_id: packet.destination_id,
-                        packet_type: PacketType::BootUp,
+                        packet_type: PacketType::HeartBeat,
                         packet_id: packet.packet_id,
-                        source_id: self.source_id,
-                        payload: Vec::from_slice(&[0u8])
-                            .map_err(|_| NetworkManagerError::BufferFull)?,
+                        source_id: packet.source_id,
+                        payload: packet.payload,
                         hop_count: packet.hop_count + 1,
                         hop_to_gw: self.gw_hops,
                     })
@@ -321,11 +344,12 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Ok((to_send, commands))
     }
 
-    pub fn handle_bootup(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError> {
+    pub fn add_heartbeat(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError> {
         self.next_packet_id += 1;
+        self.recent_seen.push((self.source_id, self.next_packet_id));
         Ok(MHPacket {
             destination_id: 0, // broadcast id
-            packet_type: PacketType::BootUp,
+            packet_type: PacketType::HeartBeat,
             packet_id: self.next_packet_id,
             source_id: self.source_id,
             payload: Vec::from_slice(&[]).map_err(|_| NetworkManagerError::BufferFull)?,

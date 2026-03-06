@@ -836,6 +836,7 @@ dependencies = [
  "env_logger",
  "heapless 0.9.2",
  "libloragw-sys",
+ "log",
  "loragw",
  "must-hop",
  "postcard",

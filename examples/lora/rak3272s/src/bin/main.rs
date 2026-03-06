@@ -114,7 +114,7 @@ async fn sensor_task(
         info!("Send a packet!");
         let random = rng.next_u64();
         // random number between 3 and 8
-        let r_num = (random % 5) + 3;
+        let r_num = (random % 5) + 8;
         info!("waiting {} seconds ...", r_num);
 
         Timer::after_secs(r_num).await;
