@@ -25,6 +25,8 @@ use lora_phy::LoRa;
 use lora_phy::mod_params::{Bandwidth, CodingRate, SpreadingFactor};
 use lora_phy::sx126x;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
+use must_hop::lora::LoraNode;
+use must_hop::node::policy::RandomAccessMac;
 use {defmt_rtt as _, panic_probe as _};
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
@@ -144,7 +146,15 @@ pub async fn lora_task(
         iq: false,
     };
     let source_id = 2;
-    lora::lora_task::<_, _, _, _, MAX_PACK_LEN, LEN>(&mut lora, channel, tp, source_id, 3, 3).await;
+    let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp) {
+        Ok(node) => node,
+        Err(e) => {
+            error!("Failed to initialize lora node: {:?}", e);
+            return;
+        }
+    };
+    let mac = RandomAccessMac;
+    lora::lora_task(node, channel, source_id, 3, 3, mac).await;
 }
 
 // This creates the task which checks for sensor data
