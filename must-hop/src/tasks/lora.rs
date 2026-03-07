@@ -40,7 +40,7 @@ pub async fn lora_task<Node, T, M, const SIZE: usize, const LEN: usize>(
 
         // Before letting router do its thing, we check if we want to send something
         if let Ok(data) = channel.try_receive()
-            && let Err(e) = router.queue_payload(data.into(), 0)
+            && let Err(e) = router.queue_payload(data.into(), 1)
         {
             error!("Error queing sensor data: {:?}", e);
         }
@@ -48,7 +48,11 @@ pub async fn lora_task<Node, T, M, const SIZE: usize, const LEN: usize>(
         match router.tick(&mut receiving_buffer).await {
             Ok(my_pkts) => {
                 if !my_pkts.is_empty() {
-                    info!("received these packets for me!: {}", my_pkts.len())
+                    info!(
+                        "received these packets for me!: {}, {}",
+                        my_pkts.len(),
+                        my_pkts[0].packet_id
+                    )
                 }
             }
             Err(MeshRouterError::Node(e)) => match e {

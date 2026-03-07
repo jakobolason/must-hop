@@ -114,7 +114,7 @@ async fn sensor_task(
         info!("Send a packet!");
         let random = rng.next_u64();
         // random number between 3 and 8
-        let r_num = (random % 5) + 8;
+        let r_num = (random % 5) + 15;
         info!("waiting {} seconds ...", r_num);
 
         Timer::after_secs(r_num).await;
@@ -145,7 +145,7 @@ pub async fn lora_task(
         crc: true,
         iq: false,
     };
-    let source_id = 2;
+    let source_id = 3;
     let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp) {
         Ok(node) => node,
         Err(e) => {

@@ -1,8 +1,8 @@
 use core::fmt;
 #[cfg(not(feature = "in_std"))]
-use defmt::trace;
+use defmt::{error, trace};
 #[cfg(feature = "in_std")]
-use log::trace;
+use log::{error, trace};
 
 use crate::node::policy::{MacPolicy, RoutingPolicy};
 
@@ -87,12 +87,8 @@ where
         payload: Vec<u8, SIZE>,
         destination: u8,
     ) -> Result<(), MeshRouterError<Node::Error>> {
-        let pkts = self.manager.payload_to_send(payload, destination)?;
-        for pkt in pkts {
-            self.tx_queue
-                .push(pkt)
-                .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
-        }
+        trace!("Queing payload ...");
+        self.manager.queue_new_payload(payload, destination)?;
         Ok(())
     }
 
@@ -107,25 +103,34 @@ where
                 .push(heartbeat_pkt)
                 .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
         }
-        trace!("now running mac ...");
+
+        let retransmission = self.manager.get_pending_transmissions()?;
+        for pkt in retransmission {
+            self.tx_queue
+                .push(pkt)
+                .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
+        }
+
+        // trace!("now running mac ...");
         let received_pkts = self
             .mac_policy
             .run_mac(&mut self.node, &mut self.tx_queue, rx_buf)
             .await
             .map_err(MeshRouterError::Node)?;
         // Short circuit if no packets received
-        if received_pkts.is_none() {
-            return Ok(Vec::new());
-        }
-        trace!("Got packets to send or receiving");
-        let (to_forward, to_me) = self
-            .manager
-            .handle_packets(received_pkts.expect("Has checked for it being none just above"))?;
+        let received_pkts = match received_pkts {
+            Some(pkts) => pkts,
+            None => Vec::new(),
+        };
+        // trace!("Got packets to send or receiving");
+        let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;
 
         for pkt in to_forward {
-            self.tx_queue
-                .push(pkt)
-                .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
+            // If buffer is full, break adding packets to it.
+            if self.tx_queue.push(pkt).is_err() {
+                error!("Tx queue is full, dropping packets ...");
+                break;
+            }
         }
         Ok(to_me)
     }
@@ -145,15 +150,15 @@ where
     // TODO: If an error like buffer overflow occurs, then this should be handled by the NM. I
     // think the payload received should be dropped, and the current packages retransmitted
     // Use to send data over the network
-    pub async fn send_payload(
-        &mut self,
-        payload: Vec<u8, SIZE>,
-        destination: u8,
-    ) -> Result<(), MeshRouterError<Node::Error>> {
-        let timeouted_pkts = self.manager.payload_to_send(payload, destination)?;
-        trace!("Sending {} packets!", timeouted_pkts.len());
-        self.send_packets(&timeouted_pkts).await
-    }
+    // pub async fn send_payload(
+    //     &mut self,
+    //     payload: Vec<u8, SIZE>,
+    //     destination: u8,
+    // ) -> Result<(), MeshRouterError<Node::Error>> {
+    //     let timeouted_pkts = self.manager.payload_to_send(payload, destination)?;
+    //     trace!("Sending {} packets!", timeouted_pkts.len());
+    //     self.send_packets(&timeouted_pkts).await
+    // }
 
     async fn send_packets(
         &mut self,

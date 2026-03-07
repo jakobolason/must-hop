@@ -2,9 +2,9 @@ use super::{MHPacket, PacketType};
 use core::cmp::{max, min};
 
 #[cfg(not(feature = "in_std"))]
-use defmt::{error, trace};
+use defmt::{debug, error, trace};
 #[cfg(feature = "in_std")]
-use log::{error, trace};
+use log::{debug, error, trace};
 
 use embassy_time::{Duration, Instant};
 use heapless::Vec;
@@ -45,7 +45,7 @@ impl From<PostError> for NetworkManagerError {
     }
 }
 
-/// Ring buffer to hold recently ACK'ed messages, to avoid retransmitting them
+/// Ring buffer to hold recently seen messages, to avoid retransmitting them
 pub struct RecentSeen<const N: usize> {
     buffer: [Option<(u8, u16)>; N],
     cursor: usize,
@@ -114,7 +114,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         }
     }
 
-    pub fn new_packet(
+    fn new_packet(
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u8,
@@ -140,10 +140,8 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     /// This removes retried packets, and checks the pending acks list. Given the data payload in bytes, it is made into a MHPacket
     /// and added to internal acks list. It returns a list of packets to send, which includes the packet with the payload provided.
     /// But it also returns all packets which haven't been ACK'ed before it's timeout.
-    pub fn payload_to_send(
+    pub fn get_pending_transmissions(
         &mut self,
-        payload: Vec<u8, SIZE>,
-        destination: u8,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, NetworkManagerError> {
         // Clean up packets with too many retries
         // TODO: Shuold switch SF if this happens
@@ -152,10 +150,16 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             |p| p.retries < self._max_retries, /*|| p.timeout < curr_time*/
         );
 
+        // NOTE: Only for debug purposes:
+        debug!(" LIST OF PEND ACKS: ");
+        self.pending_acks
+            .iter()
+            .for_each(|p| debug!("{:?}, {}", p.packet.packet_type, p.packet.packet_id));
+
         // Look into packages with expired timeouts,
         let pendings_len = self.pending_acks.len() as u8;
         trace!("pendings len: {}", pendings_len);
-        let mut to_send: Vec<MHPacket<SIZE>, LEN> = self
+        let to_send: Vec<MHPacket<SIZE>, LEN> = self
             .pending_acks
             .iter_mut()
             .filter(|p| p.timeout < curr_time)
@@ -166,19 +170,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             })
             .collect();
 
-        let new_pkt: MHPacket<SIZE> = self.new_packet(payload, destination)?;
-        if to_send.push(new_pkt.clone()).is_err() {
-            error!("Buffer was too full");
-        } else {
-            // NOTE: Only do this if buffer was not full, otherwise this just errors out
-            // Now we add the new_pkt to pending_acks
-            self.add_packet(new_pkt)?;
-        }
         Ok(to_send)
     }
 
     /// Adds the packet to the internal list
-    pub fn add_packet(&mut self, packet: MHPacket<SIZE>) -> Result<(), NetworkManagerError> {
+    fn add_packet(&mut self, packet: MHPacket<SIZE>) -> Result<(), NetworkManagerError> {
         let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
         let pkt_timout = curr_time + Duration::from_secs(self.timeout as u64);
         // First add this package to our vec
@@ -193,6 +189,16 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Ok(())
     }
 
+    pub fn queue_new_payload(
+        &mut self,
+        payload: Vec<u8, SIZE>,
+        destination: u8,
+    ) -> Result<(), NetworkManagerError> {
+        let new_pkt = self.new_packet(payload, destination)?;
+        self.add_packet(new_pkt)?;
+        Ok(())
+    }
+
     /// Manages actions which the pakcet might require from a network pov, and returns the packet
     /// if none are required, otherwise returns none
     fn receive_packet(
@@ -200,7 +206,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
         if pkt.packet_type == PacketType::HeartBeat {
-            trace!("!!! RECEIVED A HEARTBEAT {} !!!", pkt.packet_id);
+            trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
             // TODO: What about GW failure/node failure, altering this?
             if pkt.hop_count >= self.gw_hops
                 || self.recent_seen.contains((pkt.source_id, pkt.packet_id))
@@ -226,9 +232,12 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                         && pkt.destination_id == p.packet.source_id))
         }) {
             // Then remove it from our vec, and return
-            trace!("RECEIVED KNOWN PACKAGE, REMOVING FROM LIST");
+            trace!(
+                "RECEIVED KNOWN PACKAGE, REMOVING FROM LIST {}",
+                pkt.packet_id
+            );
             self.pending_acks.remove(our_packet_index);
-            // self.recent_seen.push((pkt.source_id, pkt.packet_id));
+            self.recent_seen.push((pkt.source_id, pkt.packet_id));
             return Ok(None);
         }
         // So we aren't waiting for pkt, perhaps we've seen it before?
@@ -265,7 +274,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 temp
             };
             self.add_packet(increased_gw_hops.clone())?;
-            trace!("PACKAGE SHOULD BE SENT ON");
+            trace!(
+                "PACKAGE SHOULD BE SENT ON, id: {}",
+                increased_gw_hops.packet_id
+            );
             Ok(Some((increased_gw_hops, PayloadType::Data)))
         } else {
             // If this is actually for us, then it is probably a command that the underlying app
@@ -347,6 +359,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     pub fn add_heartbeat(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError> {
         self.next_packet_id += 1;
         self.recent_seen.push((self.source_id, self.next_packet_id));
+        trace!(
+            "----------- Sending Heartbeat with packet id: {}",
+            self.next_packet_id
+        );
         Ok(MHPacket {
             destination_id: 0, // broadcast id
             packet_type: PacketType::HeartBeat,

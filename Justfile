@@ -116,7 +116,8 @@ deploy-gw-pi: build-gw-pi
 run-gw: deploy-gw-pi
   @echo "Running GW on pi"
   ssh {{PI_USER}}@{{PI_HOST}} 'chmod +x {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw \
-    && RUST_LOG=info,must_hop=trace {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
+    && RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
+    {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 # Format all code in the workspace
 [group('utils')]

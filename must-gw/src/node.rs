@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
+use log::trace;
 use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
 use must_hop::node::{MHNode, MHPacket};
 use postcard::to_slice;
@@ -119,6 +120,9 @@ impl MHNode<SIZE, LEN> for GWNode {
     type Duration = u16;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
+        packets
+            .iter()
+            .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
         let tx_pkt = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
             time::sleep(Duration::from_millis(5)).await;
@@ -155,7 +159,10 @@ impl MHNode<SIZE, LEN> for GWNode {
             );
             match postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes) {
                 Ok(packets) => {
-                    log::info!("SUCCESS !!!! Received packet: {:?}", packets.len());
+                    log::info!(
+                        "SUCCESS !!!! Received amount of packets: {:?}",
+                        packets.len()
+                    );
                     for packet in packets {
                         rec_packets.push(packet).map_err(|_| loragw::Error::Data)?
                     }
@@ -175,7 +182,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         with_timeout: bool,
     ) -> Result<Self::Connection, Self::Error> {
         let start_time = Instant::now();
-        let timeout = Duration::from_secs(5);
+        let timeout = Duration::from_secs(1);
         rec_buf.clear();
 
         loop {
@@ -192,7 +199,7 @@ impl MHNode<SIZE, LEN> for GWNode {
                 // return Err(loragw::Error::Busy);
                 return Ok(());
             }
-            time::sleep(Duration::from_millis(10)).await;
+            time::sleep(Duration::from_millis(5)).await;
         }
     }
 }

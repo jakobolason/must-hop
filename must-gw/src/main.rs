@@ -9,7 +9,8 @@ use must_hop::node::{
     network_manager::NetworkManager,
     policy::{GatewayPolicy, NodePolicy, RandomAccessMac},
 };
-use tokio::time::sleep;
+use std::io::Write;
+use tokio::time::{Instant, sleep};
 
 async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("Now try and use loragw:");
@@ -97,8 +98,46 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
 
 #[tokio::main]
 async fn main() {
+    let start_time = Instant::now();
     // To get logging from loragw
-    env_logger::init();
+    env_logger::Builder::from_default_env()
+        .format(move |buf, record| {
+            let elapsed = start_time.elapsed();
+
+            let file = record.file().unwrap_or("unknown");
+            let line = record.line().unwrap_or(0);
+
+            // 1. Pick the color for the log level
+            let level_color = match record.level() {
+                log::Level::Error => "\x1b[31m", // Red
+                log::Level::Warn => "\x1b[33m",  // Yellow
+                log::Level::Info => "\x1b[32m",  // Green
+                log::Level::Debug => "\x1b[34m", // Blue
+                log::Level::Trace => "\x1b[90m", // Gray (Bright Black)
+            };
+
+            // 2. Define the gray color for the file path, and the reset code
+            let gray = "\x1b[90m";
+            let reset = "\x1b[0m"; // Turns formatting back to normal
+
+            // 3. Paint the string!
+            writeln!(
+                buf,
+                "{}.{:06} [{}{:>5}{}] {} {}({} {}:{}){}",
+                elapsed.as_secs(),
+                elapsed.subsec_micros(),
+                level_color, // Start level color
+                record.level(),
+                reset,         // Reset after level
+                record.args(), // The actual message
+                gray,          // Start gray for the file info
+                record.target(),
+                file,
+                line,
+                reset // Reset at the very end
+            )
+        })
+        .init();
 
     log::info!("Spawning concentrator task...");
 
