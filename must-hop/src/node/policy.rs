@@ -4,7 +4,7 @@ use crate::node::{MHNode, PacketType};
 use defmt::{debug, error, info};
 #[cfg(feature = "in_std")]
 use log::{debug, error, info};
-use postcard::to_slice;
+use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -105,6 +105,7 @@ where
             if let Some(pkt) = self.hbt_pkt.take()
                 && let Err(pkt) = tx_queue.push(pkt)
             {
+                // If queue full
                 self.hbt_pkt = Some(pkt)
             }
             node.transmit(tx_queue).await?;
@@ -123,6 +124,38 @@ where
     }
 }
 
+pub struct SlotMask {
+    mask: u32,
+}
+impl Default for SlotMask {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl SlotMask {
+    pub const fn new() -> Self {
+        Self { mask: 0 }
+    }
+    /// To set a slot inside mask
+    pub fn claim(&mut self, slot: u8) {
+        // shift 1 over to slot pos, and or with mask
+        self.mask |= 1 << slot;
+    }
+
+    /// Check given slot is occupied
+    pub fn is_taken(&self, slot: u8) -> bool {
+        (self.mask & (1 << slot)) != 0
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.mask
+    }
+
+    pub fn slot_assignment_strat(&self, max_slots: u8) -> Option<u8> {
+        (0..max_slots).find(|&i| !self.is_taken(i))
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct SlotAllocation {
     my_slot: u8,
@@ -137,7 +170,7 @@ pub struct TdmaMac<const SIZE: usize> {
     pub slots_per_frame: u8,
     pub my_tx_slot: u8,
     pub epoch: Option<Instant>,
-    pub known_slots_mask: u32,
+    pub known_slots_mask: SlotMask,
     hbt_pkt: Option<MHPacket<SIZE>>,
 }
 
@@ -148,7 +181,7 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
             slots_per_frame,
             my_tx_slot: 0,
             epoch,
-            known_slots_mask: 0,
+            known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
         }
     }
@@ -160,6 +193,33 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
         let time_in_frame = elapsed_ms % frame_duration_ms;
         (time_in_frame / (self.slot_duration.as_millis())) as u8
     }
+
+    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>]) {
+        for pkt in pkts {
+            if pkt.packet_type == PacketType::HeartBeat
+                && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
+            {
+                // Resync node to heartbeat's announced slot
+                // TODO: There must be a latency here, which should be adjusted for
+                let elapsed_in_frame =
+                    Duration::from_millis((alloc.my_slot as u64) * self.slot_duration.as_millis());
+                self.epoch = Some(Instant::now() - elapsed_in_frame);
+                // TODO: alter known slots
+                self.known_slots_mask.claim(alloc.my_slot);
+                match self
+                    .known_slots_mask
+                    .slot_assignment_strat(self.slots_per_frame)
+                {
+                    Some(free_slot) => {
+                        self.my_tx_slot = free_slot;
+                        self.known_slots_mask.claim(free_slot);
+                    }
+                    None => error!("Network is full!"),
+                }
+                break;
+            }
+        }
+    }
 }
 
 impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for TdmaMac<SIZE>
@@ -169,7 +229,7 @@ where
     fn tx_heartbeat(&mut self, mut hbt: MHPacket<SIZE>) {
         let allocation = SlotAllocation {
             my_slot: self.my_tx_slot,
-            known_slots: self.known_slots_mask,
+            known_slots: self.known_slots_mask.as_u32(),
         };
         let mut buf = [0u8; SIZE];
         if let Ok(serialized_slice) = to_slice(&allocation, &mut buf) {
@@ -194,14 +254,8 @@ where
             if let Ok(conn) = conn {
                 received_packets = node.receive(conn, rx_buffer).await?;
                 // Check for being heartbeat
-                if !received_packets.is_empty() {
-                    for pkt in &received_packets {
-                        if pkt.packet_type == PacketType::HeartBeat {
-                            self.epoch = Some(Instant::now());
-                        }
-                    }
-                    return Ok(Some(received_packets));
-                }
+                self.sync_epoch(&received_packets);
+                return Ok(Some(received_packets));
             } else {
                 info!("Error in getting conn");
                 return Ok(None);
@@ -226,6 +280,7 @@ where
                 if let Some(pkt) = self.hbt_pkt.take()
                     && let Err(pkt) = tx_queue.push(pkt)
                 {
+                    // If queue full
                     self.hbt_pkt = Some(pkt)
                 }
                 node.transmit(tx_queue).await?;
@@ -237,6 +292,7 @@ where
             let conn = node.listen(rx_buffer, true).await;
             if let Ok(conn) = conn {
                 received_packets = node.receive(conn, rx_buffer).await?;
+                self.sync_epoch(&received_packets);
             } else {
                 info!("Error in getting conn");
             }
