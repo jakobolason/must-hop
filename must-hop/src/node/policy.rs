@@ -4,6 +4,8 @@ use crate::node::{MHNode, PacketType};
 use defmt::{debug, error, info};
 #[cfg(feature = "in_std")]
 use log::{debug, error, info};
+use postcard::to_slice;
+use serde::{Deserialize, Serialize};
 
 use super::{
     MHPacket,
@@ -77,21 +79,34 @@ where
         tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
     ) -> impl Future<Output = Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error>>;
+
+    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>);
 }
 
-pub struct RandomAccessMac;
+pub struct RandomAccessMac<const SIZE: usize> {
+    hbt_pkt: Option<MHPacket<SIZE>>,
+}
 
-impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for RandomAccessMac
+impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for RandomAccessMac<SIZE>
 where
     Node: MHNode<SIZE, LEN>,
 {
+    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
+        self.hbt_pkt = Some(hbt);
+    }
+
     async fn run_mac(
         &mut self,
         node: &mut Node,
         tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
     ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
-        if !tx_queue.is_empty() {
+        if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
+            if let Some(pkt) = self.hbt_pkt.take()
+                && let Err(pkt) = tx_queue.push(pkt)
+            {
+                self.hbt_pkt = Some(pkt)
+            }
             node.transmit(tx_queue).await?;
             tx_queue.clear();
         }
@@ -108,25 +123,33 @@ where
     }
 }
 
-pub struct TdmaMac {
+#[derive(Serialize, Deserialize)]
+struct SlotAllocation {
+    my_slot: u8,
+    /// Bit mask for known slots, meaning only 32 nodes can be known at a time
+    known_slots: u32,
+}
+
+pub struct TdmaMac<const SIZE: usize> {
+    // FIXME: Remove from user, should be set by GW
     pub slot_duration: Duration,
+    // FIXME: Remove from user, should be set by GW
     pub slots_per_frame: u8,
     pub my_tx_slot: u8,
     pub epoch: Option<Instant>,
+    pub known_slots_mask: u32,
+    hbt_pkt: Option<MHPacket<SIZE>>,
 }
 
-impl TdmaMac {
-    pub fn new(
-        slot_duration: Duration,
-        slots_per_frame: u8,
-        my_tx_slot: u8,
-        epoch: Option<Instant>,
-    ) -> Self {
+impl<const SIZE: usize> TdmaMac<SIZE> {
+    pub fn new(slot_duration: Duration, slots_per_frame: u8, epoch: Option<Instant>) -> Self {
         Self {
             slot_duration,
             slots_per_frame,
-            my_tx_slot,
+            my_tx_slot: 0,
             epoch,
+            known_slots_mask: 0,
+            hbt_pkt: None,
         }
     }
 
@@ -139,10 +162,23 @@ impl TdmaMac {
     }
 }
 
-impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for TdmaMac
+impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for TdmaMac<SIZE>
 where
     Node: MHNode<SIZE, LEN>,
 {
+    fn tx_heartbeat(&mut self, mut hbt: MHPacket<SIZE>) {
+        let allocation = SlotAllocation {
+            my_slot: self.my_tx_slot,
+            known_slots: self.known_slots_mask,
+        };
+        let mut buf = [0u8; SIZE];
+        if let Ok(serialized_slice) = to_slice(&allocation, &mut buf) {
+            hbt.payload.clear();
+            let _ = hbt.payload.extend_from_slice(serialized_slice);
+        }
+        self.hbt_pkt = Some(hbt)
+    }
+
     async fn run_mac(
         &mut self,
         node: &mut Node,
@@ -186,7 +222,12 @@ where
 
         if slot == self.my_tx_slot {
             debug!(" !!!  MY SLOT !!! {}", next_slot_time);
-            if !tx_queue.is_empty() {
+            if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
+                if let Some(pkt) = self.hbt_pkt.take()
+                    && let Err(pkt) = tx_queue.push(pkt)
+                {
+                    self.hbt_pkt = Some(pkt)
+                }
                 node.transmit(tx_queue).await?;
                 tx_queue.clear();
             }

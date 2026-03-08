@@ -107,7 +107,9 @@ where
         // Heartbeats, only for GW
         if let Some(heartbeat_pkt) = self.routing_policy.check_heartbeat(&mut self.manager)? {
             trace!("SENDING OUT HEARTBEAT!!");
-            self.push_queue(heartbeat_pkt)?;
+            // TODO: Make this into a flag for the mac policy, meaning it will send the correct
+            // slot together with a heartbeat
+            self.mac_policy.tx_heartbeat(heartbeat_pkt);
         }
 
         let retransmission = self.manager.get_pending_transmissions()?;
