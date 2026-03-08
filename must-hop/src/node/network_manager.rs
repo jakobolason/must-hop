@@ -205,6 +205,9 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         &mut self,
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
+        if pkt.source_id == self.source_id {
+            return Ok(None);
+        }
         if pkt.packet_type == PacketType::HeartBeat {
             trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
             // TODO: What about GW failure/node failure, altering this?
@@ -240,6 +243,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             self.recent_seen.push((pkt.source_id, pkt.packet_id));
             return Ok(None);
         }
+        // FIXME: This shouldn't be necessary
+        // Never send an ACK on
+        if pkt.packet_type == PacketType::Ack {
+            return Ok(None);
+        }
         // So we aren't waiting for pkt, perhaps we've seen it before?
         if self.recent_seen.contains((pkt.source_id, pkt.packet_id)) {
             // We do not ACK an ACK
@@ -254,6 +262,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         // Perhaps it should be sent on?
         let to_us = pkt.destination_id == self.source_id;
         if !to_us {
+            // TODO: remove harcoded destination_id for GW
             let is_gw_bound = pkt.destination_id == 1;
             let should_forward = if is_gw_bound {
                 // Are we closer to GW?

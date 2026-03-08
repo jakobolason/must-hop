@@ -1,9 +1,9 @@
-use crate::node::MHNode;
+use crate::node::{MHNode, PacketType};
 
 #[cfg(not(feature = "in_std"))]
-use defmt::{error, info};
+use defmt::{debug, error, info};
 #[cfg(feature = "in_std")]
-use log::{error, info};
+use log::{debug, error, info};
 
 use super::{
     MHPacket,
@@ -112,7 +112,7 @@ pub struct TdmaMac {
     pub slot_duration: Duration,
     pub slots_per_frame: u8,
     pub my_tx_slot: u8,
-    pub epoch: Instant,
+    pub epoch: Option<Instant>,
 }
 
 impl TdmaMac {
@@ -120,7 +120,7 @@ impl TdmaMac {
         slot_duration: Duration,
         slots_per_frame: u8,
         my_tx_slot: u8,
-        epoch: Instant,
+        epoch: Option<Instant>,
     ) -> Self {
         Self {
             slot_duration,
@@ -130,8 +130,8 @@ impl TdmaMac {
         }
     }
 
-    pub fn current_slot(&self, now: Instant) -> u8 {
-        let elapsed_ms = (now - self.epoch).as_millis();
+    pub fn current_slot(&self, now: Instant, epoch: Instant) -> u8 {
+        let elapsed_ms = (now - epoch).as_millis();
         let frame_duration_ms = (self.slot_duration.as_millis()) * (self.slots_per_frame as u64);
 
         let time_in_frame = elapsed_ms % frame_duration_ms;
@@ -150,23 +150,49 @@ where
         rx_buffer: &mut Node::ReceiveBuffer,
     ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
         let now = Instant::now();
-        let slot = self.current_slot(now);
-
-        // Calculate when the next slot starts
-        let elapsed_ms = (now - self.epoch).as_millis();
-        let next_slot_start_ms = elapsed_ms + self.slot_duration.as_millis()
-            - (elapsed_ms % self.slot_duration.as_millis());
-        let next_slot_time = self.epoch + Duration::from_millis(next_slot_start_ms);
-
         let mut received_packets = Vec::new();
 
+        if self.epoch.is_none() {
+            info!("TDMA: Waiting for first packet to sync");
+            let conn = node.listen(rx_buffer, true).await;
+            if let Ok(conn) = conn {
+                received_packets = node.receive(conn, rx_buffer).await?;
+                // Check for being heartbeat
+                if !received_packets.is_empty() {
+                    for pkt in &received_packets {
+                        if pkt.packet_type == PacketType::HeartBeat {
+                            self.epoch = Some(Instant::now());
+                        }
+                    }
+                    return Ok(Some(received_packets));
+                }
+            } else {
+                info!("Error in getting conn");
+                return Ok(None);
+            }
+        }
+        let epoch = self
+            .epoch
+            .expect("Just checked for none, which should've returned out of function");
+
+        // Calculate when the next slot starts
+        let slot = self.current_slot(now, epoch);
+        let elapsed_ms = (now - epoch).as_millis();
+        let next_slot_start_ms = elapsed_ms + self.slot_duration.as_millis()
+            - (elapsed_ms % self.slot_duration.as_millis());
+        let next_slot_time = epoch + Duration::from_millis(next_slot_start_ms);
+
+        debug!("current slot: {}", slot);
+
         if slot == self.my_tx_slot {
+            debug!(" !!!  MY SLOT !!! {}", next_slot_time);
             if !tx_queue.is_empty() {
                 node.transmit(tx_queue).await?;
                 tx_queue.clear();
             }
             Timer::at(next_slot_time).await;
         } else {
+            debug!(" -- NOT MY SLOT ---   {}", next_slot_time);
             let conn = node.listen(rx_buffer, true).await;
             if let Ok(conn) = conn {
                 received_packets = node.receive(conn, rx_buffer).await?;

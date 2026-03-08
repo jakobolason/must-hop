@@ -92,6 +92,14 @@ where
         Ok(())
     }
 
+    fn push_queue(&mut self, pkt: MHPacket<SIZE>) -> Result<(), MeshRouterError<Node::Error>> {
+        self.tx_queue
+            .push(pkt)
+            .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
+        trace!("Pusing to queue, len: {}", self.tx_queue.len());
+        Ok(())
+    }
+
     pub async fn tick(
         &mut self,
         rx_buf: &mut Node::ReceiveBuffer,
@@ -99,16 +107,12 @@ where
         // Heartbeats, only for GW
         if let Some(heartbeat_pkt) = self.routing_policy.check_heartbeat(&mut self.manager)? {
             trace!("SENDING OUT HEARTBEAT!!");
-            self.tx_queue
-                .push(heartbeat_pkt)
-                .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
+            self.push_queue(heartbeat_pkt)?;
         }
 
         let retransmission = self.manager.get_pending_transmissions()?;
         for pkt in retransmission {
-            self.tx_queue
-                .push(pkt)
-                .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
+            self.push_queue(pkt)?;
         }
 
         // trace!("now running mac ...");
@@ -126,6 +130,7 @@ where
         let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;
 
         for pkt in to_forward {
+            trace!("Pusing to tx queue:  {}", self.tx_queue.len());
             // If buffer is full, break adding packets to it.
             if self.tx_queue.push(pkt).is_err() {
                 error!("Tx queue is full, dropping packets ...");

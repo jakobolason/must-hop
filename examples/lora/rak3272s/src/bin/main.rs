@@ -19,6 +19,8 @@ use embassy_stm32::{
 };
 use embassy_sync::channel;
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
+use embassy_time::Duration;
+use embassy_time::Instant;
 use embassy_time::{Delay, Timer};
 use heapless::Vec;
 use lora_phy::LoRa;
@@ -27,6 +29,7 @@ use lora_phy::sx126x;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
 use must_hop::lora::LoraNode;
 use must_hop::node::policy::RandomAccessMac;
+use must_hop::node::policy::TdmaMac;
 use {defmt_rtt as _, panic_probe as _};
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
@@ -153,7 +156,8 @@ pub async fn lora_task(
             return;
         }
     };
-    let mac = RandomAccessMac;
+    // let mac = RandomAccessMac;
+    let mac = TdmaMac::new(Duration::from_secs(1), 10, 3, None);
     lora::lora_task(node, channel, source_id, 3, 3, mac).await;
 }
 

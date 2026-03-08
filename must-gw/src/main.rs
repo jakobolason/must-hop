@@ -7,7 +7,7 @@ use must_hop::node::{
     MHNode,
     mesh_router::MeshRouter,
     network_manager::NetworkManager,
-    policy::{GatewayPolicy, NodePolicy, RandomAccessMac},
+    policy::{GatewayPolicy, NodePolicy, RandomAccessMac, TdmaMac},
 };
 use std::io::Write;
 use tokio::time::{Instant, sleep};
@@ -70,11 +70,17 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     // let pkt = node.receive((), &rec_buf).await?;
     // log::info!("got pkts: {:?} ", pkt);
 
+    let mac = TdmaMac::new(
+        embassy_time::Duration::from_secs(1),
+        10,
+        8,
+        Some(embassy_time::Instant::now()),
+    );
     log::info!("Now making mesh router ...");
     let mut router = MeshRouter::new(
         node,
-        NetworkManager::new(0, 10, 3),
-        RandomAccessMac,
+        NetworkManager::new(1, 10, 3),
+        mac,
         GatewayPolicy::new(60),
     );
     log::info!("Now start loop..");
