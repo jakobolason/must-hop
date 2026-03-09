@@ -151,8 +151,22 @@ impl SlotMask {
         self.mask
     }
 
-    pub fn slot_assignment_strat(&self, max_slots: u8) -> Option<u8> {
-        (0..max_slots).find(|&i| !self.is_taken(i))
+    /// Get the next available slot given another node's mask and yours. Uses the node_id to avoid conflicts in race conditions
+    pub fn slot_assignment_strat(
+        &self,
+        max_slots: u8,
+        another_mask: u32,
+        node_id: u32,
+    ) -> Option<u8> {
+        let combined_mask = SlotMask {
+            mask: self.mask | another_mask,
+        };
+        let start_offset = (node_id % max_slots as u32) as u8;
+
+        (0..max_slots).find(|&i| {
+            let slot = (start_offset + i) % max_slots;
+            !combined_mask.is_taken(slot)
+        })
     }
 }
 
@@ -165,24 +179,33 @@ struct SlotAllocation {
 
 pub struct TdmaMac<const SIZE: usize> {
     // FIXME: Remove from user, should be set by GW
-    pub slot_duration: Duration,
+    slot_duration: Duration,
     // FIXME: Remove from user, should be set by GW
-    pub slots_per_frame: u8,
-    pub my_tx_slot: u8,
-    pub epoch: Option<Instant>,
-    pub known_slots_mask: SlotMask,
+    slots_per_frame: u8,
+    my_tx_slot: Option<u8>,
+    epoch: Option<Instant>,
+    known_slots_mask: SlotMask,
     hbt_pkt: Option<MHPacket<SIZE>>,
+    /// Used for the slot allocation. You should convert the MAC address into a u32 with the
+    /// biggest chance of two nodes not having the same u32 representation
+    node_id: u32,
 }
 
 impl<const SIZE: usize> TdmaMac<SIZE> {
-    pub fn new(slot_duration: Duration, slots_per_frame: u8, epoch: Option<Instant>) -> Self {
+    pub fn new(
+        slot_duration: Duration,
+        slots_per_frame: u8,
+        epoch: Option<Instant>,
+        node_id: u32,
+    ) -> Self {
         Self {
             slot_duration,
             slots_per_frame,
-            my_tx_slot: 0,
             epoch,
+            node_id,
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
+            my_tx_slot: None,
         }
     }
 
@@ -206,15 +229,20 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
                 self.epoch = Some(Instant::now() - elapsed_in_frame);
                 // TODO: alter known slots
                 self.known_slots_mask.claim(alloc.my_slot);
-                match self
-                    .known_slots_mask
-                    .slot_assignment_strat(self.slots_per_frame)
-                {
-                    Some(free_slot) => {
-                        self.my_tx_slot = free_slot;
-                        self.known_slots_mask.claim(free_slot);
+
+                // Only allocate a new slot if we don't have one
+                if self.my_tx_slot.is_none() {
+                    match self.known_slots_mask.slot_assignment_strat(
+                        self.slots_per_frame,
+                        alloc.known_slots,
+                        self.node_id,
+                    ) {
+                        Some(free_slot) => {
+                            self.my_tx_slot = Some(free_slot);
+                            self.known_slots_mask.claim(free_slot);
+                        }
+                        None => error!("Network is full!"),
                     }
-                    None => error!("Network is full!"),
                 }
                 break;
             }
@@ -226,9 +254,16 @@ impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for T
 where
     Node: MHNode<SIZE, LEN>,
 {
+    /// This only sends if you have been given a slot. GW should choose it's own slot, such that it
+    /// can start this.
     fn tx_heartbeat(&mut self, mut hbt: MHPacket<SIZE>) {
+        let my_tx_slot = match self.my_tx_slot {
+            Some(slot) => slot,
+            // Do not send any heartbeat if you haven't gotten a slot yet.
+            None => return,
+        };
         let allocation = SlotAllocation {
-            my_slot: self.my_tx_slot,
+            my_slot: my_tx_slot,
             known_slots: self.known_slots_mask.as_u32(),
         };
         let mut buf = [0u8; SIZE];

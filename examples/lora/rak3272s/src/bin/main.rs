@@ -157,7 +157,7 @@ pub async fn lora_task(
         }
     };
     // let mac = RandomAccessMac;
-    let mac = TdmaMac::new(Duration::from_secs(1), 10, 3, None);
+    let mac = TdmaMac::new(Duration::from_secs(1), 10, None);
     lora::lora_task(node, channel, source_id, 3, 3, mac).await;
 }
 

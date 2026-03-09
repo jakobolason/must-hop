@@ -73,7 +73,6 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     let mac = TdmaMac::new(
         embassy_time::Duration::from_secs(1),
         10,
-        8,
         Some(embassy_time::Instant::now()),
     );
     log::info!("Now making mesh router ...");
