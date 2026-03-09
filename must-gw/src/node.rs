@@ -5,7 +5,6 @@ use log::trace;
 use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
 use must_hop::node::{MHNode, MHPacket};
 use postcard::to_slice;
-use tokio::time::{self};
 
 const SIZE: usize = 128;
 const LEN: usize = 5; // Lets keep it the same as the nodes, make it simple

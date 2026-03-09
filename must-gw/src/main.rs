@@ -1,16 +1,14 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::error;
-use loragw::RxPacket;
 use must_gw::{create_concentrator, node};
 use must_hop::node::{
-    MHNode,
     mesh_router::MeshRouter,
     network_manager::NetworkManager,
-    policy::{GatewayPolicy, NodePolicy, RandomAccessMac, TdmaMac},
+    policy::{GatewayPolicy, RandomAccessMac, TdmaMac},
 };
 use std::io::Write;
-use tokio::time::{Instant, sleep};
+use tokio::time::Instant;
 
 async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("Now try and use loragw:");
@@ -71,19 +69,20 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     // log::info!("got pkts: {:?} ", pkt);
     let gw_source_id = 1;
 
-    let mac = TdmaMac::new(
-        embassy_time::Duration::from_secs(1),
-        10,
-        Some((
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("Time went backwards")
-                .as_millis() as u64,
-            embassy_time::Instant::now(),
-        )),
-        Some(5),
-        gw_source_id,
-    );
+    // let mac = TdmaMac::new(
+    //     embassy_time::Duration::from_secs(1),
+    //     10,
+    //     Some((
+    //         SystemTime::now()
+    //             .duration_since(UNIX_EPOCH)
+    //             .expect("Time went backwards")
+    //             .as_millis() as u64,
+    //         embassy_time::Instant::now(),
+    //     )),
+    //     Some(5),
+    //     gw_source_id,
+    // );
+    let mac = RandomAccessMac::new();
     log::info!("Now making mesh router ...");
     let mut router = MeshRouter::new(
         node,

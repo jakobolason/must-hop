@@ -1,8 +1,5 @@
-use core::sync;
-
 use crate::node::{MHNode, PacketType};
 
-use defmt::timestamp;
 #[cfg(not(feature = "in_std"))]
 use defmt::{debug, error, info};
 #[cfg(feature = "in_std")]
@@ -90,6 +87,12 @@ where
 
 pub struct RandomAccessMac<const SIZE: usize> {
     hbt_pkt: Option<MHPacket<SIZE>>,
+}
+
+impl<const SIZE: usize> RandomAccessMac<SIZE> {
+    pub fn new() -> Self {
+        Self { hbt_pkt: None }
+    }
 }
 
 impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for RandomAccessMac<SIZE>
