@@ -48,7 +48,11 @@ pub struct MHPacket<const SIZE: usize> {
 
 /// Any radio wanting to be a node, has to be able to transmit and receive
 pub trait MHNode<const SIZE: usize, const LEN: usize> {
+    #[cfg(not(feature = "in_std"))]
+    type Error: core::fmt::Debug + defmt::Format;
+    #[cfg(feature = "in_std")]
     type Error: core::fmt::Debug;
+
     type Connection;
     type ReceiveBuffer;
 

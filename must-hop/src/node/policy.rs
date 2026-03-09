@@ -201,6 +201,8 @@ pub struct TdmaMac<const SIZE: usize> {
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
     /// biggest chance of two nodes not having the same u32 representation
     node_id: u32,
+    /// Ratio to try and mitigate clock drift at nodes with no HSE
+    skew_ratio: f32,
 }
 
 impl<const SIZE: usize> TdmaMac<SIZE> {
@@ -221,12 +223,15 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
             time_sync,
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
+            skew_ratio: 1.0,
         }
     }
 
     fn current_gps_time(&self, (base_gps_ms, sync_instant): (u64, Instant)) -> u64 {
+        // TODO: could add a multiplier here to fix drifting?
         let elapsed_ms = (Instant::now() - sync_instant).as_millis();
-        base_gps_ms + elapsed_ms
+        let gw_elapsed = (elapsed_ms as f32 * self.skew_ratio) as u64;
+        base_gps_ms + gw_elapsed
     }
 
     pub fn current_slot(&self, current_time_ms: u64) -> u8 {
@@ -251,14 +256,17 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
                             info!("TDMA: Initial epoch set");
                         }
                         Some((old_gps, last_stamp)) => {
-                            let my_stamp = old_gps + (now.as_millis() - last_stamp.as_millis());
+                            let my_diff = now.as_millis() - last_stamp.as_millis();
+                            let my_stamp = old_gps + my_diff;
+                            let skew = ((alloc.gps_time_ms - old_gps) as f32) / (my_diff as f32);
+                            self.skew_ratio = skew;
                             if my_stamp > alloc.gps_time_ms {
                                 let delay = my_stamp - alloc.gps_time_ms;
-                                info!("Mesured clock drift ahead: {} ms", delay);
+                                info!("Mesured clock drift ahead: {} ms, ratio: {}", delay, skew);
                                 // self.epoch = Some(now - sender_offset);
                             } else if my_stamp < alloc.gps_time_ms {
                                 let delay = alloc.gps_time_ms - my_stamp;
-                                info!("Measured clock drift behind: {} ms", delay);
+                                info!("Measured clock drift behind: {} ms, ratio: {}", delay, skew);
                                 // self.epoch = Some(now - sender_offset);
                             } else {
                                 info!("Perfectly synced!");
@@ -272,6 +280,7 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
                     // self.epoch = Some(Instant::now() - elapsed_in_frame);
                 }
                 // TODO: alter known slots
+                info!("Other node claimed slot at {}", alloc.my_slot);
                 self.known_slots_mask.claim(alloc.my_slot);
 
                 // Only allocate a new slot if we don't have one
@@ -300,7 +309,9 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
         let elapsed_in_current_slot = current_gps_time % slot_dur;
 
         let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
-        Instant::now() + Duration::from_millis(next_slot_start_offset)
+        // A 5ms guard band is used to perhaps fix conversion errors
+        let node_offset = (next_slot_start_offset as f32 / self.skew_ratio) as u64 + 5;
+        Instant::now() + Duration::from_millis(node_offset)
     }
 
     fn update_heartbeat(&self, mut hbt: MHPacket<SIZE>) -> MHPacket<SIZE> {
@@ -355,14 +366,17 @@ where
             let conn = node
                 .listen(rx_buffer, Some(core::time::Duration::from_millis(100)))
                 .await;
-            if let Ok(conn) = conn {
-                received_packets = node.receive(conn, rx_buffer).await?;
-                // Check for being heartbeat
-                self.sync_epoch(&received_packets);
-                return Ok(Some(received_packets));
-            } else {
-                info!("Error in getting conn");
-                return Ok(None);
+            match conn {
+                Ok(conn) => {
+                    received_packets = node.receive(conn, rx_buffer).await?;
+                    // Check for being heartbeat
+                    self.sync_epoch(&received_packets);
+                    return Ok(Some(received_packets));
+                }
+                Err(e) => {
+                    info!("Error in getting conn: {:?}", e);
+                    return Ok(None);
+                }
             }
         };
 

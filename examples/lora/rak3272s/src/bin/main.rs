@@ -9,6 +9,7 @@ mod iv;
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_stm32::peripherals;
+use embassy_stm32::rcc::LsConfig;
 use embassy_stm32::rng;
 use embassy_stm32::rng::Rng;
 use embassy_stm32::{
@@ -56,6 +57,7 @@ bind_interrupts!(struct Irqs{
 async fn main(spawner: Spawner) {
     let mut config = Config::default();
     {
+        config.rcc.ls = LsConfig::default_lse();
         config.rcc.msi = Some(MSIRange::RANGE48M);
         config.rcc.sys = Sysclk::MSI;
         config.rcc.mux.rngsel = mux::Rngsel::MSI;

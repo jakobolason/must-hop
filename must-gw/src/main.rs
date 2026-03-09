@@ -81,7 +81,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
                 .as_millis() as u64,
             embassy_time::Instant::now(),
         )),
-        Some(0),
+        Some(5),
         gw_source_id,
     );
     log::info!("Now making mesh router ...");
@@ -89,7 +89,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         node,
         NetworkManager::new(gw_source_id as u8, 10, 3),
         mac,
-        GatewayPolicy::new(60),
+        GatewayPolicy::new(30),
     );
     log::info!("Now start loop..");
     loop {
