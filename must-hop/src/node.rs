@@ -2,6 +2,7 @@
 /// The MHNode describes necessary radio function for NM and MS to work. These should be
 /// implemented by the radio used on the specific device
 use core::future::Future;
+use core::time::Duration;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +51,6 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     type Error: core::fmt::Debug;
     type Connection;
     type ReceiveBuffer;
-    type Duration;
 
     /// Takes an MHPacket with a size for the user defined payload. This will be sent to the
     /// appropriate destination_id
@@ -71,6 +71,6 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     fn listen(
         &mut self,
         rec_buf: &mut Self::ReceiveBuffer,
-        with_timeout: bool,
+        with_timeout: Option<Duration>,
     ) -> impl Future<Output = Result<Self::Connection, Self::Error>>;
 }

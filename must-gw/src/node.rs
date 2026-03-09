@@ -1,14 +1,15 @@
-use std::{collections::VecDeque, time::Duration};
+use std::collections::VecDeque;
 
+use embassy_time::{Duration, Instant, Timer};
 use log::trace;
 use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
 use must_hop::node::{MHNode, MHPacket};
 use postcard::to_slice;
-use tokio::time::{self, Instant};
+use tokio::time::{self};
 
 const SIZE: usize = 128;
 const LEN: usize = 5; // Lets keep it the same as the nodes, make it simple
-const LORA_FREQ: usize = 868_100_000;
+const LORA_FREQ: usize = 868_700_000;
 // Max size that radio can send at all
 const TRANSMISSION_BUFFER: usize = 256;
 
@@ -117,7 +118,6 @@ impl MHNode<SIZE, LEN> for GWNode {
     type Error = loragw::Error;
     type Connection = ();
     type ReceiveBuffer = Vec<RxPacket>;
-    type Duration = u16;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
         packets
@@ -125,7 +125,7 @@ impl MHNode<SIZE, LEN> for GWNode {
             .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
         let tx_pkt = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
-            time::sleep(Duration::from_millis(5)).await;
+            embassy_time::Timer::at(Instant::from_millis(5)).await;
         }
         self.radio.transmit(tx_pkt)
     }
@@ -164,6 +164,7 @@ impl MHNode<SIZE, LEN> for GWNode {
                         packets.len()
                     );
                     for packet in packets {
+                        // log::info!("Packet {:?}", packet);
                         rec_packets.push(packet).map_err(|_| loragw::Error::Data)?
                     }
                 }
@@ -179,10 +180,10 @@ impl MHNode<SIZE, LEN> for GWNode {
     async fn listen(
         &mut self,
         rec_buf: &mut Self::ReceiveBuffer,
-        with_timeout: bool,
+        with_timeout: Option<core::time::Duration>,
     ) -> Result<Self::Connection, Self::Error> {
         let start_time = Instant::now();
-        let timeout = Duration::from_secs(1);
+        // let timeout = Duration::from_secs(1);
         rec_buf.clear();
 
         loop {
@@ -194,12 +195,14 @@ impl MHNode<SIZE, LEN> for GWNode {
                 self.fetched_packets.extend(packets);
                 continue;
             }
-            if with_timeout && start_time.elapsed() > timeout {
+            if let Some(timeout) = with_timeout
+                && start_time.elapsed() >= Duration::from_micros(timeout.as_micros() as u64)
+            {
                 // TODO: Need better error type here
                 // return Err(loragw::Error::Busy);
                 return Ok(());
             }
-            time::sleep(Duration::from_millis(5)).await;
+            Timer::after(Duration::from_millis(5)).await;
         }
     }
 }

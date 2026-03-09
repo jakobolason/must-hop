@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use log::error;
 use loragw::RxPacket;
@@ -69,16 +69,25 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     // node.listen(&mut rec_buf, false).await?;
     // let pkt = node.receive((), &rec_buf).await?;
     // log::info!("got pkts: {:?} ", pkt);
+    let gw_source_id = 1;
 
     let mac = TdmaMac::new(
         embassy_time::Duration::from_secs(1),
         10,
-        Some(embassy_time::Instant::now()),
+        Some((
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_millis() as u64,
+            embassy_time::Instant::now(),
+        )),
+        Some(0),
+        gw_source_id,
     );
     log::info!("Now making mesh router ...");
     let mut router = MeshRouter::new(
         node,
-        NetworkManager::new(1, 10, 3),
+        NetworkManager::new(gw_source_id as u8, 10, 3),
         mac,
         GatewayPolicy::new(60),
     );

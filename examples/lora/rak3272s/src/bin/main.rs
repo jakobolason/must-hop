@@ -43,7 +43,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use serde::{Deserialize, Serialize};
 
-const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000; // warning: set this appropriately for the region
+const LORA_FREQUENCY_IN_HZ: u32 = 868_700_000; // warning: set this appropriately for the region
 
 static CHANNEL: Channel<ThreadModeRawMutex, SensorData, 3> = Channel::new();
 
@@ -157,8 +157,8 @@ pub async fn lora_task(
         }
     };
     // let mac = RandomAccessMac;
-    let mac = TdmaMac::new(Duration::from_secs(1), 10, None);
-    lora::lora_task(node, channel, source_id, 3, 3, mac).await;
+    let mac = TdmaMac::new(Duration::from_secs(1), 10, None, None, source_id);
+    lora::lora_task(node, channel, source_id as u8, 3, 3, mac).await;
 }
 
 // This creates the task which checks for sensor data

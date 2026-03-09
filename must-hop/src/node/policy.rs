@@ -1,5 +1,8 @@
+use core::sync;
+
 use crate::node::{MHNode, PacketType};
 
+use defmt::timestamp;
 #[cfg(not(feature = "in_std"))]
 use defmt::{debug, error, info};
 #[cfg(feature = "in_std")]
@@ -14,6 +17,8 @@ use super::{
 
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
+
+const GATEWAY_ID: u32 = 1;
 
 pub trait RoutingPolicy<const SIZE: usize, const LEN: usize> {
     fn check_heartbeat(
@@ -111,7 +116,10 @@ where
             node.transmit(tx_queue).await?;
             tx_queue.clear();
         }
-        match node.listen(rx_buffer, true).await {
+        match node
+            .listen(rx_buffer, Some(core::time::Duration::from_secs(1)))
+            .await
+        {
             Ok(conn) => match node.receive(conn, rx_buffer).await {
                 Ok(pkts) => Ok(Some(pkts)),
                 Err(e) => Err(e),
@@ -163,9 +171,14 @@ impl SlotMask {
         };
         let start_offset = (node_id % max_slots as u32) as u8;
 
-        (0..max_slots).find(|&i| {
+        (0..max_slots).find_map(|i| {
             let slot = (start_offset + i) % max_slots;
-            !combined_mask.is_taken(slot)
+            debug!("looking in slot {}", slot);
+            if !combined_mask.is_taken(slot) {
+                Some(slot)
+            } else {
+                None
+            }
         })
     }
 }
@@ -175,15 +188,14 @@ struct SlotAllocation {
     my_slot: u8,
     /// Bit mask for known slots, meaning only 32 nodes can be known at a time
     known_slots: u32,
+    gps_time_ms: u64,
 }
 
 pub struct TdmaMac<const SIZE: usize> {
-    // FIXME: Remove from user, should be set by GW
     slot_duration: Duration,
-    // FIXME: Remove from user, should be set by GW
     slots_per_frame: u8,
     my_tx_slot: Option<u8>,
-    epoch: Option<Instant>,
+    time_sync: Option<(u64, Instant)>,
     known_slots_mask: SlotMask,
     hbt_pkt: Option<MHPacket<SIZE>>,
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
@@ -193,27 +205,34 @@ pub struct TdmaMac<const SIZE: usize> {
 
 impl<const SIZE: usize> TdmaMac<SIZE> {
     pub fn new(
+        // FIXME: Remove from user, should be set by GW
         slot_duration: Duration,
+        // FIXME: Remove from user, should be set by GW
         slots_per_frame: u8,
-        epoch: Option<Instant>,
+        time_sync: Option<(u64, Instant)>,
+        my_tx_slot: Option<u8>,
         node_id: u32,
     ) -> Self {
         Self {
             slot_duration,
             slots_per_frame,
-            epoch,
+            my_tx_slot,
             node_id,
+            time_sync,
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
-            my_tx_slot: None,
         }
     }
 
-    pub fn current_slot(&self, now: Instant, epoch: Instant) -> u8 {
-        let elapsed_ms = (now - epoch).as_millis();
+    fn current_gps_time(&self, (base_gps_ms, sync_instant): (u64, Instant)) -> u64 {
+        let elapsed_ms = (Instant::now() - sync_instant).as_millis();
+        base_gps_ms + elapsed_ms
+    }
+
+    pub fn current_slot(&self, current_time_ms: u64) -> u8 {
         let frame_duration_ms = (self.slot_duration.as_millis()) * (self.slots_per_frame as u64);
 
-        let time_in_frame = elapsed_ms % frame_duration_ms;
+        let time_in_frame = current_time_ms % frame_duration_ms;
         (time_in_frame / (self.slot_duration.as_millis())) as u8
     }
 
@@ -222,11 +241,36 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
             if pkt.packet_type == PacketType::HeartBeat
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
             {
-                // Resync node to heartbeat's announced slot
-                // TODO: There must be a latency here, which should be adjusted for
-                let elapsed_in_frame =
-                    Duration::from_millis((alloc.my_slot as u64) * self.slot_duration.as_millis());
-                self.epoch = Some(Instant::now() - elapsed_in_frame);
+                // Resync node to heartbeat's announced slot, if you are not gateway
+                if self.node_id != GATEWAY_ID {
+                    // TODO: There must be a latency here, which should be adjusted for
+                    let now = Instant::now();
+
+                    match self.time_sync {
+                        None => {
+                            info!("TDMA: Initial epoch set");
+                        }
+                        Some((old_gps, last_stamp)) => {
+                            let my_stamp = old_gps + (now.as_millis() - last_stamp.as_millis());
+                            if my_stamp > alloc.gps_time_ms {
+                                let delay = my_stamp - alloc.gps_time_ms;
+                                info!("Mesured clock drift ahead: {} ms", delay);
+                                // self.epoch = Some(now - sender_offset);
+                            } else if my_stamp < alloc.gps_time_ms {
+                                let delay = alloc.gps_time_ms - my_stamp;
+                                info!("Measured clock drift behind: {} ms", delay);
+                                // self.epoch = Some(now - sender_offset);
+                            } else {
+                                info!("Perfectly synced!");
+                            }
+                        }
+                    }
+                    self.time_sync = Some((alloc.gps_time_ms, now));
+                    // let elapsed_in_frame = Duration::from_millis(
+                    //     (alloc.my_slot as u64) * self.slot_duration.as_millis(),
+                    // );
+                    // self.epoch = Some(Instant::now() - elapsed_in_frame);
+                }
                 // TODO: alter known slots
                 self.known_slots_mask.claim(alloc.my_slot);
 
@@ -248,6 +292,44 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
             }
         }
     }
+
+    fn calc_nextslot_time(&self, timestamps: (u64, Instant)) -> Instant {
+        let current_gps_time = self.current_gps_time(timestamps);
+        let slot_dur = self.slot_duration.as_millis();
+
+        let elapsed_in_current_slot = current_gps_time % slot_dur;
+
+        let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
+        Instant::now() + Duration::from_millis(next_slot_start_offset)
+    }
+
+    fn update_heartbeat(&self, mut hbt: MHPacket<SIZE>) -> MHPacket<SIZE> {
+        let my_tx_slot = match self.my_tx_slot {
+            Some(slot) => slot,
+            // Do not send any heartbeat if you haven't gotten a slot yet.
+            None => {
+                error!("Trying to send heartbeat before being given a slot!");
+                0
+            }
+        };
+        let tx_timestamp = match self.time_sync {
+            Some((old_gps, last_stamp)) => {
+                old_gps + (Instant::now().as_millis() - last_stamp.as_millis())
+            }
+            None => 0,
+        };
+        let allocation = SlotAllocation {
+            my_slot: my_tx_slot,
+            known_slots: self.known_slots_mask.as_u32(),
+            gps_time_ms: tx_timestamp,
+        };
+        let mut buf = [0u8; SIZE];
+        if let Ok(serialized_slice) = to_slice(&allocation, &mut buf) {
+            hbt.payload.clear();
+            let _ = hbt.payload.extend_from_slice(serialized_slice);
+        }
+        hbt
+    }
 }
 
 impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for TdmaMac<SIZE>
@@ -256,21 +338,7 @@ where
 {
     /// This only sends if you have been given a slot. GW should choose it's own slot, such that it
     /// can start this.
-    fn tx_heartbeat(&mut self, mut hbt: MHPacket<SIZE>) {
-        let my_tx_slot = match self.my_tx_slot {
-            Some(slot) => slot,
-            // Do not send any heartbeat if you haven't gotten a slot yet.
-            None => return,
-        };
-        let allocation = SlotAllocation {
-            my_slot: my_tx_slot,
-            known_slots: self.known_slots_mask.as_u32(),
-        };
-        let mut buf = [0u8; SIZE];
-        if let Ok(serialized_slice) = to_slice(&allocation, &mut buf) {
-            hbt.payload.clear();
-            let _ = hbt.payload.extend_from_slice(serialized_slice);
-        }
+    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
         self.hbt_pkt = Some(hbt)
     }
 
@@ -280,12 +348,13 @@ where
         tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
     ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
-        let now = Instant::now();
         let mut received_packets = Vec::new();
 
-        if self.epoch.is_none() {
+        let Some(timestamps) = self.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
-            let conn = node.listen(rx_buffer, true).await;
+            let conn = node
+                .listen(rx_buffer, Some(core::time::Duration::from_millis(100)))
+                .await;
             if let Ok(conn) = conn {
                 received_packets = node.receive(conn, rx_buffer).await?;
                 // Check for being heartbeat
@@ -295,25 +364,21 @@ where
                 info!("Error in getting conn");
                 return Ok(None);
             }
-        }
-        let epoch = self
-            .epoch
-            .expect("Just checked for none, which should've returned out of function");
+        };
 
+        let current_gps_ms = self.current_gps_time(timestamps);
         // Calculate when the next slot starts
-        let slot = self.current_slot(now, epoch);
-        let elapsed_ms = (now - epoch).as_millis();
-        let next_slot_start_ms = elapsed_ms + self.slot_duration.as_millis()
-            - (elapsed_ms % self.slot_duration.as_millis());
-        let next_slot_time = epoch + Duration::from_millis(next_slot_start_ms);
+        let slot = self.current_slot(current_gps_ms);
 
         debug!("current slot: {}", slot);
 
-        if slot == self.my_tx_slot {
-            debug!(" !!!  MY SLOT !!! {}", next_slot_time);
+        if let Some(my_tx_slot) = self.my_tx_slot
+            && slot == my_tx_slot
+        {
+            debug!(" !!!  MY SLOT !!! ");
             if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
                 if let Some(pkt) = self.hbt_pkt.take()
-                    && let Err(pkt) = tx_queue.push(pkt)
+                    && let Err(pkt) = tx_queue.push(self.update_heartbeat(pkt))
                 {
                     // If queue full
                     self.hbt_pkt = Some(pkt)
@@ -321,16 +386,28 @@ where
                 node.transmit(tx_queue).await?;
                 tx_queue.clear();
             }
+            let next_slot_time = self.calc_nextslot_time(timestamps);
             Timer::at(next_slot_time).await;
         } else {
-            debug!(" -- NOT MY SLOT ---   {}", next_slot_time);
-            let conn = node.listen(rx_buffer, true).await;
+            debug!(" -- NOT MY SLOT ---   ");
+            let conn = node
+                .listen(rx_buffer, Some(core::time::Duration::from_millis(500)))
+                .await;
             if let Ok(conn) = conn {
-                received_packets = node.receive(conn, rx_buffer).await?;
+                match node.receive(conn, rx_buffer).await {
+                    Ok(pkts) => received_packets = pkts,
+                    Err(_e) => (),
+                }
                 self.sync_epoch(&received_packets);
-            } else {
-                info!("Error in getting conn");
             }
+            info!("now sleeping ...");
+            // Redeclare timestamps, which might've been updated in `self.sync_epoch` just above
+            let timestamps = match self.time_sync {
+                // Uses match to avoid an unwrap here
+                Some(timestamps) => timestamps,
+                None => timestamps,
+            };
+            let next_slot_time = self.calc_nextslot_time(timestamps);
             Timer::at(next_slot_time).await;
         }
         Ok(Some(received_packets))

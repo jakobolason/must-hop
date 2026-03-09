@@ -1,7 +1,7 @@
 /// This contains node implementations for Lora
 use super::node::{MHNode, MHPacket};
 use lora_phy::mod_params::{
-    Bandwidth, CodingRate, ModulationParams, PacketParams, SpreadingFactor,
+    Bandwidth, CodingRate, DutyCycleParams, ModulationParams, PacketParams, SpreadingFactor,
 };
 use lora_phy::mod_params::{PacketStatus, RadioError};
 use lora_phy::mod_traits::RadioKind;
@@ -12,6 +12,7 @@ use defmt::{error, trace};
 #[cfg(feature = "in_std")]
 use log::{error, trace};
 
+use core::time::{self, Duration};
 use embassy_time::Instant;
 use heapless::Vec;
 use postcard::{from_bytes, to_slice};
@@ -73,7 +74,6 @@ where
     type Error = RadioError;
     type Connection = Result<(u8, PacketStatus), RadioError>;
     type ReceiveBuffer = [u8; TRANSMISSION_BUFFER];
-    type Duration = u16;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {
         let now = Instant::now();
@@ -173,14 +173,23 @@ where
     async fn listen(
         &mut self,
         rec_buf: &mut [u8; TRANSMISSION_BUFFER],
-        with_timeout: bool,
+        with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, RadioError> {
-        let rec_mode = match with_timeout {
-            true => RxMode::Single(RECEIVE_TIMEOUT),
-            false => RxMode::Continuous,
-        };
-        self.prepare_for_rx(rec_mode).await?;
-        Ok(self.lora.rx(&self.pkt_params, rec_buf).await)
+        self.prepare_for_rx(RxMode::Continuous).await?;
+        match with_timeout {
+            Some(timeout) => {
+                match embassy_time::with_timeout(
+                    embassy_time::Duration::from_micros(timeout.as_micros() as u64),
+                    self.lora.rx(&self.pkt_params, rec_buf),
+                )
+                .await
+                {
+                    Ok(rx_result) => Ok(rx_result),
+                    Err(_) => Err(RadioError::ReceiveTimeout),
+                }
+            }
+            None => Ok(self.lora.rx(&self.pkt_params, rec_buf).await),
+        }
     }
 }
 

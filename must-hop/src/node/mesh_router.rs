@@ -149,7 +149,7 @@ where
     ) -> Result<Node::Connection, MeshRouterError<Node::Error>> {
         trace!("listening ...");
         self.node
-            .listen(rec_buf, false)
+            .listen(rec_buf, None)
             .await
             .map_err(MeshRouterError::Node)
     }
