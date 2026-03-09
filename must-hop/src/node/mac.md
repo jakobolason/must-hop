@@ -25,7 +25,10 @@ graph TD
 
 ```mermaid
 graph TD
-    Start([bootup]) --> MatchEpoch{Is time sync None?}
+    Start([bootup]) --> LastReceivedHB{Did i hear a heartbeat within the timeout?}
+    LastReceivedHB -- No --> SetTimeSyncNone[Set time sync to None]
+    SetTimeSyncNone --> MatchEpoch
+    LastReceivedHB -- Yes -->  MatchEpoch{Is time sync None?}
     MatchEpoch -- Yes --> listenForHeart(Listen for packets)
     listenForHeart --> IsHeartbeat{Was a packet <br> a heartbeat?}
     IsHeartbeat -- Yes --> callSyncEpoch[call sync_epoch]
