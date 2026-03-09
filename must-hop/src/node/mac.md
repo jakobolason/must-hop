@@ -25,11 +25,13 @@ graph TD
 
 ```mermaid
 graph TD
-    Start([booup]) --> MatchEpoch{Is Epoch None?}
+    Start([bootup]) --> MatchEpoch{Is time sync None?}
     MatchEpoch -- Yes --> listenForHeart(Listen for packets)
     listenForHeart --> IsHeartbeat{Was a packet <br> a heartbeat?}
-    IsHeartbeat -- Yes --> setEpoch(Set the epoch <br> to current instant)
-    setEpoch --> ret([Return received pkts])
+    IsHeartbeat -- Yes --> callSyncEpoch[call sync_epoch]
+    callSyncEpoch --> ret[Return Packets or None]
+    IsHeartbeat -- No --> ret
+
 
     MatchEpoch -- No --> CalcSlot(Calculate slot)
     CalcSlot --> MatchSlot{Is slot mine?}
@@ -38,6 +40,27 @@ graph TD
     Tx --> Sleep(Sleep until next slot)
     Sleep --> ret
 
-    MatchSlot -- No --> Rx(listen for packets)
+    MatchSlot -- No --> IsKnownSlot{Is slot in mask?}
+    IsKnownSlot -- Yes --> Rx(listen for packets)
+    IsKnownSlot -- No --> ret
     Rx --> ret
+```
+
+### `sync_epoch()` Handling a heartbeat packet
+
+```mermaid
+graph TD
+    IsHeartbeat  --> IsGateway{Am i Gateway or pkt.hops_to_gw > self.hops_to_gw?}
+    IsGateway -- Yes --> ClaimSlot[Add Rx slot to own mask]
+    ClaimSlot --> IsTxSlotNone{Have i allocated a Tx slot?}
+    IsTxSlotNone -- No --> ClaimTxSlot[Claim an available slot from senders mask]
+    ClaimTxSlot --> ret([Return ])
+    IsTxSlotNone -- Yes --> ret
+
+    %% Is not GW or hops lower
+    IsGateway -- No --> IsTimeSyncSet{Is time_sync set?}
+    IsTimeSyncSet -- No --> SetTimeSync[Set self.time_sync]
+    IsTimeSyncSet -- Yes --> FindSkew[Calculate skew from previous timestamp and instant]
+    FindSkew --> SetTimeSync
+    SetTimeSync --> ClaimSlot
 ```

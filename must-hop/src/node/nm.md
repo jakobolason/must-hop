@@ -4,19 +4,21 @@
 
 ```mermaid
 graph TD
-    Start([Receive Packet]) --> IsBootup{Is PacketType <br> BootUp?}
+    Start([Receive Packet]) --> IsHeartbeat{Is PacketType <br> Heartbeat?}
 
-    %% Bootup flow
-    IsBootup -- Yes --> CheckBootupHop{hop_count >= <br> self.gw_hops?}
-    CheckBootupHop -- Yes --> Discard([Discard / Return None])
-    CheckBootupHop -- No --> UpdateGW[Update self.gw_hops = hop_count + 1]
+    %% Heartbeat flow
+    IsHeartbeat -- Yes --> CheckHeartbeatHop{hop_count >= <br> self.gw_hops?}
+    CheckHeartbeatHop -- Yes --> Discard([Discard / Return None])
+    CheckHeartbeatHop -- No --> UpdateGW[Update self.gw_hops = hop_count + 1]
     UpdateGW --> AddSeen1[Add to recent_seen]
-    AddSeen1 --> RetBootup([Return PayloadType::Bootup])
+    AddSeen1 --> RetHeartbeat([Return PayloadType::Bootup])
 
     %% Pending ACKs check
-    IsBootup -- No --> CheckPending{Is it in <br> pending_acks?}
-    CheckPending -- Yes --> RemovePending[Remove from pending_acks]
-    RemovePending --> Discard
+    IsHeartbeat -- No --> CheckPending{Is packet_id in <br> pending_acks?}
+    CheckPending -- Yes --> CheckCorrectPend{Is either source_id the same, or is it an ACK with dst <-> source?}
+    CheckCorrectPend -- Yes --> RemovePending[Remove from pending_acks]
+    CheckCorrectPend -- No --> CheckSeen
+    RemovePending --> AddRecentSeen[Add to recent_seen] --> Discard
 
     %% Duplicate / Recent Seen check
     CheckPending -- No --> CheckSeen{Is it in <br> recent_seen?}
@@ -58,10 +60,10 @@ graph TD
     MatchResult -- PayloadType::Data --> PushToSend[Push exact packet to 'to_send' queue]
     MatchResult -- PayloadType::Command --> PushToCommand[Push to 'commands' list for local App]
     MatchResult -- PayloadType::ACK --> GenAck[Generate ACK packet for source]
-    MatchResult -- PayloadType::Bootup --> GenBootup[Generate BootUp packet with hop_count + 1]
+    MatchResult -- PayloadType::Heartbeat --> GenBootup[Generate BootUp packet with hop_count + 1]
 
     GenAck --> PushToSend
-    GenBootup --> PushToSend
+    GenHeartbeat --> PushToSend
     PushToSend --> EndLoop{More Packets?}
     PushToCommand --> EndLoop
     EndLoop -- Yes --> Loop
