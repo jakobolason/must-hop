@@ -83,6 +83,8 @@ where
     ) -> impl Future<Output = Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error>>;
 
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>);
+
+    fn set_gw_hops(&mut self, gw_hops: u8);
 }
 
 pub struct RandomAccessMac<const SIZE: usize> {
@@ -99,6 +101,7 @@ impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for R
 where
     Node: MHNode<SIZE, LEN>,
 {
+    fn set_gw_hops(&mut self, _gw_hops: u8) {}
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
         self.hbt_pkt = Some(hbt);
     }
@@ -206,6 +209,7 @@ pub struct TdmaMac<const SIZE: usize> {
     node_id: u32,
     /// Ratio to try and mitigate clock drift at nodes with no HSE
     skew_ratio: f32,
+    gw_hops: u8,
 }
 
 impl<const SIZE: usize> TdmaMac<SIZE> {
@@ -227,6 +231,7 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
             skew_ratio: 1.0,
+            gw_hops: 255,
         }
     }
 
@@ -250,7 +255,7 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
             {
                 // Resync node to heartbeat's announced slot, if you are not gateway
-                if self.node_id != GATEWAY_ID {
+                if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
                     // TODO: There must be a latency here, which should be adjusted for
                     let now = Instant::now();
 
@@ -350,6 +355,9 @@ impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for T
 where
     Node: MHNode<SIZE, LEN>,
 {
+    fn set_gw_hops(&mut self, gw_hops: u8) {
+        self.gw_hops = gw_hops
+    }
     /// This only sends if you have been given a slot. GW should choose it's own slot, such that it
     /// can start this.
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
@@ -367,7 +375,7 @@ where
         let Some(timestamps) = self.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_millis(100)))
+                .listen(rx_buffer, Some(core::time::Duration::from_secs(10)))
                 .await;
             match conn {
                 Ok(conn) => {

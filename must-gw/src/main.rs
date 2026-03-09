@@ -69,20 +69,20 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     // log::info!("got pkts: {:?} ", pkt);
     let gw_source_id = 1;
 
-    // let mac = TdmaMac::new(
-    //     embassy_time::Duration::from_secs(1),
-    //     10,
-    //     Some((
-    //         SystemTime::now()
-    //             .duration_since(UNIX_EPOCH)
-    //             .expect("Time went backwards")
-    //             .as_millis() as u64,
-    //         embassy_time::Instant::now(),
-    //     )),
-    //     Some(5),
-    //     gw_source_id,
-    // );
-    let mac = RandomAccessMac::new();
+    let mac = TdmaMac::new(
+        embassy_time::Duration::from_secs(1),
+        10,
+        Some((
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_millis() as u64,
+            embassy_time::Instant::now(),
+        )),
+        Some(5),
+        gw_source_id,
+    );
+    // let mac = RandomAccessMac::new();
     log::info!("Now making mesh router ...");
     let mut router = MeshRouter::new(
         node,

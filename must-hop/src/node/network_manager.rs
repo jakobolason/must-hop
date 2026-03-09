@@ -199,6 +199,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Ok(())
     }
 
+    pub fn get_gw_hops(&self) -> u8 {
+        self.gw_hops
+    }
+
     /// Manages actions which the pakcet might require from a network pov, and returns the packet
     /// if none are required, otherwise returns none
     fn receive_packet(

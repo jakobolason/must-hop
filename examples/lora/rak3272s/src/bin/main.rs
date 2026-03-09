@@ -150,7 +150,7 @@ pub async fn lora_task(
         crc: true,
         iq: false,
     };
-    let source_id = 4;
+    let source_id = 3;
     let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp) {
         Ok(node) => node,
         Err(e) => {
@@ -158,8 +158,8 @@ pub async fn lora_task(
             return;
         }
     };
-    let mac = RandomAccessMac::new();
-    // let mac = TdmaMac::new(Duration::from_secs(1), 10, None, None, source_id);
+    // let mac = RandomAccessMac::new();
+    let mac = TdmaMac::new(Duration::from_secs(1), 10, None, None, source_id);
     lora::lora_task(node, channel, source_id as u8, 3, 3, mac).await;
 }
 
