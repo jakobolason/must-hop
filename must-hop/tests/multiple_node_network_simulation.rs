@@ -108,10 +108,10 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
 #[tokio::test]
 async fn test_mesh_topology() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
-    let node_a = 5;
-    let node_b = 2;
-    let node_c = 3;
-    let node_d = 4;
+    let node_a = 2;
+    let node_b = 3;
+    let node_c = 4;
+    let node_d = 5;
 
     {
         let mut e = env.lock().unwrap();
@@ -165,13 +165,13 @@ async fn test_mesh_topology() {
     // These packages were not meant for us, so we should not receive anything here
     assert_eq!(res1.len(), 0);
     // But router b should have send a new package, and have a pending ack
-    // assert_eq!(router_b.get_pending_count(), 1);
+    assert_eq!(router_b.get_pending_count(), 1);
     // And shoul've also sent a package over the air, which router A can receive
 
     let res2 = router_a.tick(&mut ()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And node A should've removed the package now
-    // assert_eq!(router_a.get_pending_count(), 0);
+    assert_eq!(router_a.get_pending_count(), 0);
 
     // Router C should've also received it, and since this is for it, it receives the data
     let res3 = router_c.tick(&mut ()).await.unwrap();
@@ -183,10 +183,10 @@ async fn test_mesh_topology() {
 #[tokio::test]
 async fn test_node_b_to_node_c() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
-    let node_a = 1;
-    let node_b = 2;
-    let node_c = 3;
-    let node_d = 4;
+    let node_a = 2;
+    let node_b = 3;
+    let node_c = 4;
+    let node_d = 5;
 
     {
         let mut e = env.lock().unwrap();
@@ -201,7 +201,7 @@ async fn test_node_b_to_node_c() {
             node_id: node_a,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
         RandomAccessMac::new(),
         NodePolicy,
     );
@@ -211,7 +211,7 @@ async fn test_node_b_to_node_c() {
             node_id: node_b,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
         RandomAccessMac::new(),
         NodePolicy,
     );
@@ -221,7 +221,7 @@ async fn test_node_b_to_node_c() {
             node_id: node_c,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
         RandomAccessMac::new(),
         NodePolicy,
     );
@@ -230,15 +230,16 @@ async fn test_node_b_to_node_c() {
 
     router_b.queue_payload(msg1, node_c).unwrap();
     assert_eq!(router_b.get_pending_count(), 1);
+    let resb = router_b.tick(&mut ()).await.unwrap();
 
     // both node A and C are in range of B, so they both receive the packet
-    let res2 = router_a.receive((), &()).await.unwrap();
+    let res2 = router_a.tick(&mut ()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And since A < B < C meaning not in between, it does not retransmit
     assert_eq!(router_a.get_pending_count(), 0);
 
     // Router C should've also received it, and since this is for it, it receives the data
-    let res3 = router_c.receive((), &()).await.unwrap();
+    let res3 = router_c.tick(&mut ()).await.unwrap();
     assert_eq!(res3.len(), 1);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
@@ -247,10 +248,10 @@ async fn test_node_b_to_node_c() {
 #[tokio::test]
 async fn testing_multiple_nodes_can_hear_a() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
-    let node_a = 1;
-    let node_b = 2;
-    let node_c = 3;
-    let node_d = 4;
+    let node_a = 2;
+    let node_b = 3;
+    let node_c = 4;
+    let node_d = 5;
 
     {
         let mut e = env.lock().unwrap();
@@ -308,27 +309,28 @@ async fn testing_multiple_nodes_can_hear_a() {
 
     router_a.queue_payload(msg1, node_c).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
+    let resa = router_a.tick(&mut ()).await.unwrap();
 
     // both nodes B and C are in range of A, so they both receive the packet
-    let res2 = router_b.receive((), &()).await.unwrap();
+    let res2 = router_b.tick(&mut ()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And since it is not for node B, then it sends it on
     assert_eq!(router_b.get_pending_count(), 1);
 
     // Router C should've also received it, and since this is for it, it receives the data
-    let res3 = router_c.receive((), &()).await.unwrap();
+    let res3 = router_c.tick(&mut ()).await.unwrap();
     println!("res: {:?}", res3);
     assert_eq!(res3.len(), 1);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
 
     // Now because C < D, D is not in between sender and reciever
-    let d = router_d.receive((), &()).await.unwrap();
+    let d = router_d.tick(&mut ()).await.unwrap();
     assert_eq!(d.len(), 0);
     assert_eq!(router_d.get_pending_count(), 0);
 
     // Router C should've also received it, and since this is for it, it receives the data
-    let res3 = router_c.receive((), &()).await.unwrap();
+    let res3 = router_c.tick(&mut ()).await.unwrap();
     // And node C should've already got this, so it doesnt care
     assert_eq!(res3.len(), 0);
     // And does not send it on
@@ -337,6 +339,114 @@ async fn testing_multiple_nodes_can_hear_a() {
 
 #[tokio::test]
 async fn testing_gw_communication() {
+    let env = Arc::new(Mutex::new(SimulationEnv::new()));
+    let node_a = 2;
+    let node_b = 3;
+    let node_c = 4;
+    let node_d = 5;
+    let gw = 1;
+
+    {
+        let mut e = env.lock().unwrap();
+        //
+        // (A) <-> (B) <-> (C) <-> (D) <-> (GW)
+        //
+        e.add_bidi_link(node_a, node_b);
+        e.add_bidi_link(node_b, node_c);
+        e.add_bidi_link(node_c, node_d);
+        e.add_bidi_link(node_d, gw);
+    }
+
+    let mut router_a = MeshRouter::new(
+        MockRadio {
+            node_id: node_a,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        RandomAccessMac::new(),
+        NodePolicy,
+    );
+
+    let mut router_b = MeshRouter::new(
+        MockRadio {
+            node_id: node_b,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        RandomAccessMac::new(),
+        NodePolicy,
+    );
+
+    let mut router_c = MeshRouter::new(
+        MockRadio {
+            node_id: node_c,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        RandomAccessMac::new(),
+        NodePolicy,
+    );
+
+    let mut router_d = MeshRouter::new(
+        MockRadio {
+            node_id: node_d,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        RandomAccessMac::new(),
+        NodePolicy,
+    );
+
+    let mut gw_router = MeshRouter::new(
+        MockRadio {
+            node_id: gw,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(gw, 5, 3),
+        RandomAccessMac::new(),
+        GatewayPolicy::new(30),
+    );
+    // First GW sends out Bootup
+    gw_router.tick(&mut ()).await.unwrap();
+    // Two ticks, one for receiving, one for sending
+    router_d.tick(&mut ()).await.unwrap();
+    router_d.tick(&mut ()).await.unwrap();
+
+    router_c.tick(&mut ()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
+
+    router_b.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
+
+    router_a.tick(&mut ()).await.unwrap();
+
+    let msg1 = Vec::from_slice(&[0x01]).unwrap();
+
+    router_a.queue_payload(msg1, gw).unwrap();
+    assert_eq!(router_a.get_pending_count(), 1);
+    let resa = router_a.tick(&mut ()).await.unwrap();
+
+    // both nodes B and C are in range of A, so they both receive the packet
+    let res2 = router_b.tick(&mut ()).await.unwrap();
+    assert_eq!(res2.len(), 0);
+    // And since it is not for node B, then it sends it on
+    assert_eq!(router_b.get_pending_count(), 1);
+
+    let res3 = router_c.tick(&mut ()).await.unwrap();
+    assert_eq!(res3.len(), 0);
+    assert_eq!(router_c.get_pending_count(), 0);
+
+    let d = router_d.tick(&mut ()).await.unwrap();
+    assert_eq!(d.len(), 0);
+    assert_eq!(router_d.get_pending_count(), 0);
+
+    let res4 = gw_router.tick(&mut ()).await.unwrap();
+    assert_ne!(res4.len(), 1);
+    assert_eq!(gw_router.get_pending_count(), 0);
+}
+
+#[tokio::test]
+async fn testing_complex_gw_communication() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
     let node_a = 2;
     let node_b = 3;
@@ -407,33 +517,40 @@ async fn testing_gw_communication() {
         GatewayPolicy::new(30),
     );
     // First GW sends out Bootup
-    // gw_router.bootup().await.unwrap();
+    gw_router.tick(&mut ()).await.unwrap();
+    // Two ticks, one for receiving, one for sending
+    router_d.tick(&mut ()).await.unwrap();
+    router_d.tick(&mut ()).await.unwrap();
 
-    router_d.receive((), &()).await.unwrap();
-    router_c.receive((), &()).await.unwrap();
-    router_b.receive((), &()).await.unwrap();
-    router_a.receive((), &()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
+
+    router_b.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
+
+    router_a.tick(&mut ()).await.unwrap();
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
 
     router_a.queue_payload(msg1, gw).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
+    let resa = router_a.tick(&mut ()).await.unwrap();
 
     // both nodes B and C are in range of A, so they both receive the packet
-    let res2 = router_b.receive((), &()).await.unwrap();
+    let res2 = router_b.tick(&mut ()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And since it is not for node B, then it sends it on
     assert_eq!(router_b.get_pending_count(), 1);
 
-    let res3 = router_c.receive((), &()).await.unwrap();
+    let res3 = router_c.tick(&mut ()).await.unwrap();
     assert_eq!(res3.len(), 0);
-    assert_eq!(router_c.get_pending_count(), 0);
+    assert_eq!(router_c.get_pending_count(), 1);
 
-    let d = router_d.receive((), &()).await.unwrap();
+    let d = router_d.tick(&mut ()).await.unwrap();
     assert_eq!(d.len(), 0);
     assert_eq!(router_d.get_pending_count(), 0);
 
-    let res4 = gw_router.receive((), &()).await.unwrap();
+    let res4 = gw_router.tick(&mut ()).await.unwrap();
     assert_ne!(res4.len(), 1);
     assert_eq!(gw_router.get_pending_count(), 0);
 }

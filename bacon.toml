@@ -31,7 +31,15 @@ need_stdout = false
 
 #  Runs unit tests on Host
 [jobs.test]
-command = ["cargo", "test", "-p", "must-hop", "--features", "in_std"]
+command = [
+  "cargo",
+  "test",
+  "-p",
+  "must-hop",
+  "--no-default-features",
+  "--features",
+  "in_std",
+]
 need_stdout = true
 
 # 4. EXAMPLES (ESP32): strictly checks if the embedded example compiles

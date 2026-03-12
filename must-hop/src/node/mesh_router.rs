@@ -91,7 +91,8 @@ where
         destination: u8,
     ) -> Result<(), MeshRouterError<Node::Error>> {
         trace!("Queing payload ...");
-        self.manager.queue_new_payload(payload, destination)?;
+        let pkt = self.manager.queue_new_payload(payload, destination)?;
+        self.push_queue(pkt)?;
         Ok(())
     }
 

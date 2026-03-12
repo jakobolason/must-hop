@@ -108,15 +108,19 @@ async fn test_multiple_packets_fifo_order() {
     // 1. A sends three packets in sequence
     router_a.queue_payload(msg1, 2).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
+    router_a.tick(&mut ()).await.unwrap();
+
     router_a.queue_payload(msg2, 2).unwrap();
-    assert_eq!(router_a.get_pending_count(), 2);
+    assert_eq!(router_a.get_pending_count(), 1);
+    router_a.tick(&mut ()).await.unwrap();
     router_a.queue_payload(msg3, 2).unwrap();
-    assert_eq!(router_a.get_pending_count(), 3);
+    assert_eq!(router_a.get_pending_count(), 1);
+    router_a.tick(&mut ()).await.unwrap();
 
     // 2. B receives them. Should be in order 1 -> 2 -> 3
 
     // First receive
-    let res1 = router_b.receive((), &()).await.unwrap();
+    let res1 = router_b.tick(&mut ()).await.unwrap();
     assert_eq!(router_b.get_pending_count(), 0);
     assert_eq!(res1.len(), 3);
     assert_eq!(res1[0].payload[0], 0x01, "Should receive msg1 first");
@@ -154,14 +158,14 @@ async fn test_send_and_ack() {
     // assert_eq!(router_a.get_pending_count(), 3);
 
     // Node B now receives these
-    let res1 = router_b.receive((), &()).await.unwrap();
+    let res1 = router_b.tick(&mut ()).await.unwrap();
     // These packages were not meant for us, so we should not receive anything here
     assert_eq!(res1.len(), 0);
     // But router b should have send a new package, and have a pending ack
     assert_eq!(router_b.get_pending_count(), 1);
     // And shoul've also sent a package over the air, which router A can receive
 
-    let res2 = router_a.receive((), &()).await.unwrap();
+    let res2 = router_a.tick(&mut ()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And node A should've removed the package now
     assert_eq!(router_a.get_pending_count(), 0);

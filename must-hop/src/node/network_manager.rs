@@ -193,14 +193,35 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u8,
-    ) -> Result<(), NetworkManagerError> {
+    ) -> Result<MHPacket<SIZE>, NetworkManagerError> {
         let new_pkt = self.new_packet(payload, destination)?;
-        self.add_packet(new_pkt)?;
-        Ok(())
+        self.add_packet(new_pkt.clone())?;
+        Ok(new_pkt)
     }
 
     pub fn get_gw_hops(&self) -> u8 {
         self.gw_hops
+    }
+
+    fn check_pend_ack(&mut self, pkt: &MHPacket<SIZE>) -> bool {
+        if let Some(our_packet_index) = self.pending_acks.iter().position(|p| {
+            // shortcircuit here
+            p.packet.packet_id == pkt.packet_id
+                && (p.packet.source_id == pkt.source_id
+                    || (pkt.packet_type == PacketType::Ack
+            // TODO: Shouldn't this be flipped? I don't think so
+                        && pkt.destination_id == p.packet.source_id))
+        }) {
+            // Then remove it from our vec, and return
+            trace!(
+                "RECEIVED KNOWN PACKAGE, REMOVING FROM LIST {}",
+                pkt.packet_id
+            );
+            self.pending_acks.remove(our_packet_index);
+            self.recent_seen.push((pkt.source_id, pkt.packet_id));
+            return true;
+        }
+        false
     }
 
     /// Manages actions which the packet might require from a network pov, and returns the packet
@@ -210,6 +231,8 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
         if pkt.source_id == self.source_id {
+            // We return None no matter if its our own or not
+            let _ = self.check_pend_ack(&pkt);
             return Ok(None);
         }
         if pkt.packet_type == PacketType::HeartBeat {
@@ -230,21 +253,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             return Ok(Some((pkt, PayloadType::HeartBeat)));
         }
         // Check if it is one of our packets
-        if let Some(our_packet_index) = self.pending_acks.iter().position(|p| {
-            // shortcircuit here
-            p.packet.packet_id == pkt.packet_id
-                && (p.packet.source_id == pkt.source_id
-                    || (pkt.packet_type == PacketType::Ack
-            // TODO: Shouldn't this be flipped? I don't think so
-                        && pkt.destination_id == p.packet.source_id))
-        }) {
-            // Then remove it from our vec, and return
-            trace!(
-                "RECEIVED KNOWN PACKAGE, REMOVING FROM LIST {}",
-                pkt.packet_id
-            );
-            self.pending_acks.remove(our_packet_index);
-            self.recent_seen.push((pkt.source_id, pkt.packet_id));
+        if self.check_pend_ack(&pkt) {
             return Ok(None);
         }
         // FIXME: This shouldn't be necessary
