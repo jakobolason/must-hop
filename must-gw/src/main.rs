@@ -1,4 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    num::NonZeroU8,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use log::error;
 use must_gw::{create_concentrator, node};
@@ -71,7 +74,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
 
     let mac = TdmaMac::new(
         embassy_time::Duration::from_secs(1),
-        10,
+        NonZeroU8::new(10).unwrap(),
         Some((
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -117,7 +120,7 @@ async fn main() {
         .format(move |buf, record| {
             let elapsed = start_time.elapsed();
 
-            let file = record.file().unwrap_or("unknown");
+            // let file = record.file().unwrap_or("unknown");
             let line = record.line().unwrap_or(0);
 
             // 1. Pick the color for the log level
@@ -136,7 +139,7 @@ async fn main() {
             // 3. Paint the string!
             writeln!(
                 buf,
-                "{}.{:06} [{}{:>5}{}] {} {}({} {}:{}){}",
+                "{}.{:06} [{}{:>5}{}] {} {}({}:{} ){}",
                 elapsed.as_secs(),
                 elapsed.subsec_micros(),
                 level_color, // Start level color
@@ -145,7 +148,7 @@ async fn main() {
                 record.args(), // The actual message
                 gray,          // Start gray for the file info
                 record.target(),
-                file,
+                // file,
                 line,
                 reset // Reset at the very end
             )

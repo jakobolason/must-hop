@@ -1,4 +1,4 @@
-# Figures
+# Library Traits and implementations
 
 The `MHNode` trait:
 
@@ -9,10 +9,9 @@ classDiagram
         +type Error
         +type Connection
         +type ReceiveBuffer
-        +type Duration
         +transmit(packets: &[MHPacket~SIZE~]) Future~Result~
-        +receive(conn, rec_buf) Future~Result~
-        +listen(rec_buf, with_timeout) Future~Result~
+        +receive(conn, rec_buf: Self::ReceiveBuffer) Future~Result~
+        +listen(rec_buf: Self::ReceiveBuffer, with_timeout: Option~Duration~) Future~Result~
     }
 
     class LoraNode~RK, DLY, SIZE, LEN~ {
@@ -51,43 +50,7 @@ packet-beta
 8-15: "packet_type (8 bits)"
 16-31: "packet_id (16 bits)"
 32-39: "source_id (8 bits)"
-40-103: "payload (variable length / Vec)"
-104-111: "hop_count (8 bits)"
-112-119: "hop_to_gw (8 bits)"
-```
-
-- `LoraNode` implementation of `MHNode`:
-
-```mermaid
-classDiagram
-    class MHNode~SIZE, LEN~ {
-        <<trait>>
-        +type Error
-        +type Connection
-        +type ReceiveBuffer
-        +type Duration
-        +transmit(packets: &[MHPacket]) Result~(), Error~
-        +receive(conn: Connection, rec_buf: &ReceiveBuffer) Result~Vec, Error~
-        +listen(rec_buf: &mut ReceiveBuffer, with_timeout: bool) Result~Connection, Error~
-    }
-
-    class LoraNode~RK, DLY, SIZE, LEN~ {
-        -lora: &'a mut LoRa~RK, DLY~
-        -_tp: TransmitParameters
-        -pkt_params: PacketParams
-        -mdltn_params: ModulationParams
-        +new(lora: &mut LoRa, tp: TransmitParameters) Result~LoraNode, RadioError~
-        +prepare_for_rx(rx_mode: RxMode) Result~(), RadioError~
-    }
-
-    class LoraAssociatedTypes {
-        <<associated types>>
-        Error = RadioError
-        Connection = Result~(u8, PacketStatus), RadioError~
-        ReceiveBuffer = [u8; 256]
-        Duration = u16
-    }
-
-    MHNode <|.. LoraNode : implements
-    LoraNode ..> LoraAssociatedTypes : specifies types
+40-47: "hop_count (8 bits)"
+48-55: "hop_to_gw (8 bits)"
+56-95: "payload (max 256 bytes)"
 ```

@@ -11,7 +11,7 @@ graph TD
     CheckHeartbeatHop -- Yes --> Discard([Discard / Return None])
     CheckHeartbeatHop -- No --> UpdateGW[Update self.gw_hops = hop_count + 1]
     UpdateGW --> AddSeen1[Add to recent_seen]
-    AddSeen1 --> RetHeartbeat([Return PayloadType::Bootup])
+    AddSeen1 --> RetHeartbeat([Return PayloadType::Heartbeat])
 
     %% Pending ACKs check
     IsHeartbeat -- No --> CheckPending{Is packet_id in <br> pending_acks?}
@@ -60,7 +60,7 @@ graph TD
     MatchResult -- PayloadType::Data --> PushToSend[Push exact packet to 'to_send' queue]
     MatchResult -- PayloadType::Command --> PushToCommand[Push to 'commands' list for local App]
     MatchResult -- PayloadType::ACK --> GenAck[Generate ACK packet for source]
-    MatchResult -- PayloadType::Heartbeat --> GenBootup[Generate BootUp packet with hop_count + 1]
+    MatchResult -- PayloadType::Heartbeat --> GenBootup[Generate Heartbeat packet with hop_count + 1]
 
     GenAck --> PushToSend
     GenHeartbeat --> PushToSend

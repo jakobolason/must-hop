@@ -217,14 +217,14 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
         // FIXME: Remove from user, should be set by GW
         slot_duration: Duration,
         // FIXME: Remove from user, should be set by GW
-        slots_per_frame: u8,
+        slots_per_frame: core::num::NonZeroU8,
         time_sync: Option<(u64, Instant)>,
         my_tx_slot: Option<u8>,
         node_id: u32,
     ) -> Self {
         Self {
             slot_duration,
-            slots_per_frame,
+            slots_per_frame: slots_per_frame.into(),
             my_tx_slot,
             node_id,
             time_sync,
@@ -322,15 +322,7 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
         Instant::now() + Duration::from_millis(node_offset)
     }
 
-    fn update_heartbeat(&self, mut hbt: MHPacket<SIZE>) -> MHPacket<SIZE> {
-        let my_tx_slot = match self.my_tx_slot {
-            Some(slot) => slot,
-            // Do not send any heartbeat if you haven't gotten a slot yet.
-            None => {
-                error!("Trying to send heartbeat before being given a slot!");
-                0
-            }
-        };
+    fn update_heartbeat(&self, mut hbt: MHPacket<SIZE>, my_tx_slot: u8) -> MHPacket<SIZE> {
         let tx_timestamp = match self.time_sync {
             Some((old_gps, last_stamp)) => {
                 old_gps + (Instant::now().as_millis() - last_stamp.as_millis())
@@ -403,7 +395,7 @@ where
             debug!(" !!!  MY SLOT !!! ");
             if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
                 if let Some(pkt) = self.hbt_pkt.take()
-                    && let Err(pkt) = tx_queue.push(self.update_heartbeat(pkt))
+                    && let Err(pkt) = tx_queue.push(self.update_heartbeat(pkt, my_tx_slot))
                 {
                     // If queue full
                     self.hbt_pkt = Some(pkt)
@@ -425,7 +417,6 @@ where
                 }
                 self.sync_epoch(&received_packets);
             }
-            info!("now sleeping ...");
             // Redeclare timestamps, which might've been updated in `self.sync_epoch` just above
             let timestamps = match self.time_sync {
                 // Uses match to avoid an unwrap here

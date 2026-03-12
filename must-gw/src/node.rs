@@ -124,7 +124,7 @@ impl MHNode<SIZE, LEN> for GWNode {
             .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
         let tx_pkt = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
-            embassy_time::Timer::at(Instant::from_millis(5)).await;
+            embassy_time::Timer::after(Duration::from_millis(5)).await;
         }
         self.radio.transmit(tx_pkt)
     }

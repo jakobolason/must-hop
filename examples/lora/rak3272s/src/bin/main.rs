@@ -6,6 +6,8 @@
 #[path = "../iv.rs"]
 mod iv;
 
+use core::num::NonZeroU8;
+
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_stm32::peripherals;
@@ -57,7 +59,7 @@ bind_interrupts!(struct Irqs{
 async fn main(spawner: Spawner) {
     let mut config = Config::default();
     {
-        config.rcc.ls = LsConfig::default_lse();
+        config.rcc.ls = LsConfig::default_lsi();
         config.rcc.msi = Some(MSIRange::RANGE48M);
         config.rcc.sys = Sysclk::MSI;
         config.rcc.mux.rngsel = mux::Rngsel::MSI;
@@ -150,7 +152,7 @@ pub async fn lora_task(
         crc: true,
         iq: false,
     };
-    let source_id = 3;
+    let source_id = 2;
     let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp) {
         Ok(node) => node,
         Err(e) => {
@@ -159,7 +161,13 @@ pub async fn lora_task(
         }
     };
     // let mac = RandomAccessMac::new();
-    let mac = TdmaMac::new(Duration::from_secs(1), 10, None, None, source_id);
+    let mac = TdmaMac::new(
+        Duration::from_secs(1),
+        NonZeroU8::new(10).unwrap(),
+        None,
+        None,
+        source_id,
+    );
     lora::lora_task(node, channel, source_id as u8, 3, 3, mac).await;
 }
 

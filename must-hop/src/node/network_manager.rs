@@ -203,7 +203,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         self.gw_hops
     }
 
-    /// Manages actions which the pakcet might require from a network pov, and returns the packet
+    /// Manages actions which the packet might require from a network pov, and returns the packet
     /// if none are required, otherwise returns none
     fn receive_packet(
         &mut self,
@@ -391,10 +391,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use heapless::Vec;
 
     // A helper to make a dummy manager for testing
     fn setup_manager() -> NetworkManager<40, 5> {
-        NetworkManager::new(1, 10, 3) // Source ID 1, Timeout 10s, 3 Retries
+        NetworkManager::new(2, 10, 3)
     }
 
     #[test]
@@ -403,54 +404,110 @@ mod tests {
         let payload = [0xAB, 0xCD];
         let vec = Vec::from_slice(&payload).expect("Could not get vec from slice");
 
-        // Test basic packet creation
         let pkt = manager.new_packet(vec, 2).unwrap();
 
-        assert_eq!(pkt.source_id, 1);
+        assert_eq!(pkt.source_id, 2);
         assert_eq!(pkt.destination_id, 2);
         assert_eq!(pkt.packet_id, 1);
         assert_eq!(pkt.payload, payload);
     }
 
     #[test]
-    fn test_send_queue_logic() {
+    fn test_queueing_and_ack_handling() {
         let mut manager = setup_manager();
-        let payload = [1, 2, 3];
-        let pkt = Vec::from_slice(&payload).unwrap();
-        let pkt = manager.new_packet(pkt, 2).unwrap();
+        let payload = Vec::from_slice(&[1, 2, 3]).unwrap();
 
-        // Calling send_packet should queue it and return it for sending
-        let to_send = manager
-            .receive_packet(pkt.clone())
-            .expect("Should queue packet");
-        assert!(to_send.is_some());
-        let (to_send, payload_type) = to_send.unwrap();
+        // 1. Queue a new packet bound for node 2
+        manager
+            .queue_new_payload(payload, 2)
+            .expect("Should queue payload");
 
-        // Check it returned the packet to be sent
-        assert_eq!(to_send.packet_id, 1);
+        // It should now be in the pending list awaiting an ACK
+        assert_eq!(manager.get_pending_count(), 1);
+
+        // 2. Simulate receiving an ACK from node 2
+        let ack_pkt = MHPacket {
+            destination_id: 2, // Back to us
+            packet_type: PacketType::Ack,
+            packet_id: 1, // Matches the ID of the packet we just sent
+            source_id: 3, // From the node we sent it to
+            payload: Vec::from_slice(&[0]).unwrap(),
+            hop_count: 1,
+            hop_to_gw: 5,
+        };
+
+        // 3. Process the ACK
+        let result = manager
+            .receive_packet(ack_pkt)
+            .expect("Should process packet");
+
+        // The manager should consume the ACK and return None
+        assert!(result.is_none());
+
+        // Our pending list should now be empty because the packet was ACK'd
+        assert_eq!(manager.get_pending_count(), 0);
+    }
+
+    #[test]
+    fn test_forwarding_logic() {
+        let mut manager = setup_manager();
+        // Simulate that we are 2 hops away from the gateway (GW is ID 1 usually, but let's say GW=0)
+        manager.gw_hops = 2;
+
+        // Simulate a packet coming from node 3, bound for the GW (let's assume ID 1 is GW for your logic)
+        let incoming_pkt = MHPacket {
+            destination_id: 1, // GW Bound
+            packet_type: PacketType::Data,
+            packet_id: 42,
+            source_id: 3,
+            payload: Vec::from_slice(&[9, 9]).unwrap(),
+            hop_count: 1,
+            hop_to_gw: 4, // Node 3 thinks it is 4 hops away. We are 2 hops away, so we should forward.
+        };
+
+        let result = manager
+            .receive_packet(incoming_pkt)
+            .expect("Should process packet");
+
+        // We expect the manager to modify the packet and tell us to send it on
+        assert!(result.is_some());
+        let (forward_pkt, payload_type) = result.unwrap();
+
         assert_eq!(payload_type, PayloadType::Data);
+        // It should update the hop_to_gw to our current knowledge (2)
+        assert_eq!(forward_pkt.hop_to_gw, 2);
 
-        // Check it is actually in the pending list
-        assert_eq!(manager.pending_acks.len(), 1);
+        // It should also add this to pending_acks since we are forwarding it and expect an ACK
+        assert_eq!(manager.get_pending_count(), 1);
+    }
 
-        // now act as if we transmitted this, and listened, and another node now transmits this.
-        // That should mean the previous package gets removed from pendick acks
-        let received = to_send;
-        // Should be none, because we just received an ACK for a package we sent
-        let should_be_none = manager.receive_packet(received).unwrap();
+    #[test]
+    fn test_heartbeat_updates_gw_hops() {
+        let mut manager = setup_manager();
+        // Start with default unknown hops
+        assert_eq!(manager.get_gw_hops(), 255);
 
-        assert_eq!(should_be_none, None);
+        // Simulate a heartbeat from a node that is 1 hop from the GW
+        let heartbeat_pkt = MHPacket {
+            destination_id: 0,
+            packet_type: PacketType::HeartBeat,
+            packet_id: 100,
+            source_id: 3,
+            payload: Vec::new(),
+            hop_count: 1,
+            hop_to_gw: 1,
+        };
 
-        // 3. Receive the same packet back (simulating a loopback or re-forwarding)
-        // If we receive a packet with Source != Self, we usually forward it.
-        // But if we receive an ACK (logic you haven't fully implemented in snippet yet), we remove it.
+        let result = manager
+            .receive_packet(heartbeat_pkt)
+            .expect("Should process packet");
 
-        // For now, let's test the "BufferFull" error
-        // for _ in 0..LEN {
-        //     let _ = manager.send_packet(pkt.clone());
-        // }
-        // Next one should fail
-        // let res = manager.send_packet(pkt);
-        // assert!(matches!(res, Err(NetworkManagerError::BufferFull)));
+        // We should forward the heartbeat
+        assert!(result.is_some());
+        let (_, payload_type) = result.unwrap();
+        assert_eq!(payload_type, PayloadType::HeartBeat);
+
+        // Our manager should have updated its own distance to the GW (hop_count + 1)
+        assert_eq!(manager.get_gw_hops(), 2);
     }
 }
