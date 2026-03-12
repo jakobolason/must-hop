@@ -45,7 +45,10 @@ pub struct Builder<'a> {
     gains: &'a [TxGain],
     channel_conf: Vec<(u8, ChannelConf)>,
 }
-pub struct Running {}
+pub struct Running {
+    gps_fd: Option<std::os::raw::c_int>,
+    gps_buffer: Vec<u8>,
+}
 
 /// A LoRa concentrator.
 pub struct Concentrator<State> {
@@ -73,6 +76,10 @@ impl ResetToken {
     }
 
     /// Unsafe bypass if you are sure the concentrator is reset before use
+    ///
+    /// # Safety
+    /// This is unsafe because if this token is not a proper reset of the board,
+    /// then it will crash upon starting it.
     pub unsafe fn bypass() -> Self {
         ResetToken { _priv: () }
     }
@@ -210,7 +217,10 @@ impl<'a> Concentrator<Builder<'a>> {
         Ok(Concentrator {
             _prevent_sync: PhantomData,
             _guard: self._guard,
-            state: Running {},
+            state: Running {
+                gps_fd: None,
+                gps_buffer: Vec::new(),
+            },
         })
     }
 }
@@ -237,18 +247,18 @@ impl Concentrator<Running> {
     /// Perform a non-blocking read of up to 16 packets from
     /// concentrator's FIFO.
     pub fn receive(&self) -> Result<Option<Vec<RxPacket>>> {
-        log::info!("Setting up receive!");
+        log::debug!("Setting up receive!");
         let mut tmp_buf: [std::mem::MaybeUninit<llg::lgw_pkt_rx_s>; 16] =
             unsafe { std::mem::MaybeUninit::uninit().assume_init() };
 
-        log::info!("Now calling");
+        log::debug!("Now calling");
         let len = unsafe {
             hal_call!(lgw_receive(
                 tmp_buf.len() as u8,
                 tmp_buf.as_mut_ptr() as *mut llg::lgw_pkt_rx_s
             ))
         }?;
-        log::info!("Received {} packets", len);
+        log::debug!("Received {} packets", len);
         if len > 0 {
             let mut out = Vec::with_capacity(len as usize);
             for i in 0..(len as usize) {
@@ -272,12 +282,130 @@ impl Concentrator<Running> {
     /// Stop the LoRa concentrator and disconnect it.
     pub fn stop(self) -> Result<Concentrator<Closed>> {
         log::info!("stopping concentrator");
+        if let Some(fd) = self.state.gps_fd {
+            unsafe {
+                let _ = hal_call!(lgw_gps_disable(fd));
+            }
+        }
+
         unsafe { hal_call!(lgw_stop()) }?;
         Ok(Concentrator {
             _prevent_sync: PhantomData,
             _guard: self._guard,
             state: Closed {},
         })
+    }
+
+    pub fn enable_gps(&mut self, tty_path: &str, gps_family: &str) -> Result<()> {
+        let tty = std::ffi::CString::new(tty_path).map_err(|_| Error::Data)?;
+        let family = std::ffi::CString::new(gps_family).map_err(|_| Error::Data)?;
+        let mut fd: std::os::raw::c_int = -1;
+
+        unsafe {
+            hal_call!(lgw_gps_enable(
+                tty.as_ptr() as *mut _,
+                family.as_ptr() as *mut _,
+                0,
+                &mut fd
+            ))
+        }?;
+        self.state.gps_fd = Some(fd);
+        Ok(())
+    }
+
+    pub fn process_gps_frames(&mut self) -> Result<()> {
+        let fd = match self.state.gps_fd {
+            Some(fd) => fd,
+            None => return Ok(()),
+        };
+
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+
+        let mut read_buf = [0u8; 128];
+        let bytes_read = unsafe {
+            libc::read(
+                fd,
+                read_buf.as_mut_ptr() as *mut libc::c_void,
+                read_buf.len(),
+            )
+        };
+
+        if bytes_read > 0 {
+            self.state
+                .gps_buffer
+                .extend_from_slice(&read_buf[..bytes_read as usize]);
+        }
+
+        let mut rd_idx = 0;
+        let mut frame_end_idx = 0;
+        let wr_idx = self.state.gps_buffer.len();
+
+        while rd_idx < wr_idx {
+            let mut frame_size: usize = 0;
+            let sync_char = self.state.gps_buffer[rd_idx];
+
+            if sync_char == llg::LGW_GPS_UBX_SYNC_CHAR as u8 {
+                let msg_type = unsafe {
+                    llg::lgw_parse_ubx(
+                        self.state.gps_buffer[rd_idx..].as_ptr() as *const _,
+                        wr_idx - rd_idx,
+                        &mut frame_size,
+                    )
+                };
+
+                if frame_size > (wr_idx - rd_idx) {
+                    break;
+                }
+
+                if msg_type as u32 == 2 {
+                    frame_size = 0;
+                }
+            } else if sync_char == llg::LGW_GPS_NMEA_SYNC_CHAR as u8 {
+                if let Some(end_offset) = self.state.gps_buffer[rd_idx..wr_idx]
+                    .iter()
+                    .position(|&b| b == 0x0A)
+                {
+                    frame_size = end_offset + 1;
+                    let _msg_type = unsafe {
+                        llg::lgw_parse_nmea(
+                            self.state.gps_buffer[rd_idx..].as_ptr() as *const _,
+                            frame_size as std::os::raw::c_int,
+                        )
+                    };
+                }
+            }
+
+            if frame_size > 0 {
+                rd_idx += frame_size;
+                frame_end_idx = rd_idx;
+            } else {
+                rd_idx += 1;
+            }
+        }
+
+        if frame_end_idx > 0 {
+            self.state.gps_buffer.drain(..frame_end_idx);
+        }
+
+        Ok(())
+    }
+
+    pub fn get_gps(&self) -> Result<(Coordinates, std::time::Duration)> {
+        let mut utc = unsafe { std::mem::MaybeUninit::<llg::timespec>::zeroed().assume_init() };
+        let mut gps_time =
+            unsafe { std::mem::MaybeUninit::<llg::timespec>::zeroed().assume_init() };
+        let mut loc = unsafe { std::mem::MaybeUninit::<llg::coord_s>::zeroed().assume_init() };
+        let mut err = unsafe { std::mem::MaybeUninit::<llg::coord_s>::zeroed().assume_init() };
+
+        unsafe { hal_call!(lgw_gps_get(&mut utc, &mut gps_time, &mut loc, &mut err)) }?;
+
+        let coords = Coordinates::from(loc);
+        let duration = std::time::Duration::new(gps_time.tv_sec as u64, gps_time.tv_nsec as u32);
+
+        Ok((coords, duration))
     }
 
     /// Returns the concentrators current transmit status.
@@ -291,7 +419,7 @@ impl Concentrator<Running> {
         unsafe {
             hal_call!(lgw_status(
                 {
-                    log::info!("[WARN] remove hardcoded RF chain argument from status calls");
+                    log::error!("[WARN] remove hardcoded RF chain argument from status calls");
                     0u8
                 },
                 TX_STATUS,

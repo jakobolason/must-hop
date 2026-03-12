@@ -6,9 +6,12 @@
 #[path = "../iv.rs"]
 mod iv;
 
+use core::num::NonZeroU8;
+
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_stm32::peripherals;
+use embassy_stm32::rcc::LsConfig;
 use embassy_stm32::rng;
 use embassy_stm32::rng::Rng;
 use embassy_stm32::{
@@ -19,12 +22,17 @@ use embassy_stm32::{
 };
 use embassy_sync::channel;
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
+use embassy_time::Duration;
+use embassy_time::Instant;
 use embassy_time::{Delay, Timer};
 use heapless::Vec;
 use lora_phy::LoRa;
 use lora_phy::mod_params::{Bandwidth, CodingRate, SpreadingFactor};
 use lora_phy::sx126x;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
+use must_hop::lora::LoraNode;
+use must_hop::node::policy::RandomAccessMac;
+use must_hop::node::policy::TdmaMac;
 use {defmt_rtt as _, panic_probe as _};
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
@@ -38,7 +46,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 use serde::{Deserialize, Serialize};
 
-const LORA_FREQUENCY_IN_HZ: u32 = 868_100_000; // warning: set this appropriately for the region
+const LORA_FREQUENCY_IN_HZ: u32 = 868_700_000; // warning: set this appropriately for the region
 
 static CHANNEL: Channel<ThreadModeRawMutex, SensorData, 3> = Channel::new();
 
@@ -51,6 +59,7 @@ bind_interrupts!(struct Irqs{
 async fn main(spawner: Spawner) {
     let mut config = Config::default();
     {
+        config.rcc.ls = LsConfig::default_lsi();
         config.rcc.msi = Some(MSIRange::RANGE48M);
         config.rcc.sys = Sysclk::MSI;
         config.rcc.mux.rngsel = mux::Rngsel::MSI;
@@ -112,7 +121,7 @@ async fn sensor_task(
         info!("Send a packet!");
         let random = rng.next_u64();
         // random number between 3 and 8
-        let r_num = (random % 5) + 3;
+        let r_num = (random % 5) + 15;
         info!("waiting {} seconds ...", r_num);
 
         Timer::after_secs(r_num).await;
@@ -143,8 +152,23 @@ pub async fn lora_task(
         crc: true,
         iq: false,
     };
-    let source_id = 1;
-    lora::lora_task::<_, _, _, _, MAX_PACK_LEN, LEN>(&mut lora, channel, tp, source_id, 3, 3).await;
+    let source_id = 2;
+    let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp) {
+        Ok(node) => node,
+        Err(e) => {
+            error!("Failed to initialize lora node: {:?}", e);
+            return;
+        }
+    };
+    // let mac = RandomAccessMac::new();
+    let mac = TdmaMac::new(
+        Duration::from_secs(1),
+        NonZeroU8::new(10).unwrap(),
+        None,
+        None,
+        source_id,
+    );
+    lora::lora_task(node, channel, source_id as u8, 3, 3, mac).await;
 }
 
 // This creates the task which checks for sensor data

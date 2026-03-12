@@ -2,6 +2,7 @@
 /// The MHNode describes necessary radio function for NM and MS to work. These should be
 /// implemented by the radio used on the specific device
 use core::future::Future;
+use core::time::Duration;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
@@ -14,18 +15,20 @@ pub mod policy;
 /// A Data stream, meaning it wants to send multiple packets(u8 amount). In this case, Node B will
 /// continue to listen, until it has receieved (u8) amount of packages
 /// ACK should only be sent by a GW, because they will not retransmit
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub enum PacketType {
     /// To send just a single packet
     Data,
     /// Payload should be bitmask of received packets
     Ack,
-    /// When GW boots up, it sends this out
-    BootUp,
+    /// The GW should send out periodic heartbeats
+    HeartBeat,
 }
 
 /// MHPacket defines the package sent around the network
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub struct MHPacket<const SIZE: usize> {
     /// Destination identifier
     // TODO: Perhaps bigger than u8?
@@ -45,10 +48,13 @@ pub struct MHPacket<const SIZE: usize> {
 
 /// Any radio wanting to be a node, has to be able to transmit and receive
 pub trait MHNode<const SIZE: usize, const LEN: usize> {
-    type Error;
+    #[cfg(not(feature = "in_std"))]
+    type Error: core::fmt::Debug + defmt::Format;
+    #[cfg(feature = "in_std")]
+    type Error: core::fmt::Debug;
+
     type Connection;
     type ReceiveBuffer;
-    type Duration;
 
     /// Takes an MHPacket with a size for the user defined payload. This will be sent to the
     /// appropriate destination_id
@@ -69,6 +75,6 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     fn listen(
         &mut self,
         rec_buf: &mut Self::ReceiveBuffer,
-        with_timeout: bool,
+        with_timeout: Option<Duration>,
     ) -> impl Future<Output = Result<Self::Connection, Self::Error>>;
 }

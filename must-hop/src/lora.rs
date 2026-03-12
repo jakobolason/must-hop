@@ -12,18 +12,20 @@ use defmt::{error, trace};
 #[cfg(feature = "in_std")]
 use log::{error, trace};
 
+use core::time::Duration;
 use embassy_time::Instant;
 use heapless::Vec;
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
 // Approximately 1 second?
-const RECEIVE_TIMEOUT: u16 = 100;
+// const RECEIVE_TIMEOUT: u16 = 255;
 // TODO: Should this be a const generic for the user to set? Perhaps a default value?
 const TRANSMISSION_BUFFER: usize = 256; // The radio can receive 256 bytes to transmit
 
 /// Example of payload
-#[derive(Serialize, Deserialize, Debug, PartialEq, defmt::Format)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub struct SensorData {
     pub device_id: u8,
     pub temperate: f32,
@@ -71,8 +73,7 @@ where
 {
     type Error = RadioError;
     type Connection = Result<(u8, PacketStatus), RadioError>;
-    type ReceiveBuffer = [u8; SIZE];
-    type Duration = u16;
+    type ReceiveBuffer = [u8; TRANSMISSION_BUFFER];
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {
         let now = Instant::now();
@@ -136,7 +137,7 @@ where
     async fn receive(
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
-        rec_buf: &[u8; SIZE],
+        rec_buf: &[u8; TRANSMISSION_BUFFER],
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, RadioError> {
         // First we check if we actually got something
         let (len, _rx_pkt_status) = match conn {
@@ -171,15 +172,24 @@ where
 
     async fn listen(
         &mut self,
-        rec_buf: &mut [u8; SIZE],
-        with_timeout: bool,
+        rec_buf: &mut [u8; TRANSMISSION_BUFFER],
+        with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, RadioError> {
-        let rec_mode = match with_timeout {
-            true => RxMode::Single(RECEIVE_TIMEOUT),
-            false => RxMode::Continuous,
-        };
-        self.prepare_for_rx(rec_mode).await?;
-        Ok(self.lora.rx(&self.pkt_params, rec_buf).await)
+        self.prepare_for_rx(RxMode::Continuous).await?;
+        match with_timeout {
+            Some(timeout) => {
+                match embassy_time::with_timeout(
+                    embassy_time::Duration::from_micros(timeout.as_micros() as u64),
+                    self.lora.rx(&self.pkt_params, rec_buf),
+                )
+                .await
+                {
+                    Ok(rx_result) => Ok(rx_result),
+                    Err(_) => Err(RadioError::ReceiveTimeout),
+                }
+            }
+            None => Ok(self.lora.rx(&self.pkt_params, rec_buf).await),
+        }
     }
 }
 

@@ -763,3 +763,20 @@ impl TryFrom<u8> for RxStatus {
         })
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct Coordinates {
+    pub lat: f64,
+    pub lon: f64,
+    pub alt: i16,
+}
+
+impl From<llg::coord_s> for Coordinates {
+    fn from(c: llg::coord_s) -> Self {
+        Self {
+            lat: c.lat,
+            lon: c.lon,
+            alt: c.alt,
+        }
+    }
+}

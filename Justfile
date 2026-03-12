@@ -38,14 +38,15 @@ test:
 test-sim:
     cargo test --test network_simulation --features "in_std"
 
+# Use these to hint at using bacon, because this just takes more to type
 # Start Bacon for live feedback
 [group('Tests')]
-watch:
+bacon:
     bacon
 
 # Start Bacon for testing
 [group('Tests')]
-watch-test:
+bacon-test:
     bacon test
 
 # Note: Requires riscv32imac-unknown-none-elf target installed
@@ -108,14 +109,16 @@ build-gw-pi:
 [group('Pi deployments')]
 deploy-gw-pi: build-gw-pi
   @echo "Copying binary GW to pi"
-  ssh {{PI_USER}}@{{PI_HOST}} 'mkdir -p {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release'
+  ssh {{PI_USER}}@{{PI_HOST}} 'mkdir -p {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release && rm -f {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
   scp target/aarch64-unknown-linux-gnu/release/must-gw {{PI_USER}}@{{PI_HOST}}:{{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw
 
 [group('Pi deployments')]
 run-gw: deploy-gw-pi
   @echo "Running GW on pi"
-  ssh {{PI_USER}}@{{PI_HOST}} 'chmod +x {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw \
-    && {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
+  ssh {{PI_USER}}@{{PI_HOST}} 'pkill -9 must-gw || true \
+    && chmod +x {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw \
+    && RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
+    {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 # Format all code in the workspace
 [group('utils')]

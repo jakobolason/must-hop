@@ -3,9 +3,12 @@ use must_hop::node::{
     MHNode, MHPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
-    policy::NodePolicy,
+    policy::{NodePolicy, RandomAccessMac},
 };
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 const SIZE: usize = 40;
 const LEN: usize = 5;
@@ -17,7 +20,6 @@ impl MHNode<SIZE, LEN> for MockRadio {
     type Error = NetworkManagerError;
     type Connection = ();
     type ReceiveBuffer = ();
-    type Duration = u16;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
         {
@@ -48,7 +50,7 @@ impl MHNode<SIZE, LEN> for MockRadio {
     async fn listen(
         &mut self,
         _receiving_buffer: &mut (),
-        _with_timeout: bool,
+        _with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, Self::Error> {
         println!("listening!");
         Ok(())
@@ -89,11 +91,13 @@ async fn test_multiple_packets_fifo_order() {
     let mut router_a = MeshRouter::new(
         MockRadio { air: air.clone() },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
     let mut router_b = MeshRouter::new(
         MockRadio { air: air.clone() },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -102,11 +106,11 @@ async fn test_multiple_packets_fifo_order() {
     let msg3 = Vec::from_slice(&[0x03]).unwrap();
 
     // 1. A sends three packets in sequence
-    router_a.send_payload(msg1, 2).await.unwrap();
+    router_a.queue_payload(msg1, 2).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
-    router_a.send_payload(msg2, 2).await.unwrap();
+    router_a.queue_payload(msg2, 2).unwrap();
     assert_eq!(router_a.get_pending_count(), 2);
-    router_a.send_payload(msg3, 2).await.unwrap();
+    router_a.queue_payload(msg3, 2).unwrap();
     assert_eq!(router_a.get_pending_count(), 3);
 
     // 2. B receives them. Should be in order 1 -> 2 -> 3
@@ -126,27 +130,29 @@ async fn test_multiple_packets_fifo_order() {
 #[tokio::test]
 async fn test_send_and_ack() {
     let air = create_air();
-    let mut router_a: MeshRouter<_, _, _, NodePolicy> = MeshRouter::new(
+    let mut router_a = MeshRouter::new(
         MockRadio { air: air.clone() },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
-    let mut router_b: MeshRouter<_, _, _, NodePolicy> = MeshRouter::new(
+    let mut router_b = MeshRouter::new(
         MockRadio { air: air.clone() },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
     // let msg2 = Vec::from_slice(&[0x02]).unwrap();
     // let msg3 = Vec::from_slice(&[0x03]).unwrap();
 
-    router_a.send_payload(msg1, 3).await.unwrap();
+    router_a.queue_payload(msg1, 3).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
     // router_a.send_payload(msg2, 3).await.unwrap();
     // assert_eq!(router_a.get_pending_count(), 2);
     // router_a.send_payload(msg3, 3).await.unwrap();
     // assert_eq!(router_a.get_pending_count(), 3);
-    //
+
     // Node B now receives these
     let res1 = router_b.receive((), &()).await.unwrap();
     // These packages were not meant for us, so we should not receive anything here

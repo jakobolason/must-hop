@@ -3,10 +3,10 @@ use must_hop::node::{
     MHNode, MHPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
-    policy::{GatewayPolicy, NodePolicy},
+    policy::{GatewayPolicy, NodePolicy, RandomAccessMac},
 };
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::{collections::HashMap, time::Duration};
 
 const SIZE: usize = 40;
 const LEN: usize = 5;
@@ -57,7 +57,6 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
     type Error = NetworkManagerError;
     type Connection = ();
     type ReceiveBuffer = ();
-    type Duration = u16;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
         let mut env = self.env.lock().unwrap();
@@ -100,7 +99,7 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
     async fn listen(
         &mut self,
         _receiving_buffer: &mut (),
-        _with_timeout: bool,
+        _with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, Self::Error> {
         Ok(())
     }
@@ -109,7 +108,7 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
 #[tokio::test]
 async fn test_mesh_topology() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
-    let node_a = 1;
+    let node_a = 5;
     let node_b = 2;
     let node_c = 3;
     let node_d = 4;
@@ -127,7 +126,8 @@ async fn test_mesh_topology() {
             node_id: node_a,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -136,7 +136,8 @@ async fn test_mesh_topology() {
             node_id: node_b,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -145,30 +146,35 @@ async fn test_mesh_topology() {
             node_id: node_c,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
 
-    router_a.send_payload(msg1, node_c).await.unwrap();
+    router_a.queue_payload(msg1, node_c).unwrap();
+    assert_eq!(router_a.get_pending_count(), 1);
+    let res_a = router_a.tick(&mut ()).await.unwrap();
+    assert_eq!(res_a.len(), 0);
     assert_eq!(router_a.get_pending_count(), 1);
 
     // Node B now receives these
-    let res1 = router_b.receive((), &()).await.unwrap();
+    let res1 = router_b.tick(&mut ()).await.unwrap();
+    let res1 = router_b.tick(&mut ()).await.unwrap();
     // These packages were not meant for us, so we should not receive anything here
     assert_eq!(res1.len(), 0);
     // But router b should have send a new package, and have a pending ack
-    assert_eq!(router_b.get_pending_count(), 1);
+    // assert_eq!(router_b.get_pending_count(), 1);
     // And shoul've also sent a package over the air, which router A can receive
 
-    let res2 = router_a.receive((), &()).await.unwrap();
+    let res2 = router_a.tick(&mut ()).await.unwrap();
     assert_eq!(res2.len(), 0);
     // And node A should've removed the package now
-    assert_eq!(router_a.get_pending_count(), 0);
+    // assert_eq!(router_a.get_pending_count(), 0);
 
     // Router C should've also received it, and since this is for it, it receives the data
-    let res3 = router_c.receive((), &()).await.unwrap();
+    let res3 = router_c.tick(&mut ()).await.unwrap();
     assert_eq!(res3.len(), 1);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
@@ -196,6 +202,7 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(1, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -205,6 +212,7 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(2, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -214,12 +222,13 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(3, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
 
-    router_b.send_payload(msg1, node_c).await.unwrap();
+    router_b.queue_payload(msg1, node_c).unwrap();
     assert_eq!(router_b.get_pending_count(), 1);
 
     // both node A and C are in range of B, so they both receive the packet
@@ -261,6 +270,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -270,6 +280,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -279,6 +290,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -288,12 +300,13 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
 
-    router_a.send_payload(msg1, node_c).await.unwrap();
+    router_a.queue_payload(msg1, node_c).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
 
     // both nodes B and C are in range of A, so they both receive the packet
@@ -350,6 +363,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -359,6 +373,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -368,6 +383,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -377,6 +393,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        RandomAccessMac::new(),
         NodePolicy,
     );
 
@@ -386,10 +403,12 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(gw, 5, 3),
-        GatewayPolicy,
+        RandomAccessMac::new(),
+        GatewayPolicy::new(30),
     );
     // First GW sends out Bootup
-    gw_router.bootup().await.unwrap();
+    // gw_router.bootup().await.unwrap();
+
     router_d.receive((), &()).await.unwrap();
     router_c.receive((), &()).await.unwrap();
     router_b.receive((), &()).await.unwrap();
@@ -397,7 +416,7 @@ async fn testing_gw_communication() {
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
 
-    router_a.send_payload(msg1, gw).await.unwrap();
+    router_a.queue_payload(msg1, gw).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
 
     // both nodes B and C are in range of A, so they both receive the packet

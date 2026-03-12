@@ -2,9 +2,9 @@ use super::{MHPacket, PacketType};
 use core::cmp::{max, min};
 
 #[cfg(not(feature = "in_std"))]
-use defmt::{error, trace};
+use defmt::{debug, error, trace};
 #[cfg(feature = "in_std")]
-use log::{error, trace};
+use log::{debug, error, trace};
 
 use embassy_time::{Duration, Instant};
 use heapless::Vec;
@@ -13,7 +13,8 @@ use postcard::Error as PostError;
 
 // pub const LEN: usize = 5;
 /// Does not need to be serialized, because only MHPacket will be sent
-#[derive(Debug, PartialEq, defmt::Format)]
+#[derive(Debug, PartialEq)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub struct PendingPacket<const SIZE: usize> {
     /// We keep the whole packet so it can be retransmitted
     packet: MHPacket<SIZE>,
@@ -23,7 +24,8 @@ pub struct PendingPacket<const SIZE: usize> {
     retries: u8,
 }
 
-#[derive(Debug, defmt::Format)]
+#[derive(Debug)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub enum NetworkManagerError {
     Hardware(RadioError),
     Serialization(PostError),
@@ -43,7 +45,7 @@ impl From<PostError> for NetworkManagerError {
     }
 }
 
-/// Ring buffer to hold recently ACK'ed messages, to avoid retransmitting them
+/// Ring buffer to hold recently seen messages, to avoid retransmitting them
 pub struct RecentSeen<const N: usize> {
     buffer: [Option<(u8, u16)>; N],
     cursor: usize,
@@ -79,7 +81,7 @@ pub enum PayloadType {
     Data,
     Command,
     ACK,
-    Bootup,
+    HeartBeat,
 }
 
 /// Maintains record of packages sent, to ensure that they are received.
@@ -112,7 +114,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         }
     }
 
-    pub fn new_packet(
+    fn new_packet(
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u8,
@@ -138,43 +140,41 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     /// This removes retried packets, and checks the pending acks list. Given the data payload in bytes, it is made into a MHPacket
     /// and added to internal acks list. It returns a list of packets to send, which includes the packet with the payload provided.
     /// But it also returns all packets which haven't been ACK'ed before it's timeout.
-    pub fn payload_to_send(
+    pub fn get_pending_transmissions(
         &mut self,
-        payload: Vec<u8, SIZE>,
-        destination: u8,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, NetworkManagerError> {
         // Clean up packets with too many retries
         // TODO: Shuold switch SF if this happens
         let curr_time = Instant::now();
+        self.pending_acks.retain(
+            |p| p.retries < self._max_retries, /*|| p.timeout < curr_time*/
+        );
+
+        // NOTE: Only for debug purposes:
+        debug!(" LIST OF PEND ACKS: ");
         self.pending_acks
-            .retain(|p| p.retries < self._max_retries || p.timeout < curr_time);
+            .iter()
+            .for_each(|p| debug!("{:?}, {}", p.packet.packet_type, p.packet.packet_id));
 
         // Look into packages with expired timeouts,
         let pendings_len = self.pending_acks.len() as u8;
         trace!("pendings len: {}", pendings_len);
-        let mut to_send: Vec<MHPacket<SIZE>, LEN> = self
+        let to_send: Vec<MHPacket<SIZE>, LEN> = self
             .pending_acks
             .iter_mut()
             .filter(|p| p.timeout < curr_time)
             .map(|p| {
                 p.retries += 1;
+                p.timeout = curr_time + Duration::from_secs(self.timeout as u64);
                 p.packet.clone()
             })
             .collect();
 
-        let new_pkt: MHPacket<SIZE> = self.new_packet(payload, destination)?;
-        if to_send.push(new_pkt.clone()).is_err() {
-            error!("Buffer was too full");
-        } else {
-            // NOTE: Only do this if buffer was not full, otherwise this just errors out
-            // Now we add the new_pkt to pending_acks
-            self.add_packet(new_pkt)?;
-        }
         Ok(to_send)
     }
 
     /// Adds the packet to the internal list
-    pub fn add_packet(&mut self, packet: MHPacket<SIZE>) -> Result<(), NetworkManagerError> {
+    fn add_packet(&mut self, packet: MHPacket<SIZE>) -> Result<(), NetworkManagerError> {
         let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
         let pkt_timout = curr_time + Duration::from_secs(self.timeout as u64);
         // First add this package to our vec
@@ -189,21 +189,45 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Ok(())
     }
 
-    /// Manages actions which the pakcet might require from a network pov, and returns the packet
+    pub fn queue_new_payload(
+        &mut self,
+        payload: Vec<u8, SIZE>,
+        destination: u8,
+    ) -> Result<(), NetworkManagerError> {
+        let new_pkt = self.new_packet(payload, destination)?;
+        self.add_packet(new_pkt)?;
+        Ok(())
+    }
+
+    pub fn get_gw_hops(&self) -> u8 {
+        self.gw_hops
+    }
+
+    /// Manages actions which the packet might require from a network pov, and returns the packet
     /// if none are required, otherwise returns none
-    pub fn receive_packet(
+    fn receive_packet(
         &mut self,
         pkt: MHPacket<SIZE>,
     ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
-        if pkt.packet_type == PacketType::BootUp {
-            if pkt.hop_count >= self.gw_hops {
+        if pkt.source_id == self.source_id {
+            return Ok(None);
+        }
+        if pkt.packet_type == PacketType::HeartBeat {
+            trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
+            // TODO: What about GW failure/node failure, altering this?
+            if pkt.hop_count >= self.gw_hops
+                || self.recent_seen.contains((pkt.source_id, pkt.packet_id))
+            {
                 // If incoming route has the same length, then discard this
                 return Ok(None);
             }
+            trace!("!!! SENDING HEARTBEAT ON {}", pkt.packet_id);
             // GW sends 0, first node has 1 hop, therefore:
             self.gw_hops = pkt.hop_count + 1;
+            // Add to recent seen, to compare later
+            self.recent_seen.push((pkt.source_id, pkt.packet_id));
             // Fire and forget
-            return Ok(Some((pkt, PayloadType::Bootup)));
+            return Ok(Some((pkt, PayloadType::HeartBeat)));
         }
         // Check if it is one of our packets
         if let Some(our_packet_index) = self.pending_acks.iter().position(|p| {
@@ -211,13 +235,21 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             p.packet.packet_id == pkt.packet_id
                 && (p.packet.source_id == pkt.source_id
                     || (pkt.packet_type == PacketType::Ack
-            // TODO: Shouldn't this be flipped?
+            // TODO: Shouldn't this be flipped? I don't think so
                         && pkt.destination_id == p.packet.source_id))
         }) {
             // Then remove it from our vec, and return
-            trace!("RECEIVED KNOWN PACKAGE, REMOVING FROM LIST");
+            trace!(
+                "RECEIVED KNOWN PACKAGE, REMOVING FROM LIST {}",
+                pkt.packet_id
+            );
             self.pending_acks.remove(our_packet_index);
-            // self.recent_seen.push((pkt.source_id, pkt.packet_id));
+            self.recent_seen.push((pkt.source_id, pkt.packet_id));
+            return Ok(None);
+        }
+        // FIXME: This shouldn't be necessary
+        // Never send an ACK on
+        if pkt.packet_type == PacketType::Ack {
             return Ok(None);
         }
         // So we aren't waiting for pkt, perhaps we've seen it before?
@@ -234,6 +266,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         // Perhaps it should be sent on?
         let to_us = pkt.destination_id == self.source_id;
         if !to_us {
+            // TODO: remove harcoded destination_id for GW
             let is_gw_bound = pkt.destination_id == 1;
             let should_forward = if is_gw_bound {
                 // Are we closer to GW?
@@ -254,7 +287,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 temp
             };
             self.add_packet(increased_gw_hops.clone())?;
-            trace!("PACKAGE SHOULD BE SENT ON");
+            trace!(
+                "PACKAGE SHOULD BE SENT ON, id: {}",
+                increased_gw_hops.packet_id
+            );
             Ok(Some((increased_gw_hops, PayloadType::Data)))
         } else {
             // If this is actually for us, then it is probably a command that the underlying app
@@ -286,7 +322,25 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             };
             match ptype {
                 PayloadType::Data => to_send.push(packet).map_err(err_closure)?,
-                PayloadType::Command => commands.push(packet).map_err(err_closure)?,
+                PayloadType::Command => {
+                    // Then we give it back to the app, but also send an ACK back to the sender
+                    commands.push(packet.clone()).map_err(err_closure)?;
+                    if packet.packet_type == PacketType::Data {
+                        to_send
+                            .push(MHPacket {
+                                destination_id: packet.source_id,
+                                packet_type: PacketType::Ack,
+                                packet_id: packet.packet_id,
+                                source_id: self.source_id,
+                                payload: Vec::from_slice(&[0u8])
+                                    .map_err(|_| NetworkManagerError::BufferFull)?,
+                                hop_count: 0,
+                                hop_to_gw: self.gw_hops,
+                            })
+                            .map_err(err_closure)?
+                    }
+                }
+                // Mainly here to stop repeating packets TODO: Check if this ever happens
                 PayloadType::ACK => to_send
                     .push(MHPacket {
                         destination_id: packet.source_id,
@@ -299,14 +353,13 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                         hop_to_gw: self.gw_hops,
                     })
                     .map_err(err_closure)?,
-                PayloadType::Bootup => to_send
+                PayloadType::HeartBeat => to_send
                     .push(MHPacket {
                         destination_id: packet.destination_id,
-                        packet_type: PacketType::BootUp,
+                        packet_type: PacketType::HeartBeat,
                         packet_id: packet.packet_id,
-                        source_id: self.source_id,
-                        payload: Vec::from_slice(&[0u8])
-                            .map_err(|_| NetworkManagerError::BufferFull)?,
+                        source_id: packet.source_id,
+                        payload: packet.payload,
                         hop_count: packet.hop_count + 1,
                         hop_to_gw: self.gw_hops,
                     })
@@ -316,11 +369,16 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Ok((to_send, commands))
     }
 
-    pub fn handle_bootup(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError> {
+    pub fn add_heartbeat(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError> {
         self.next_packet_id += 1;
+        self.recent_seen.push((self.source_id, self.next_packet_id));
+        trace!(
+            "----------- Sending Heartbeat with packet id: {}",
+            self.next_packet_id
+        );
         Ok(MHPacket {
             destination_id: 0, // broadcast id
-            packet_type: PacketType::BootUp,
+            packet_type: PacketType::HeartBeat,
             packet_id: self.next_packet_id,
             source_id: self.source_id,
             payload: Vec::from_slice(&[]).map_err(|_| NetworkManagerError::BufferFull)?,
@@ -333,10 +391,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use heapless::Vec;
 
     // A helper to make a dummy manager for testing
     fn setup_manager() -> NetworkManager<40, 5> {
-        NetworkManager::new(1, 10, 3) // Source ID 1, Timeout 10s, 3 Retries
+        NetworkManager::new(2, 10, 3)
     }
 
     #[test]
@@ -345,54 +404,110 @@ mod tests {
         let payload = [0xAB, 0xCD];
         let vec = Vec::from_slice(&payload).expect("Could not get vec from slice");
 
-        // Test basic packet creation
         let pkt = manager.new_packet(vec, 2).unwrap();
 
-        assert_eq!(pkt.source_id, 1);
+        assert_eq!(pkt.source_id, 2);
         assert_eq!(pkt.destination_id, 2);
         assert_eq!(pkt.packet_id, 1);
         assert_eq!(pkt.payload, payload);
     }
 
     #[test]
-    fn test_send_queue_logic() {
+    fn test_queueing_and_ack_handling() {
         let mut manager = setup_manager();
-        let payload = [1, 2, 3];
-        let pkt = Vec::from_slice(&payload).unwrap();
-        let pkt = manager.new_packet(pkt, 2).unwrap();
+        let payload = Vec::from_slice(&[1, 2, 3]).unwrap();
 
-        // Calling send_packet should queue it and return it for sending
-        let to_send = manager
-            .receive_packet(pkt.clone())
-            .expect("Should queue packet");
-        assert!(to_send.is_some());
-        let (to_send, payload_type) = to_send.unwrap();
+        // 1. Queue a new packet bound for node 2
+        manager
+            .queue_new_payload(payload, 2)
+            .expect("Should queue payload");
 
-        // Check it returned the packet to be sent
-        assert_eq!(to_send.packet_id, 1);
+        // It should now be in the pending list awaiting an ACK
+        assert_eq!(manager.get_pending_count(), 1);
+
+        // 2. Simulate receiving an ACK from node 2
+        let ack_pkt = MHPacket {
+            destination_id: 2, // Back to us
+            packet_type: PacketType::Ack,
+            packet_id: 1, // Matches the ID of the packet we just sent
+            source_id: 3, // From the node we sent it to
+            payload: Vec::from_slice(&[0]).unwrap(),
+            hop_count: 1,
+            hop_to_gw: 5,
+        };
+
+        // 3. Process the ACK
+        let result = manager
+            .receive_packet(ack_pkt)
+            .expect("Should process packet");
+
+        // The manager should consume the ACK and return None
+        assert!(result.is_none());
+
+        // Our pending list should now be empty because the packet was ACK'd
+        assert_eq!(manager.get_pending_count(), 0);
+    }
+
+    #[test]
+    fn test_forwarding_logic() {
+        let mut manager = setup_manager();
+        // Simulate that we are 2 hops away from the gateway (GW is ID 1 usually, but let's say GW=0)
+        manager.gw_hops = 2;
+
+        // Simulate a packet coming from node 3, bound for the GW (let's assume ID 1 is GW for your logic)
+        let incoming_pkt = MHPacket {
+            destination_id: 1, // GW Bound
+            packet_type: PacketType::Data,
+            packet_id: 42,
+            source_id: 3,
+            payload: Vec::from_slice(&[9, 9]).unwrap(),
+            hop_count: 1,
+            hop_to_gw: 4, // Node 3 thinks it is 4 hops away. We are 2 hops away, so we should forward.
+        };
+
+        let result = manager
+            .receive_packet(incoming_pkt)
+            .expect("Should process packet");
+
+        // We expect the manager to modify the packet and tell us to send it on
+        assert!(result.is_some());
+        let (forward_pkt, payload_type) = result.unwrap();
+
         assert_eq!(payload_type, PayloadType::Data);
+        // It should update the hop_to_gw to our current knowledge (2)
+        assert_eq!(forward_pkt.hop_to_gw, 2);
 
-        // Check it is actually in the pending list
-        assert_eq!(manager.pending_acks.len(), 1);
+        // It should also add this to pending_acks since we are forwarding it and expect an ACK
+        assert_eq!(manager.get_pending_count(), 1);
+    }
 
-        // now act as if we transmitted this, and listened, and another node now transmits this.
-        // That should mean the previous package gets removed from pendick acks
-        let received = to_send;
-        // Should be none, because we just received an ACK for a package we sent
-        let should_be_none = manager.receive_packet(received).unwrap();
+    #[test]
+    fn test_heartbeat_updates_gw_hops() {
+        let mut manager = setup_manager();
+        // Start with default unknown hops
+        assert_eq!(manager.get_gw_hops(), 255);
 
-        assert_eq!(should_be_none, None);
+        // Simulate a heartbeat from a node that is 1 hop from the GW
+        let heartbeat_pkt = MHPacket {
+            destination_id: 0,
+            packet_type: PacketType::HeartBeat,
+            packet_id: 100,
+            source_id: 3,
+            payload: Vec::new(),
+            hop_count: 1,
+            hop_to_gw: 1,
+        };
 
-        // 3. Receive the same packet back (simulating a loopback or re-forwarding)
-        // If we receive a packet with Source != Self, we usually forward it.
-        // But if we receive an ACK (logic you haven't fully implemented in snippet yet), we remove it.
+        let result = manager
+            .receive_packet(heartbeat_pkt)
+            .expect("Should process packet");
 
-        // For now, let's test the "BufferFull" error
-        // for _ in 0..LEN {
-        //     let _ = manager.send_packet(pkt.clone());
-        // }
-        // Next one should fail
-        // let res = manager.send_packet(pkt);
-        // assert!(matches!(res, Err(NetworkManagerError::BufferFull)));
+        // We should forward the heartbeat
+        assert!(result.is_some());
+        let (_, payload_type) = result.unwrap();
+        assert_eq!(payload_type, PayloadType::HeartBeat);
+
+        // Our manager should have updated its own distance to the GW (hop_count + 1)
+        assert_eq!(manager.get_gw_hops(), 2);
     }
 }
