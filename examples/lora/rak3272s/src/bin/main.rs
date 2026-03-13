@@ -144,7 +144,7 @@ const LEN: usize = 5; // floor(256/MAX_PACK_LEN)
 pub async fn lora_task(
     mut lora: Stm32wlLoRa<'static, Master>,
     channel: channel::Receiver<'static, ThreadModeRawMutex, SensorData, 3>,
-    mut debug_pin: Output<'static>,
+    debug_pin: Output<'static>,
 ) {
     let sf = SpreadingFactor::_7;
     let bw = Bandwidth::_125KHz;
@@ -176,6 +176,7 @@ pub async fn lora_task(
         NonZeroU8::new(10).unwrap(),
         None,
         None,
+        Some(debug_pin),
         source_id,
     );
     let nm = network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(
@@ -194,11 +195,6 @@ pub async fn lora_task(
         {
             error!("Error queing sensor data: {:?}", e);
         }
-
-        // TRy and see if this works
-        debug_pin.set_high();
-        Timer::after_micros(100).await;
-        debug_pin.set_low();
 
         // TODO: This should take in the Option<Data> from above
         match router.tick(&mut receiving_buffer).await {

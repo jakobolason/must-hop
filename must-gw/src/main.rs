@@ -72,7 +72,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     // log::info!("got pkts: {:?} ", pkt);
     let gw_source_id = 1;
 
-    let mac = TdmaMac::new(
+    let mac = TdmaMac::<(), 128>::new(
         embassy_time::Duration::from_secs(1),
         NonZeroU8::new(10).unwrap(),
         Some((

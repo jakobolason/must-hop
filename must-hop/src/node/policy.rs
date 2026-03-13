@@ -1,3 +1,6 @@
+#[cfg(not(feature = "debug"))]
+use core::marker::PhantomData;
+
 use crate::node::{MHNode, PacketType};
 
 #[cfg(not(feature = "in_std"))]
@@ -6,7 +9,7 @@ use defmt::{debug, error, info};
 use log::{debug, error, info};
 
 #[cfg(feature = "debug")]
-use embassy_stm32::gpio::Output;
+use embedded_hal::digital::OutputPin;
 
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
@@ -201,7 +204,18 @@ struct SlotAllocation {
     gps_time_ms: u64,
 }
 
-pub struct TdmaMac<const SIZE: usize> {
+#[cfg(feature = "debug")]
+pub trait DebugPin: embedded_hal::digital::OutputPin {}
+#[cfg(feature = "debug")]
+impl<T: embedded_hal::digital::OutputPin> DebugPin for T {}
+
+// When "debug" is OFF, this trait requires nothing, so any type (like `()`) can implement it.
+#[cfg(not(feature = "debug"))]
+pub trait DebugPin {}
+#[cfg(not(feature = "debug"))]
+impl<T> DebugPin for T {}
+
+pub struct TdmaMac<P, const SIZE: usize> {
     slot_duration: Duration,
     slots_per_frame: u8,
     my_tx_slot: Option<u8>,
@@ -214,9 +228,14 @@ pub struct TdmaMac<const SIZE: usize> {
     /// Ratio to try and mitigate clock drift at nodes with no HSE
     skew_ratio: f32,
     gw_hops: u8,
+    #[cfg(feature = "debug")]
+    pub debug_pin: Option<P>,
+
+    #[cfg(not(feature = "debug"))]
+    _marker: PhantomData<P>,
 }
 
-impl<const SIZE: usize> TdmaMac<SIZE> {
+impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
     pub fn new(
         // FIXME: Remove from user, should be set by GW
         slot_duration: Duration,
@@ -224,6 +243,7 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
         slots_per_frame: core::num::NonZeroU8,
         time_sync: Option<(u64, Instant)>,
         my_tx_slot: Option<u8>,
+        #[cfg(feature = "debug")] debug_pin: Option<P>,
         node_id: u32,
     ) -> Self {
         Self {
@@ -236,6 +256,10 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
             hbt_pkt: None,
             skew_ratio: 1.0,
             gw_hops: 255,
+            #[cfg(feature = "debug")]
+            debug_pin,
+            #[cfg(not(feature = "debug"))]
+            _marker: PhantomData,
         }
     }
 
@@ -347,9 +371,10 @@ impl<const SIZE: usize> TdmaMac<SIZE> {
     }
 }
 
-impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for TdmaMac<SIZE>
+impl<Node, const SIZE: usize, const LEN: usize, P> MacPolicy<Node, SIZE, LEN> for TdmaMac<P, SIZE>
 where
     Node: MHNode<SIZE, LEN>,
+    P: DebugPin,
 {
     fn set_gw_hops(&mut self, gw_hops: u8) {
         self.gw_hops = gw_hops
@@ -392,6 +417,11 @@ where
         let slot = self.current_slot(current_gps_ms);
 
         debug!("current slot: {}", slot);
+        // TODO: Should move the sleep up to here instead, but this is how it is right now
+        #[cfg(feature = "debug")]
+        if let Some(pin) = self.debug_pin.as_mut() {
+            let _ = pin.set_high();
+        }
 
         if let Some(my_tx_slot) = self.my_tx_slot
             && slot == my_tx_slot
@@ -430,33 +460,10 @@ where
             let next_slot_time = self.calc_nextslot_time(timestamps);
             Timer::at(next_slot_time).await;
         }
+        #[cfg(feature = "debug")]
+        if let Some(pin) = self.debug_pin.as_mut() {
+            let _ = pin.set_low();
+        }
         Ok(Some(received_packets))
-    }
-}
-
-#[cfg(feature = "debug")]
-pub struct DebugTdmaMac<'a, const SIZE: usize> {
-    tdma_mac: TdmaMac<SIZE>,
-    debug_pin: Output<'a>,
-}
-
-impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for DebugTdmaMac<SIZE>
-where
-    Node: MHNode<SIZE, LEN>,
-{
-    fn set_gw_hops(&mut self, gw_hops: u8) {
-        self.tdma_mac.set_gw_hops(gw_hops);
-    }
-
-    async fn run_mac(
-        &mut self,
-        node: &mut Node,
-        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
-        rx_buffer: &mut Node::ReceiveBuffer,
-    ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
-        self.tdma_mac.run_mac(node, tx_queue, rx_buffer)
-    }
-    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
-        self.tdma_mac.tx_heartbeat(hbt);
     }
 }

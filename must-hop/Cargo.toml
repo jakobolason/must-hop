@@ -18,16 +18,7 @@ embassy-futures = { version = "0" }
 log = { version = "0.4.29", optional = true }
 tokio = { version = "1.49.0", features = ["rt", "macros"], optional = true }
 
-embassy-stm32 = { version = "0.5.0", features = [
-  "defmt",
-  "stm32wle5cc",
-  "time-driver-any",
-  "memory-x",
-  "unstable-pac",
-  "exti",
-  "chrono",
-], optional = true }
-
+embedded-hal = { version = "1.0.0", optional = true }
 [features]
 default = [
   "postcard/defmt",
@@ -40,4 +31,4 @@ default = [
   "embassy-futures/defmt",
 ]
 in_std = ["tokio", "log", "embassy-time/std", "serde/std"]
-debug = ["embassy-stm32"]
+debug = ["embedded-hal"]
