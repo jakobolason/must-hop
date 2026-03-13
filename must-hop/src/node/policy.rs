@@ -412,6 +412,10 @@ where
             }
         };
 
+        // Sleep until right before the next slot time, to avoid jitter
+        let next_slot_time = self.calc_nextslot_time(timestamps);
+        Timer::at(next_slot_time).await;
+
         let current_gps_ms = self.current_gps_time(timestamps);
         // Calculate when the next slot starts
         let slot = self.current_slot(current_gps_ms);
@@ -437,8 +441,6 @@ where
                 node.transmit(tx_queue).await?;
                 tx_queue.clear();
             }
-            let next_slot_time = self.calc_nextslot_time(timestamps);
-            Timer::at(next_slot_time).await;
         } else {
             debug!(" -- NOT MY SLOT ---   ");
             let conn = node
@@ -457,8 +459,6 @@ where
                 Some(timestamps) => timestamps,
                 None => timestamps,
             };
-            let next_slot_time = self.calc_nextslot_time(timestamps);
-            Timer::at(next_slot_time).await;
         }
         #[cfg(feature = "debug")]
         if let Some(pin) = self.debug_pin.as_mut() {

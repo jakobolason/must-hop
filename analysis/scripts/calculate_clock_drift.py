@@ -56,7 +56,7 @@ def calculate_trigger_deltas(csv_filepath: str, ref_channel='DIN 1', target_chan
         print("Individual Time-Deltas (ms):")
         for i, d in enumerate(deltas_ms, 1):
             print(f"  Event {i}: {d:.4f} ms")
-        
+    
     print(f"\nAverage Delta: {mean_delta:.4f} ms")
     print(f"Median Delta: {median_delta:.4f} ms")
     
