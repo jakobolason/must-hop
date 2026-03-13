@@ -27,12 +27,17 @@ use embassy_time::Instant;
 use embassy_time::{Delay, Timer};
 use heapless::Vec;
 use lora_phy::LoRa;
+use lora_phy::mod_params::RadioError;
 use lora_phy::mod_params::{Bandwidth, CodingRate, SpreadingFactor};
 use lora_phy::sx126x;
 use lora_phy::sx126x::{Stm32wl, Sx126x};
 use must_hop::lora::LoraNode;
-use must_hop::node::policy::RandomAccessMac;
-use must_hop::node::policy::TdmaMac;
+use must_hop::node::MHPacket;
+use must_hop::node::policy::NodePolicy;
+use must_hop::node::{
+    mesh_router, network_manager,
+    policy::{RandomAccessMac, TdmaMac},
+};
 use {defmt_rtt as _, panic_probe as _};
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
@@ -88,7 +93,9 @@ async fn main(spawner: Spawner) {
         .await
         .unwrap();
     info!("lora setup done ...");
-    if let Err(e) = spawner.spawn(lora_task(lora, CHANNEL.receiver())) {
+    let debug_pin = Output::new(p.PA2, Level::Low, Speed::VeryHigh);
+
+    if let Err(e) = spawner.spawn(lora_task(lora, CHANNEL.receiver(), debug_pin)) {
         error!("error in spawning lora task: {:?}", e);
     }
     // TODO: Add sensor data creation task
@@ -130,13 +137,14 @@ async fn sensor_task(
 
 /// From the study, sensor data will likely be between 20-40 bytes per transmission
 const MAX_PACK_LEN: usize = 40;
-// const MAX_RADIO_BUFFER: usize = 256; // kB
+const MAX_RADIO_BUFFER: usize = 256; // kB
 const LEN: usize = 5; // floor(256/MAX_PACK_LEN)
 
 #[embassy_executor::task]
 pub async fn lora_task(
     mut lora: Stm32wlLoRa<'static, Master>,
     channel: channel::Receiver<'static, ThreadModeRawMutex, SensorData, 3>,
+    mut debug_pin: Output<'static>,
 ) {
     let sf = SpreadingFactor::_7;
     let bw = Bandwidth::_125KHz;
@@ -153,6 +161,8 @@ pub async fn lora_task(
         iq: false,
     };
     let source_id = 2;
+    let timeout = 3;
+    let max_retries = 3;
     let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp) {
         Ok(node) => node,
         Err(e) => {
@@ -168,7 +178,48 @@ pub async fn lora_task(
         None,
         source_id,
     );
-    lora::lora_task(node, channel, source_id as u8, 3, 3, mac).await;
+    let nm = network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(
+        source_id as u8,
+        timeout,
+        max_retries,
+    );
+    let mut router = mesh_router::MeshRouter::new(node, nm, mac, NodePolicy);
+    info!("Waiting for packet or sensor data to send");
+    loop {
+        let mut receiving_buffer = [00u8; MAX_RADIO_BUFFER];
+
+        // Before letting router do its thing, we check if we want to send something
+        if let Ok(data) = channel.try_receive()
+            && let Err(e) = router.queue_payload(data.into(), 1)
+        {
+            error!("Error queing sensor data: {:?}", e);
+        }
+
+        // TRy and see if this works
+        debug_pin.set_high();
+        Timer::after_micros(100).await;
+        debug_pin.set_low();
+
+        // TODO: This should take in the Option<Data> from above
+        match router.tick(&mut receiving_buffer).await {
+            Ok(my_pkts) => {
+                if !my_pkts.is_empty() {
+                    info!(
+                        "received these packets for me!: {}, {}",
+                        my_pkts.len(),
+                        my_pkts[0].packet_id
+                    )
+                }
+            }
+            Err(mesh_router::MeshRouterError::Node(e)) => match e {
+                RadioError::ReceiveTimeout => continue,
+                _ => error!("Error in radio: {:?}", e),
+            },
+            Err(e) => error!("Error in ticking router; {:?}", e),
+        }
+    }
+
+    // lora::lora_task(node, channel, source_id as u8, 3, 3, mac).await;
 }
 
 // This creates the task which checks for sensor data

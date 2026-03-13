@@ -4,6 +4,9 @@ use defmt::{error, trace};
 #[cfg(feature = "in_std")]
 use log::{error, trace};
 
+#[cfg(feature = "debug")]
+use embassy_stm32::gpio::Output;
+
 use crate::node::{
     PacketType,
     policy::{MacPolicy, RoutingPolicy},
@@ -60,6 +63,8 @@ where
     routing_policy: Routing,
     mac_policy: Mac,
     tx_queue: Vec<MHPacket<SIZE>, LEN>,
+    #[cfg(feature = "debug")]
+    debug_pin: Output,
 }
 
 impl<Node, Mac, Routing, const SIZE: usize, const LEN: usize>

@@ -4,6 +4,10 @@ use crate::node::{MHNode, PacketType};
 use defmt::{debug, error, info};
 #[cfg(feature = "in_std")]
 use log::{debug, error, info};
+
+#[cfg(feature = "debug")]
+use embassy_stm32::gpio::Output;
+
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -427,5 +431,32 @@ where
             Timer::at(next_slot_time).await;
         }
         Ok(Some(received_packets))
+    }
+}
+
+#[cfg(feature = "debug")]
+pub struct DebugTdmaMac<'a, const SIZE: usize> {
+    tdma_mac: TdmaMac<SIZE>,
+    debug_pin: Output<'a>,
+}
+
+impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for DebugTdmaMac<SIZE>
+where
+    Node: MHNode<SIZE, LEN>,
+{
+    fn set_gw_hops(&mut self, gw_hops: u8) {
+        self.tdma_mac.set_gw_hops(gw_hops);
+    }
+
+    async fn run_mac(
+        &mut self,
+        node: &mut Node,
+        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        rx_buffer: &mut Node::ReceiveBuffer,
+    ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
+        self.tdma_mac.run_mac(node, tx_queue, rx_buffer)
+    }
+    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
+        self.tdma_mac.tx_heartbeat(hbt);
     }
 }
