@@ -24,6 +24,53 @@ graph TD
 ## TDMA
 
 ```mermaid
+sequenceDiagram
+    participant GW as Gateway (Node ID 1)
+    participant N1 as Node A (e.g., Hop 1)
+    participant N2 as Node B (e.g., Hop 2)
+
+    Note over GW: Frame Start / Slot 0
+    GW->>N1: Broadcast Heartbeat (GPS time: T0, Known slots: [0])
+
+    Note over N1: N1 in Rx mode
+    N1->>N1: sync_epoch(): Calculate skew vs T0
+    N1->>N1: Claims available slot (e.g., Slot 2)
+    N1->>N1: Sleeps (Timer::at) until next slot (calc from timestamp)
+
+    Note over GW, N2: Time passes...
+
+    Note over N1: Slot 1 Begins
+    N1->>N1: Wakes up for slot
+    N1 ->>N1: Calculates timestamp, and current slot
+    N1->>N1: Not my slot, listening ...
+    N1->>N1: No pkts received, ticking and then sleeping until next slot
+
+    Note over GW, N2: Time passes...
+
+    Note over N1: Slot 2 Begins
+    N1->>N1: Wakes up for slot
+    N1 ->>N1: Calculates timestamp, and current slot
+    N1->>N1: My slot!
+    N1->>N1: update_heartbeat(): Writes slots [0, 2] & current timestamp to payload
+    N1->>GW: Transmit Heartbeat
+    N1->>N2: Transmit Heartbeat
+
+    Note over N2: N2 in Rx mode
+    N2->>N2: sync_epoch(): Calculate skew vs N1's timestamp
+    N2->>N2: Updates known_slots_mask (sees GW and N1 are taken)
+    N2->>N2: Claims available slot (e.g., Slot 3)
+    N2->>N2: Sleeps (Timer::at) until next slot
+
+    Note over GW, N2: Time passes...
+
+    Note over N2: Slot 3 Begins
+    N2->>N2: Wakes up for its slot
+    N2->>N2: update_heartbeat(): Writes slots [2, 3] & current timestamp to payload
+    N2->>N1: Transmit Heartbeat
+    N2->>GW: Transmit Heartbeat (if in range)
+```
+
+```mermaid
 graph TD
     Start([bootup]) --> MatchEpoch{Is time sync None?}
     MatchEpoch -- Yes --> listenForHeart(Listen for packets)

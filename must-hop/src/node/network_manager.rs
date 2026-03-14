@@ -151,14 +151,14 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         );
 
         // NOTE: Only for debug purposes:
-        debug!(" LIST OF PEND ACKS: ");
-        self.pending_acks
-            .iter()
-            .for_each(|p| debug!("{:?}, {}", p.packet.packet_type, p.packet.packet_id));
+        // debug!(" LIST OF PEND ACKS: ");
+        // self.pending_acks
+        //     .iter()
+        //     .for_each(|p| debug!("{:?}, {}", p.packet.packet_type, p.packet.packet_id));
 
         // Look into packages with expired timeouts,
-        let pendings_len = self.pending_acks.len() as u8;
-        trace!("pendings len: {}", pendings_len);
+        // let pendings_len = self.pending_acks.len() as u8;
+        // trace!("pendings len: {}", pendings_len);
         let to_send: Vec<MHPacket<SIZE>, LEN> = self
             .pending_acks
             .iter_mut()

@@ -419,7 +419,7 @@ impl Concentrator<Running> {
         unsafe {
             hal_call!(lgw_status(
                 {
-                    log::error!("[WARN] remove hardcoded RF chain argument from status calls");
+                    log::warn!("[WARN] remove hardcoded RF chain argument from status calls");
                     0u8
                 },
                 TX_STATUS,

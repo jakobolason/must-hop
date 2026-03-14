@@ -11,6 +11,7 @@ use log::{debug, error, info};
 #[cfg(feature = "debug")]
 use embedded_hal::digital::OutputPin;
 
+use core::fmt;
 use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -153,6 +154,45 @@ impl Default for SlotMask {
         Self::new()
     }
 }
+
+impl fmt::Debug for SlotMask {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Taken Slots: [")?;
+        let mut first = true;
+
+        for i in 0..32 {
+            if self.is_taken(i) {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", i)?;
+                first = false;
+            }
+        }
+        write!(f, "]")
+    }
+}
+
+#[cfg(not(feature = "in_std"))]
+impl defmt::Format for SlotMask {
+    fn format(&self, fmt: defmt::Formatter) {
+        defmt::write!(fmt, "Taken Slots: [");
+        let mut first = true;
+
+        for i in 0..32 {
+            if self.is_taken(i) {
+                if !first {
+                    defmt::write!(fmt, ", ");
+                }
+                // We use {=u8} to tell defmt exactly what type it is sending over the wire
+                defmt::write!(fmt, "{=u8}", i);
+                first = false;
+            }
+        }
+        defmt::write!(fmt, "]");
+    }
+}
+
 impl SlotMask {
     pub const fn new() -> Self {
         Self { mask: 0 }
@@ -226,7 +266,9 @@ pub struct TdmaMac<P, const SIZE: usize> {
     /// biggest chance of two nodes not having the same u32 representation
     node_id: u32,
     /// Ratio to try and mitigate clock drift at nodes with no HSE
-    skew_ratio: f32,
+    // skew_ratio: f64,
+    skew_gw_diff: u64,
+    skew_local_diff: u64,
     gw_hops: u8,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
@@ -254,7 +296,9 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             time_sync,
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
-            skew_ratio: 1.0,
+            // skew_ratio: 1.0,
+            skew_gw_diff: 1,
+            skew_local_diff: 1,
             gw_hops: 255,
             #[cfg(feature = "debug")]
             debug_pin,
@@ -266,8 +310,10 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
     fn current_gps_time(&self, (base_gps_ms, sync_instant): (u64, Instant)) -> u64 {
         // TODO: could add a multiplier here to fix drifting?
         let elapsed_ms = (Instant::now() - sync_instant).as_millis();
-        let gw_elapsed = (elapsed_ms as f32 * self.skew_ratio) as u64;
-        base_gps_ms + gw_elapsed
+        // let gw_elapsed = (elapsed_ms as f64 * self.skew_ratio) as u64;
+        let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
+            / self.skew_local_diff as u128) as u64;
+        base_gps_ms + elapsed_ms
     }
 
     pub fn current_slot(&self, current_time_ms: u64) -> u8 {
@@ -290,34 +336,30 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                     match self.time_sync {
                         None => {
                             info!("TDMA: Initial epoch set");
+                            self.time_sync = Some((alloc.gps_time_ms, now));
                         }
                         Some((old_gps, last_stamp)) => {
                             let my_diff = now.as_millis() - last_stamp.as_millis();
                             let my_stamp = old_gps + my_diff;
+                            let gw_diff = alloc.gps_time_ms - old_gps;
                             let skew = ((alloc.gps_time_ms - old_gps) as f32) / (my_diff as f32);
-                            self.skew_ratio = skew;
-                            if my_stamp > alloc.gps_time_ms {
-                                let delay = my_stamp - alloc.gps_time_ms;
+                            // self.skew_ratio = skew;
+                            self.skew_gw_diff = gw_diff;
+                            self.skew_local_diff = my_diff;
+                            if my_stamp != alloc.gps_time_ms {
+                                let delay: i64 = my_stamp as i64 - alloc.gps_time_ms as i64;
                                 info!("Mesured clock drift ahead: {} ms, ratio: {}", delay, skew);
-                                // self.epoch = Some(now - sender_offset);
-                            } else if my_stamp < alloc.gps_time_ms {
-                                let delay = alloc.gps_time_ms - my_stamp;
-                                info!("Measured clock drift behind: {} ms, ratio: {}", delay, skew);
-                                // self.epoch = Some(now - sender_offset);
                             } else {
                                 info!("Perfectly synced!");
                             }
                         }
                     }
-                    self.time_sync = Some((alloc.gps_time_ms, now));
-                    // let elapsed_in_frame = Duration::from_millis(
-                    //     (alloc.my_slot as u64) * self.slot_duration.as_millis(),
-                    // );
-                    // self.epoch = Some(Instant::now() - elapsed_in_frame);
                 }
-                // TODO: alter known slots
-                info!("Other node claimed slot at {}", alloc.my_slot);
                 self.known_slots_mask.claim(alloc.my_slot);
+                info!(
+                    "Other node claimed slot at {}. {:?}",
+                    alloc.my_slot, self.known_slots_mask
+                );
 
                 // Only allocate a new slot if we don't have one
                 if self.my_tx_slot.is_none() {
@@ -346,14 +388,25 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
 
         let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
         // A 5ms guard band is used to perhaps fix conversion errors
-        let node_offset = (next_slot_start_offset as f32 / self.skew_ratio) as u64 + 5;
-        Instant::now() + Duration::from_millis(node_offset)
+        let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
+            / self.skew_gw_diff as u128) as u64;
+        Instant::now() + Duration::from_millis(next_slot_start_offset)
     }
-
-    fn update_heartbeat(&self, mut hbt: MHPacket<SIZE>, my_tx_slot: u8) -> MHPacket<SIZE> {
+    fn update_heartbeat<Node, const LEN: usize>(
+        &self,
+        mut hbt: MHPacket<SIZE>,
+        my_tx_slot: u8,
+        node: &mut Node,
+        len: usize,
+    ) -> MHPacket<SIZE>
+    where
+        Node: MHNode<SIZE, LEN>,
+    {
+        let toa = node.calc_tx_delay(len);
         let tx_timestamp = match self.time_sync {
-            Some((old_gps, last_stamp)) => {
-                old_gps + (Instant::now().as_millis() - last_stamp.as_millis())
+            Some(stamps) => {
+                // old_gps + (Instant::now().as_millis() - last_stamp.as_millis())
+                self.current_gps_time(stamps) + toa.as_millis() as u64
             }
             None => 0,
         };
@@ -393,6 +446,8 @@ where
     ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
         let mut received_packets = Vec::new();
 
+        // Don't transmit anything until you have a slot, which you only have once you've heard a
+        // heartbeat.
         let Some(timestamps) = self.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             let conn = node
@@ -416,9 +471,8 @@ where
         let next_slot_time = self.calc_nextslot_time(timestamps);
         Timer::at(next_slot_time).await;
 
-        let current_gps_ms = self.current_gps_time(timestamps);
-        // Calculate when the next slot starts
-        let slot = self.current_slot(current_gps_ms);
+        // get current slot
+        let slot = self.current_slot(self.current_gps_time(timestamps));
 
         debug!("current slot: {}", slot);
         // TODO: Should move the sleep up to here instead, but this is how it is right now
@@ -432,11 +486,19 @@ where
         {
             debug!(" !!!  MY SLOT !!! ");
             if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
-                if let Some(pkt) = self.hbt_pkt.take()
-                    && let Err(pkt) = tx_queue.push(self.update_heartbeat(pkt, my_tx_slot))
-                {
-                    // If queue full
-                    self.hbt_pkt = Some(pkt)
+                // If should send hbt, update it's timestamp
+                if self.hbt_pkt.is_some() && !tx_queue.is_full() {
+                    if let Some(pkt) = self.hbt_pkt.take()
+                        && let Err(pkt) = tx_queue.push(self.update_heartbeat(
+                            pkt,
+                            my_tx_slot,
+                            node,
+                            tx_queue.len() as usize,
+                        ))
+                    {
+                        // If queue full, then try and send it next time
+                        self.hbt_pkt = Some(pkt)
+                    }
                 }
                 node.transmit(tx_queue).await?;
                 tx_queue.clear();
@@ -444,7 +506,7 @@ where
         } else {
             debug!(" -- NOT MY SLOT ---   ");
             let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_millis(500)))
+                .listen(rx_buffer, Some(core::time::Duration::from_millis(200)))
                 .await;
             if let Ok(conn) = conn {
                 match node.receive(conn, rx_buffer).await {

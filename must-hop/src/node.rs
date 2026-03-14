@@ -70,11 +70,16 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
         conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
     ) -> impl Future<Output = Result<Vec<MHPacket<SIZE>, LEN>, Self::Error>>;
-    // TODO: Make the 5 a generic
 
+    /// Make the node listen for a preample, giving a connection relative to the physical layer
+    /// used. Optionally a duration to listen in can be given.
     fn listen(
         &mut self,
         rec_buf: &mut Self::ReceiveBuffer,
         with_timeout: Option<Duration>,
     ) -> impl Future<Output = Result<Self::Connection, Self::Error>>;
+
+    /// For time sensitive packets and physical layers with predictable Tx times, this can be used
+    /// to send a timestamp which might be closer to the actual timestamp.
+    fn calc_tx_delay(&self, payload_len: usize) -> Duration;
 }

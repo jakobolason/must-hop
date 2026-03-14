@@ -204,4 +204,7 @@ impl MHNode<SIZE, LEN> for GWNode {
             Timer::after(Duration::from_millis(5)).await;
         }
     }
+    fn calc_tx_delay(&self, payload_len: usize) -> core::time::Duration {
+        core::time::Duration::from_millis(60 * payload_len as u64)
+    }
 }

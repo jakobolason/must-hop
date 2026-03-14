@@ -163,10 +163,6 @@ where
         };
         trace!("Got packet!");
 
-        // TODO: Check if this should be retransmitted
-        // if (packet.to != me)
-        // transmit(lora, packet, tp).await?;
-
         Ok(packets)
     }
 
@@ -190,6 +186,10 @@ where
             }
             None => Ok(self.lora.rx(&self.pkt_params, rec_buf).await),
         }
+    }
+
+    fn calc_tx_delay(&self, payload_len: usize) -> Duration {
+        Duration::from_millis(60 * payload_len as u64)
     }
 }
 
