@@ -367,7 +367,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                         destination_id: packet.destination_id,
                         packet_type: PacketType::HeartBeat,
                         packet_id: packet.packet_id,
-                        source_id: packet.source_id,
+                        source_id: self.source_id,
                         payload: packet.payload,
                         hop_count: packet.hop_count + 1,
                         hop_to_gw: self.gw_hops,
@@ -382,9 +382,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         self.next_packet_id += 1;
         self.recent_seen.push((self.source_id, self.next_packet_id));
         trace!(
-            "----------- Sending Heartbeat with packet id: {}",
+            "----------- Sending Heartbeat with packet id: {} -------------",
             self.next_packet_id
         );
+        // If we are calling this, then we are a GW
+        self.gw_hops = 0;
         Ok(MHPacket {
             destination_id: 0, // broadcast id
             packet_type: PacketType::HeartBeat,

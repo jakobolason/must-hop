@@ -1,8 +1,10 @@
 # Multi hop networking implementation
 
-This project aims to provide drivers for using a LoRa antenna inspired by the BLE Host controller like trouBLE. And then, on top of such an abstraction layer, create a multi hop network of multiple nodes and connecting to a GW.
+This project aims to create a multi hop network of multiple sensors in a chain topology sending sensor information to a GW who relays this information to a remote server.
 
-Meant as the source code for my bachelor's thesis, which explores the emerging world of LoRa, embedded Rust and a goal of creating a small device for a sensor network on power lines.
+Meant as the source code for my bachelor's thesis, which explores the emerging world of LoRa, embedded Rust and a goal of creating a small device for a sensor network on power lines and reducing the gateway / sensor ratio.
+
+Power consumption should be minimzed such that the footprint of these sensors is minimal, which is why a TDMA implementation is important for the success of this project's goal.
 
 ## Contents
 
@@ -23,15 +25,15 @@ Meant as the source code for my bachelor's thesis, which explores the emerging w
 
 ## Examples
 
-The goal is to have 2 working examples, one with the ESP32-C6 dev board, which utilizes BLE to create a multi hop network. The trouBLE create provides a nice abstraction on top of the antenna, so implementing the MHNode traits for trouBLE should hopefully be enough.
+The goal is to have 2 working examples, one with the ESP32-C6 dev board which has BLE capabilities, to create a multi hop network. The trouBLE crate provides a nice abstraction on top of the antenna, so implementing the MHNode traits for trouBLE could be enough.
 
-The other example is using the RAK3272s board, which is a board for the RAK3172 which has a STM32WLE5CC and a SemTech 1262 LoRa radio. Here, lora-rs packages are used to provide low-level drivers, and the goal is to create an implementation of the MHNode traits for LoRa without making MHNode to closely coupled to LoRa, perhaps impossible.
+The other example is using the RAK3272s board, holding a RAK3172 inside, which has a STM32WLE5CC and a SemTech 1262 LoRa radio. Here, lora-rs packages are used to provide low-level drivers, and the goal is to create an implementation of the MHNode traits for LoRa without making MHNode to closely coupled to LoRa.
 
-A Justfile has been introduced to ease the use of handling the examples for this project, and to document the different ways of running the examples. To view all available options, run `just -l`, and then to run it, is `just run-rak` to run the RAK3272s example.
+A Justfile has been introduced to ease the use of handling the examples for this project, and to document the different ways of running the examples. To view all available options, run `just -l`.
 
 ### Probe-rs server
 
-Probe-rs is a very powerful tool, and by compiling probe-rs with the `server` feature flag, it is possible to run `probe-rs serve` on a remote host, and connect to that server on your local machine. With this, it is possible to launch programs and flash to a device, as if you were directly connected to it. This is utilized in this project, where `just remote-rak` runs the RAK3272s example but connects to a Raspberry Pi using Tailscale and lets probe-rs handle the authentication and flashing of my request.
+Probe-rs is a very powerful tool, and by compiling probe-rs with the `server` feature flag, it is possible to run `probe-rs serve` on a remote host, and connect to that server on your local machine. With this, it is possible to launch programs and flash to a device, as if you were directly connected to it. This is utilized in this project, where `just remote-run` runs the RAK3272s example but connects to a Raspberry Pi using Tailscale and lets probe-rs handle the authentication and flashing of my request.
 For more information, visit the [docs](https://probe.rs/docs/tools/#serve)
 
 ### cross-rs

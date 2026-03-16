@@ -70,6 +70,32 @@ sequenceDiagram
     N2->>GW: Transmit Heartbeat (if in range)
 ```
 
+### Time synchronization
+
+```mermaid
+sequenceDiagram
+    participant GW as Gateway
+    participant N as Node A
+
+    Note over GW, N: Frame Start / Slot 0
+    GW->>N: Broadcast Heartbeat, time: T0
+
+    Note over N: Records T1, takes slot 1
+    Note over GW, N: Frame Start / Slot 1
+    Note over N: Calc timestamp T2
+    N->>GW: Heartbeat (time: T2 )
+    Note over GW: Receives T2 at T3
+
+    Note over GW, N: ... Slot 0
+    GW->>N: Broadcast Heartbeat { time: T4, (A: T3) }
+
+
+```
+
+$$
+delay = \frac{\Delta_{up} + \Delta_{up}}{2}
+$$
+
 ```mermaid
 graph TD
     Start([bootup]) --> MatchEpoch{Is time sync None?}

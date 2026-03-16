@@ -270,7 +270,7 @@ pub struct TdmaMac<P, const SIZE: usize> {
     /// biggest chance of two nodes not having the same u32 representation
     node_id: u8,
     /// Ratio to try and mitigate clock drift at nodes with no HSE
-    skew_ratio: f32,
+    // skew_ratio: f64,
     skew_gw_diff: u64,
     skew_local_diff: u64,
     gw_hops: u8,
@@ -302,7 +302,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             time_sync,
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
-            skew_ratio: 1.0,
+            // skew_ratio: 1.0,
             skew_gw_diff: 1,
             skew_local_diff: 1,
             gw_hops: 255,
@@ -317,9 +317,9 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
     fn current_gps_time(&self, (base_gps_ms, sync_instant): (u64, Instant)) -> u64 {
         // TODO: could add a multiplier here to fix drifting?
         let elapsed_ms = (Instant::now() - sync_instant).as_millis();
-        let gw_elapsed_ms = (elapsed_ms as f32 * self.skew_ratio) as u64;
-        // let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
-        //     / self.skew_local_diff as u128) as u64;
+        // let gw_elapsed = (elapsed_ms as f64 * self.skew_ratio) as u64;
+        let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
+            / self.skew_local_diff as u128) as u64;
         base_gps_ms + gw_elapsed_ms
     }
 
@@ -330,9 +330,8 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         let elapsed_in_current_slot = current_gps_time % slot_dur;
 
         let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
-        // let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
-        //     / self.skew_gw_diff as u128) as u64;
-        let node_offset = (next_slot_start_offset as f32 / self.skew_ratio) as u64;
+        let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
+            / self.skew_gw_diff as u128) as u64;
 
         // A 5ms guard band is used to perhaps fix conversion/rounding errors
         let guard_band = 5;
@@ -357,56 +356,49 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
             {
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
-                if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
+                if pkt.hop_to_gw < self.gw_hops {
                     // TODO: There must be a latency here, which should be adjusted for
+                    let now = Instant::now();
 
                     match self.time_sync {
                         None => {
                             info!("TDMA: Initial epoch set");
-                            self.time_sync = Some((alloc.gps_time_ms, Instant::now()));
+                            self.time_sync = Some((alloc.gps_time_ms, now));
                         }
                         Some((old_gps, last_stamp)) => {
                             // Calculate skews
-                            let my_stamp = self.current_gps_time((old_gps, last_stamp));
-                            let my_diff = (Instant::now() - last_stamp).as_millis();
+                            let my_diff = now.as_millis() - last_stamp.as_millis();
+                            let my_stamp = old_gps + my_diff;
+                            let gw_diff = alloc.gps_time_ms - old_gps;
+                            let skew = ((alloc.gps_time_ms - old_gps) as f32) / (my_diff as f32);
+                            let skewed_stamp = old_gps
+                                + ((my_diff as u128 * gw_diff as u128) / my_diff as u128) as u64;
+                            // self.skew_ratio = skew;
+                            self.skew_gw_diff = gw_diff;
+                            self.skew_local_diff = my_diff;
 
-                            // Check if a t3 delta is availale for us
-                            let delay = if let Some((_, delta_up)) =
+                            // Check if a t3 is availale for us
+                            if let Some((_, delta_up)) =
                                 alloc.t3_deltas.iter().find(|t| t.0 == self.node_id)
                             {
                                 // delta is our T3 - T2
-                                let delta_down = my_stamp as i64 - alloc.gps_time_ms as i64;
-                                info!("Delta up: {}\t\t Delta down: {}", delta_up, delta_down);
-                                let clock_offset = (delta_down - *delta_up as i64) / 2;
-                                let nw_delay = (delta_down + *delta_up as i64) / 2;
+                                let delta_down = my_stamp - alloc.gps_time_ms;
+                                let clock_offset = (delta_down as i64 - *delta_up as i64) / 2;
+                                let nw_delay = (delta_down as i64 + *delta_up as i64) / 2;
                                 info!(
-                                    "Measured clock offset: {}\t\tMeasured network delay: {}",
+                                    "Measured clock offset: {}\nMeasured network delay: {}",
                                     clock_offset, nw_delay
                                 );
-                                nw_delay
-                            } else {
-                                0
-                            };
-
-                            // Use the network delay to make up for transmission time, etc.
-                            let current_true_time = alloc.gps_time_ms as i64 + delay;
-                            let gw_diff = current_true_time - old_gps as i64;
-                            let skew = (gw_diff as f32) / (my_diff as f32);
-
-                            self.skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
-                            self.skew_gw_diff = gw_diff as u64;
-                            self.skew_local_diff = my_diff;
-                            self.time_sync = Some((current_true_time as u64, Instant::now()));
+                            }
 
                             // Debug info:
                             if my_stamp != alloc.gps_time_ms {
-                                let skewed_stamp = old_gps + (gw_diff as u128) as u64;
                                 let delay: i64 = my_stamp as i64 - alloc.gps_time_ms as i64;
                                 let skewed_delay: i64 =
                                     skewed_stamp as i64 - alloc.gps_time_ms as i64;
                                 info!(
-                                    "Mesured clock drift: {} ms, skewed drift: {}, ratio: {}\t self ratio: {}",
-                                    delay, skewed_delay, skew, self.skew_ratio
+                                    "Mesured clock drift: {} ms, skewed drift: {}, ratio: {}",
+                                    delay, skewed_delay, skew
                                 );
                             } else {
                                 info!("Perfectly synced!");
@@ -416,19 +408,10 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {
-                        // Cast to i64 to not panic at my_time < alloc
-                        self.current_gps_time(stamps) as i64 - alloc.gps_time_ms as i64
+                        self.current_gps_time(stamps) - alloc.gps_time_ms
                     } else {
                         0
-                    } as u16;
-                    match self.t3_deltas.iter().position(|t| t.0 == pkt.source_id) {
-                        Some(idx) => self.t3_deltas[idx] = (pkt.source_id, t3),
-                        None => {
-                            if self.t3_deltas.push((pkt.source_id, t3)).is_err() {
-                                error!("T3 deltas is full!")
-                            }
-                        }
-                    }
+                    };
                 }
                 self.known_slots_mask.claim(alloc.my_slot);
                 info!(

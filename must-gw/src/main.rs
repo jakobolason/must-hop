@@ -89,9 +89,9 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     log::info!("Now making mesh router ...");
     let mut router = MeshRouter::new(
         node,
-        NetworkManager::new(gw_source_id as u8, 10, 3),
+        NetworkManager::new(gw_source_id, 10, 3),
         mac,
-        GatewayPolicy::new(30),
+        GatewayPolicy::new(10),
     );
     log::info!("Now start loop..");
     loop {
