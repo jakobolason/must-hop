@@ -110,7 +110,7 @@ Offset is the difference perceived instant at N compared to the GW.
 ```python
 # At timestamp
 (old_timestamp, old_instant)
-self.timestamp = heartbeat_time + offset
+self.timestamp = heartbeat_time + delay
 self.sync_instant = now()
 gw_diff = self.timestamp - old_timestamp
 my_diff = now() - old_instant

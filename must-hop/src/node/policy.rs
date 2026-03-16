@@ -341,13 +341,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
 
     pub fn current_slot(&self, current_time_ms: u64) -> u8 {
         let frame_duration_ms = (self.slot_duration.as_millis()) * (self.slots_per_frame as u64);
-
         let time_in_frame = current_time_ms % frame_duration_ms;
-        info!(
-            "time in frame / slot dur: {} {}",
-            time_in_frame,
-            self.slot_duration.as_millis()
-        );
 
         // Add half of slot duration to achieve 'round to nearest' int division
         let slot_dur = self.slot_duration.as_millis();
@@ -396,9 +390,11 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                             let gw_diff = current_true_time - old_gps as i64;
                             let skew = (gw_diff as f32) / (my_diff as f32);
 
-                            // self.skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
-                            self.skew_gw_diff = gw_diff as u64;
-                            self.skew_local_diff = my_diff;
+                            self.skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
+
+                            // self.skew_gw_diff = gw_diff as u64;
+                            // self.skew_local_diff = my_diff;
+
                             self.time_sync = Some((current_true_time as u64, Instant::now()));
 
                             // Debug info:
@@ -468,11 +464,11 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
     where
         Node: MHNode<SIZE, LEN>,
     {
-        let toa = node.calc_tx_delay(len);
+        // let toa = node.calc_tx_delay(len);
         let tx_timestamp = match self.time_sync {
             Some(stamps) => {
                 // old_gps + (Instant::now().as_millis() - last_stamp.as_millis())
-                self.current_gps_time(stamps) + toa.as_millis() as u64
+                self.current_gps_time(stamps) // + toa.as_millis() as u64
             }
             None => 0,
         };

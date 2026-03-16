@@ -122,11 +122,21 @@ impl MHNode<SIZE, LEN> for GWNode {
         packets
             .iter()
             .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
+        let before = Instant::now();
         let tx_pkt = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
             embassy_time::Timer::after(Duration::from_millis(5)).await;
         }
-        self.radio.transmit(tx_pkt)
+        self.radio.transmit(tx_pkt)?;
+        let after = Instant::now();
+        let only_tx = after - before;
+
+        trace!(
+            "[TX DURATION] millis: {},\t ticks: {}",
+            only_tx.as_millis(),
+            only_tx
+        );
+        Ok(())
     }
 
     async fn receive(
