@@ -313,7 +313,20 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         // let gw_elapsed = (elapsed_ms as f64 * self.skew_ratio) as u64;
         let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
             / self.skew_local_diff as u128) as u64;
-        base_gps_ms + elapsed_ms
+        base_gps_ms + gw_elapsed_ms
+    }
+
+    fn calc_nextslot_time(&self, timestamps: (u64, Instant)) -> Instant {
+        let current_gps_time = self.current_gps_time(timestamps);
+        let slot_dur = self.slot_duration.as_millis();
+
+        let elapsed_in_current_slot = current_gps_time % slot_dur;
+
+        let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
+        // A 5ms guard band is used to perhaps fix conversion errors
+        let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
+            / self.skew_gw_diff as u128) as u64;
+        Instant::now() + Duration::from_millis(node_offset)
     }
 
     pub fn current_slot(&self, current_time_ms: u64) -> u8 {
@@ -343,12 +356,19 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                             let my_stamp = old_gps + my_diff;
                             let gw_diff = alloc.gps_time_ms - old_gps;
                             let skew = ((alloc.gps_time_ms - old_gps) as f32) / (my_diff as f32);
+                            let skewed_stamp = old_gps
+                                + ((my_diff as u128 * gw_diff as u128) / my_diff as u128) as u64;
                             // self.skew_ratio = skew;
                             self.skew_gw_diff = gw_diff;
                             self.skew_local_diff = my_diff;
                             if my_stamp != alloc.gps_time_ms {
                                 let delay: i64 = my_stamp as i64 - alloc.gps_time_ms as i64;
-                                info!("Mesured clock drift ahead: {} ms, ratio: {}", delay, skew);
+                                let skewed_delay: i64 =
+                                    skewed_stamp as i64 - alloc.gps_time_ms as i64;
+                                info!(
+                                    "Mesured clock drift: {} ms, skewed drift: {}, ratio: {}",
+                                    delay, skewed_delay, skew
+                                );
                             } else {
                                 info!("Perfectly synced!");
                             }
@@ -380,18 +400,6 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         }
     }
 
-    fn calc_nextslot_time(&self, timestamps: (u64, Instant)) -> Instant {
-        let current_gps_time = self.current_gps_time(timestamps);
-        let slot_dur = self.slot_duration.as_millis();
-
-        let elapsed_in_current_slot = current_gps_time % slot_dur;
-
-        let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
-        // A 5ms guard band is used to perhaps fix conversion errors
-        let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
-            / self.skew_gw_diff as u128) as u64;
-        Instant::now() + Duration::from_millis(next_slot_start_offset)
-    }
     fn update_heartbeat<Node, const LEN: usize>(
         &self,
         mut hbt: MHPacket<SIZE>,

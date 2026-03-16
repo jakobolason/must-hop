@@ -10,6 +10,7 @@ Meant as the source code for my bachelor's thesis, which explores the emerging w
   Provides traits for nodes, a NetworkManager to handle the multi hop logic, and a MeshRouter to handle the flow of receiving and retransmitting packages.
   - `MeshRouter` handles a `MHNode` and a `NetworkManager`, then given a policy for replying to messages handles how a node should receive and transmit to create the multi hop network
   - `NetworkManager` Is the brains maintaining a record of sent packets which have not been acknowledged yet. The acknowledgement is handled by the routing policy given to the `MeshRouter`
+  - `MacPolicy`: An implementation for Random Access(RA) and TDMA can be chosen for the system, such that it simply a plug-and-play system when compiling, as to how the system should communicate.
 
 - `libloragw-sys`:
   Rust bindings for the sx1302-hal to use the RAK2287 board on a raspberry Pi and communicate to it with a rust program.
@@ -19,8 +20,6 @@ Meant as the source code for my bachelor's thesis, which explores the emerging w
 
 - `must-gw`:
   A Lora Gateway to retrieve sensor data from nodes and send them to a remote server. Will use `must-hop` to act as a node on the network, but being special because it replies with ACK's instead of retransmitting packages.
-  - [x] Can listen to nodes
-  - [x] Send ACK's back to nodes
 
 ## Examples
 
@@ -50,15 +49,14 @@ Thus everything can be compiled and then the binaries can be copied to a remote 
   - [x] Define gateway communication
   - [ ] Have a nice dashboard kind of, to see information
         could use Ratatui for this perhaps
-- [] central, peripheral, runner abstraction for LoRa
-  Still unsure if this will actually be needed, since MHNode defines what this lib needs and therefore it might be unecessary to do this.
-  - [x] Or, use traits to define a transmit and receive function
-  - [x] MHNode and NetworkManager define some of the functionality required
+- [x] Traits required for radios to use this library: `MHNode`
+  - [x] lora-rs implements this in `must-hop/lora.rs`
+  - [x] SX1302 concentrator implements this in `must-gw/node.rs`
 - [ ] medium-access-control somehow handled
-  - [ ] use `lora.cad` for channel activity detection
   - [x] MacPolicy trait passed to meshrouter, letting the user choose one of the provided implementations or make their own.
   - [x] `RandomAccessMac` defines a naive and simple MAC implementation.
-  - [ ] `TDMAMac` should define how MAC is handled if TDMA is chosen.
+    - [ ] use `lora.cad` for channel activity detection in RA
+  - [x] `TDMAMac` defines how MAC is handled if TDMA is chosen.
 
 - [x] Messages can be passed on to another node
   - [x] Define how each packet looks (MHPacket)
