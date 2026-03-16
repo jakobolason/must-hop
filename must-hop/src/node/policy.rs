@@ -245,7 +245,7 @@ struct SlotAllocation {
     known_slots: u32,
     gps_time_ms: u64,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    t3_deltas: Vec<(u8, u16), 5>,
+    t3_deltas: Vec<(u8, i16), 5>,
 }
 
 #[cfg(feature = "debug")]
@@ -275,7 +275,7 @@ pub struct TdmaMac<P, const SIZE: usize> {
     skew_local_diff: u64,
     gw_hops: u8,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    t3_deltas: Vec<(u8, u16), 5>,
+    t3_deltas: Vec<(u8, i16), 5>,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
 
@@ -334,9 +334,9 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         //     / self.skew_gw_diff as u128) as u64;
         let node_offset = (next_slot_start_offset as f32 / self.skew_ratio) as u64;
 
-        // A 5ms guard band is used to perhaps fix conversion/rounding errors
+        // Wake up just a bit before the slot starts to ensure listening at correct time
         let guard_band = 5;
-        Instant::now() + Duration::from_millis(node_offset + guard_band)
+        Instant::now() + Duration::from_millis(node_offset.saturating_sub(guard_band))
     }
 
     pub fn current_slot(&self, current_time_ms: u64) -> u8 {
@@ -348,7 +348,10 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             time_in_frame,
             self.slot_duration.as_millis()
         );
-        (time_in_frame / (self.slot_duration.as_millis())) as u8
+
+        // Add half of slot duration to achieve 'round to nearest' int division
+        let slot_dur = self.slot_duration.as_millis();
+        ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
 
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>]) {
@@ -371,21 +374,21 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                             let my_diff = (Instant::now() - last_stamp).as_millis();
 
                             // Check if a t3 delta is availale for us
-                            let delay = if let Some((_, delta_up)) =
+                            let (delay, offset) = if let Some((_, delta_up)) =
                                 alloc.t3_deltas.iter().find(|t| t.0 == self.node_id)
                             {
                                 // delta is our T3 - T2
                                 let delta_down = my_stamp as i64 - alloc.gps_time_ms as i64;
-                                info!("Delta up: {}\t\t Delta down: {}", delta_up, delta_down);
+                                info!("Delta up:\t{}\t\t\t Delta down:\t{}", delta_up, delta_down);
                                 let clock_offset = (delta_down - *delta_up as i64) / 2;
                                 let nw_delay = (delta_down + *delta_up as i64) / 2;
                                 info!(
-                                    "Measured clock offset: {}\t\tMeasured network delay: {}",
+                                    "clock offset:\t{}\t\tnetwork delay:\t{}",
                                     clock_offset, nw_delay
                                 );
-                                nw_delay
+                                (nw_delay, clock_offset)
                             } else {
-                                0
+                                (0, 0)
                             };
 
                             // Use the network delay to make up for transmission time, etc.
@@ -393,7 +396,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                             let gw_diff = current_true_time - old_gps as i64;
                             let skew = (gw_diff as f32) / (my_diff as f32);
 
-                            self.skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
+                            // self.skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
                             self.skew_gw_diff = gw_diff as u64;
                             self.skew_local_diff = my_diff;
                             self.time_sync = Some((current_true_time as u64, Instant::now()));
@@ -417,10 +420,10 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {
                         // Cast to i64 to not panic at my_time < alloc
-                        self.current_gps_time(stamps) as i64 - alloc.gps_time_ms as i64
+                        (self.current_gps_time(stamps) as i64 - alloc.gps_time_ms as i64) as i16
                     } else {
                         0
-                    } as u16;
+                    };
                     match self.t3_deltas.iter().position(|t| t.0 == pkt.source_id) {
                         Some(idx) => self.t3_deltas[idx] = (pkt.source_id, t3),
                         None => {
@@ -550,6 +553,8 @@ where
             && slot == my_tx_slot
         {
             debug!(" !!!  MY SLOT !!! ");
+            // NOTE: Introduce a 50ms delay here, to ensure nodes are listening in your slot
+            Timer::after(Duration::from_millis(50)).await;
             if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
                 // If should send hbt, update it's timestamp
 
@@ -560,6 +565,8 @@ where
                     // If queue full, then try and send it next time
                     self.hbt_pkt = Some(pkt)
                 }
+                // Now reset our feedbacks, to not send old data if a node's responce it lost
+                self.t3_deltas.clear();
 
                 node.transmit(tx_queue).await?;
                 tx_queue.clear();
