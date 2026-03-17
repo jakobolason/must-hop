@@ -117,6 +117,9 @@ my_diff = now() - old_instant
 
 skew = gw_diff / my_diff
 self.skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
+# Proportional regulator!
+error = skew - self.skew_ratio
+self.skew_ratio = self.skew_ratio + 0.2 * (error)
 
 # At time calculation
 elapsed = (now() - self.sync_instant) * self.skew_ratio

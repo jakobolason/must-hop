@@ -398,7 +398,9 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             info!("Perfectly synced?!");
         }
 
-        let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
+        // let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
+        let kp = 0.4;
+        let skew_ratio = self.skew_ratio + kp * (skew - self.skew_ratio);
 
         // self.skew_gw_diff = gw_diff as u64;
         // self.skew_local_diff = my_diff;
