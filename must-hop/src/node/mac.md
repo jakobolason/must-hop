@@ -158,9 +158,10 @@ graph TD
 
 ```mermaid
 graph TD
-    IsHeartbeat  --> IsGateway{Am i Gateway or pkt.hops_to_gw > self.hops_to_gw?}
-    IsGateway -- Yes --> ClaimSlot[Add Rx slot to own mask]
-    ClaimSlot --> IsTxSlotNone{Have i allocated a Tx slot?}
+    IsHeartbeat  --> IsGateway{Am i Gateway or pkt.hops_to_gw < self.hops_to_gw?}
+    IsGateway -- Yes --> CalcFeedback[Calculate delta up]
+    CalcFeedback --> ClaimSlot[Add Rx slot to own mask]
+    ClaimSlot --> IsTxSlotNone{Have i allocated<br/> a Tx slot?}
     IsTxSlotNone -- No --> ClaimTxSlot[Claim an available slot from senders mask]
     ClaimTxSlot --> ret([Return ])
     IsTxSlotNone -- Yes --> ret
@@ -168,7 +169,7 @@ graph TD
     %% Is not GW or hops lower
     IsGateway -- No --> IsTimeSyncSet{Is time_sync set?}
     IsTimeSyncSet -- No --> SetTimeSync[Set self.time_sync]
-    IsTimeSyncSet -- Yes --> FindSkew[Calculate skew from previous timestamp and instant]
+    IsTimeSyncSet -- Yes --> FindSkew[Calculate skew, delay from previous timestamp, instant and GW feedback]
     FindSkew --> SetTimeSync
     SetTimeSync --> ClaimSlot
 ```

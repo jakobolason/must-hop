@@ -348,6 +348,8 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
 
+    /// Given a heartbeat packet from a nearer-gw node, this calculates the new timestamp and the
+    /// new skew ratio for the node to be properly synchronized.
     fn update_skew_and_stamp(&self, hb: &SlotAllocation) -> (f32, Option<(u64, Instant)>) {
         let (old_gps, last_stamp) = match self.time_sync {
             Some(stamps) => stamps,
@@ -393,7 +395,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 delay, skewed_delay, skew, self.skew_ratio
             );
         } else {
-            info!("Perfectly synced!");
+            info!("Perfectly synced?!");
         }
 
         let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
