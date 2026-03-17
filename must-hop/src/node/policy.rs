@@ -348,6 +348,63 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
 
+    fn update_skew_and_stamp(&self, hb: &SlotAllocation) -> (f32, Option<(u64, Instant)>) {
+        let (old_gps, last_stamp) = match self.time_sync {
+            Some(stamps) => stamps,
+            None => {
+                // Short circuit from function if not set
+                info!("TDMA: Initial epoch set");
+                return (1_f32, Some((hb.gps_time_ms, Instant::now())));
+            }
+        };
+        // Calculate skews
+        let my_stamp = self.current_gps_time((old_gps, last_stamp));
+        let my_diff = (Instant::now() - last_stamp).as_millis();
+
+        // Check if a t3 delta is availale for us
+        let (delay, offset) =
+            if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == self.node_id) {
+                // delta is our T3 - T2
+                let delta_down = my_stamp as i64 - hb.gps_time_ms as i64;
+                info!("Delta up:\t{}\t\t\t Delta down:\t{}", delta_up, delta_down);
+                let clock_offset = (delta_down - *delta_up as i64) / 2;
+                let nw_delay = (delta_down + *delta_up as i64) / 2;
+                info!(
+                    "clock offset:\t{}\t\tnetwork delay:\t{}",
+                    clock_offset, nw_delay
+                );
+                (nw_delay, clock_offset)
+            } else {
+                (0, 0)
+            };
+
+        // Use the network delay to make up for transmission time, etc.
+        let current_true_time = hb.gps_time_ms as i64 + delay;
+        let gw_diff = current_true_time - old_gps as i64;
+        let skew = (gw_diff as f32) / (my_diff as f32);
+
+        // Debug info:
+        if my_stamp != hb.gps_time_ms {
+            let skewed_stamp = old_gps + (gw_diff as u128) as u64;
+            let delay: i64 = my_stamp as i64 - hb.gps_time_ms as i64;
+            let skewed_delay: i64 = skewed_stamp as i64 - hb.gps_time_ms as i64;
+            info!(
+                "Mesured clock drift: {} ms, skewed drift: {}, ratio: {}\t self ratio: {}",
+                delay, skewed_delay, skew, self.skew_ratio
+            );
+        } else {
+            info!("Perfectly synced!");
+        }
+
+        let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
+
+        // self.skew_gw_diff = gw_diff as u64;
+        // self.skew_local_diff = my_diff;
+
+        let time_sync = Some((current_true_time as u64, Instant::now()));
+        (skew_ratio, time_sync)
+    }
+
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>]) {
         for pkt in pkts {
             if pkt.packet_type == PacketType::HeartBeat
@@ -355,63 +412,10 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             {
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
-                    // TODO: There must be a latency here, which should be adjusted for
-
-                    match self.time_sync {
-                        None => {
-                            info!("TDMA: Initial epoch set");
-                            self.time_sync = Some((alloc.gps_time_ms, Instant::now()));
-                        }
-                        Some((old_gps, last_stamp)) => {
-                            // Calculate skews
-                            let my_stamp = self.current_gps_time((old_gps, last_stamp));
-                            let my_diff = (Instant::now() - last_stamp).as_millis();
-
-                            // Check if a t3 delta is availale for us
-                            let (delay, offset) = if let Some((_, delta_up)) =
-                                alloc.t3_deltas.iter().find(|t| t.0 == self.node_id)
-                            {
-                                // delta is our T3 - T2
-                                let delta_down = my_stamp as i64 - alloc.gps_time_ms as i64;
-                                info!("Delta up:\t{}\t\t\t Delta down:\t{}", delta_up, delta_down);
-                                let clock_offset = (delta_down - *delta_up as i64) / 2;
-                                let nw_delay = (delta_down + *delta_up as i64) / 2;
-                                info!(
-                                    "clock offset:\t{}\t\tnetwork delay:\t{}",
-                                    clock_offset, nw_delay
-                                );
-                                (nw_delay, clock_offset)
-                            } else {
-                                (0, 0)
-                            };
-
-                            // Use the network delay to make up for transmission time, etc.
-                            let current_true_time = alloc.gps_time_ms as i64 + delay;
-                            let gw_diff = current_true_time - old_gps as i64;
-                            let skew = (gw_diff as f32) / (my_diff as f32);
-
-                            self.skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
-
-                            // self.skew_gw_diff = gw_diff as u64;
-                            // self.skew_local_diff = my_diff;
-
-                            self.time_sync = Some((current_true_time as u64, Instant::now()));
-
-                            // Debug info:
-                            if my_stamp != alloc.gps_time_ms {
-                                let skewed_stamp = old_gps + (gw_diff as u128) as u64;
-                                let delay: i64 = my_stamp as i64 - alloc.gps_time_ms as i64;
-                                let skewed_delay: i64 =
-                                    skewed_stamp as i64 - alloc.gps_time_ms as i64;
-                                info!(
-                                    "Mesured clock drift: {} ms, skewed drift: {}, ratio: {}\t self ratio: {}",
-                                    delay, skewed_delay, skew, self.skew_ratio
-                                );
-                            } else {
-                                info!("Perfectly synced!");
-                            }
-                        }
-                    }
+                    // Calculate updated skew and timestamps
+                    let (skew_ratio, time_sync) = self.update_skew_and_stamp(&alloc);
+                    self.skew_ratio = skew_ratio;
+                    self.time_sync = time_sync;
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {
