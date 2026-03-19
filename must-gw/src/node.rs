@@ -143,12 +143,13 @@ impl MHNode<SIZE, LEN> for GWNode {
         &mut self,
         _conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> Result<heapless::Vec<MHPacket<SIZE>, LEN>, Self::Error> {
+    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, Instant), Self::Error> {
         // Check if any packets came in whilst transitioning from listen to receive
         // let pkts: Vec<RxPacket> = match self.radio.receive() {
         //     Ok(Some(packet)) => packet,
         //     _ => Vec::new(),
         // };
+        let rx_hw_timestamp = Instant::now();
         let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
         for pkt in rec_buf
         /*.iter().chain(pkts.iter())*/
@@ -183,7 +184,7 @@ impl MHNode<SIZE, LEN> for GWNode {
                 }
             };
         }
-        Ok(rec_packets)
+        Ok((rec_packets, rx_hw_timestamp))
     }
 
     async fn listen(

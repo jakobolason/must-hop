@@ -3,6 +3,7 @@
 /// implemented by the radio used on the specific device
 use core::future::Future;
 use core::time::Duration;
+use embassy_time::Instant;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
@@ -69,7 +70,7 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
         &mut self,
         conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> impl Future<Output = Result<Vec<MHPacket<SIZE>, LEN>, Self::Error>>;
+    ) -> impl Future<Output = Result<(Vec<MHPacket<SIZE>, LEN>, Instant), Self::Error>>;
 
     /// Make the node listen for a preample, giving a connection relative to the physical layer
     /// used. Optionally a duration to listen in can be given.

@@ -197,7 +197,7 @@ where
         receiving_buffer: &Node::ReceiveBuffer,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
         // TODO: should be able to receieve multiple packets
-        let pkts = self
+        let (pkts, rx_hw_timestamp) = self
             .node
             .receive(conn, receiving_buffer)
             .await

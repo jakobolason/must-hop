@@ -135,7 +135,7 @@ where
             .await
         {
             Ok(conn) => match node.receive(conn, rx_buffer).await {
-                Ok(pkts) => Ok(Some(pkts)),
+                Ok((pkts, rx_hw_timestamp)) => Ok(Some(pkts)),
                 Err(e) => Err(e),
             },
             Err(e) => {
@@ -314,9 +314,13 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         }
     }
 
-    fn current_gps_time(&self, (base_gps_ms, sync_instant): (u64, Instant)) -> u64 {
+    fn current_gps_time(&self, stamps: (u64, Instant)) -> u64 {
+        self.gps_time_at(stamps, Instant::now())
+    }
+
+    fn gps_time_at(&self, (base_gps_ms, sync_instant): (u64, Instant), at_instant: Instant) -> u64 {
         // TODO: could add a multiplier here to fix drifting?
-        let elapsed_ms = (Instant::now() - sync_instant).as_millis();
+        let elapsed_ms = (at_instant - sync_instant).as_millis();
         let gw_elapsed_ms = (elapsed_ms as f32 * self.skew_ratio) as u64;
         // let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
         //     / self.skew_local_diff as u128) as u64;
@@ -350,7 +354,11 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
 
     /// Given a heartbeat packet from a nearer-gw node, this calculates the new timestamp and the
     /// new skew ratio for the node to be properly synchronized.
-    fn update_skew_and_stamp(&self, hb: &SlotAllocation) -> (f32, Option<(u64, Instant)>) {
+    fn update_skew_and_stamp(
+        &self,
+        hb: &SlotAllocation,
+        rx_hw_timestamp: Instant,
+    ) -> (f32, Option<(u64, Instant)>) {
         let (old_gps, last_stamp) = match self.time_sync {
             Some(stamps) => stamps,
             None => {
@@ -360,8 +368,9 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             }
         };
         // Calculate skews
-        let my_stamp = self.current_gps_time((old_gps, last_stamp));
-        let my_diff = (Instant::now() - last_stamp).as_millis();
+        // let my_stamp = self.current_gps_time((old_gps, last_stamp));
+        let my_diff = (rx_hw_timestamp - last_stamp).as_millis();
+        let my_stamp = my_diff + old_gps;
 
         // Check if a t3 delta is availale for us
         let (delay, offset) =
@@ -400,16 +409,17 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
 
         // let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
         let kp = 0.4;
-        let skew_ratio = self.skew_ratio + kp * (skew - self.skew_ratio);
+        let err = skew - self.skew_ratio;
+        let skew_ratio = self.skew_ratio + kp * err;
 
         // self.skew_gw_diff = gw_diff as u64;
         // self.skew_local_diff = my_diff;
 
-        let time_sync = Some((current_true_time as u64, Instant::now()));
+        let time_sync = Some((current_true_time as u64, rx_hw_timestamp));
         (skew_ratio, time_sync)
     }
 
-    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>]) {
+    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_hw_timestamp: Instant) {
         for pkt in pkts {
             if pkt.packet_type == PacketType::HeartBeat
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
@@ -417,14 +427,16 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
                     // Calculate updated skew and timestamps
-                    let (skew_ratio, time_sync) = self.update_skew_and_stamp(&alloc);
+                    let (skew_ratio, time_sync) =
+                        self.update_skew_and_stamp(&alloc, rx_hw_timestamp);
                     self.skew_ratio = skew_ratio;
                     self.time_sync = time_sync;
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {
                         // Cast to i64 to not panic at my_time < alloc
-                        (self.current_gps_time(stamps) as i64 - alloc.gps_time_ms as i64) as i16
+                        (self.gps_time_at(stamps, rx_hw_timestamp) as i64
+                            - alloc.gps_time_ms as i64) as i16
                     } else {
                         0
                     };
@@ -462,30 +474,24 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         }
     }
 
-    fn update_heartbeat<Node, const LEN: usize>(
+    fn update_heartbeat(
         &self,
         mut hbt: MHPacket<SIZE>,
         my_tx_slot: u8,
-        node: &mut Node,
-        len: usize,
-    ) -> MHPacket<SIZE>
-    where
-        Node: MHNode<SIZE, LEN>,
-    {
-        // let toa = node.calc_tx_delay(len);
+        t3_deltas: Vec<(u8, i16), 5>,
+    ) -> MHPacket<SIZE> {
         let tx_timestamp = match self.time_sync {
-            Some(stamps) => {
-                // old_gps + (Instant::now().as_millis() - last_stamp.as_millis())
-                self.current_gps_time(stamps) // + toa.as_millis() as u64
+            Some(stamps) => self.current_gps_time(stamps),
+            None => {
+                error!("In update heartbeat before we've heard a heartbeat??");
+                0
             }
-            None => 0,
         };
         let allocation = SlotAllocation {
             my_slot: my_tx_slot,
             known_slots: self.known_slots_mask.as_u32(),
             gps_time_ms: tx_timestamp,
-            // We want to send a copy, therefore clone is necessary
-            t3_deltas: self.t3_deltas.clone(),
+            t3_deltas,
         };
         let mut buf = [0u8; SIZE];
         if let Ok(serialized_slice) = to_slice(&allocation, &mut buf) {
@@ -520,6 +526,7 @@ where
 
         // Don't transmit anything until you have a slot, which you only have once you've heard a
         // heartbeat.
+        // TODO: Go back into this, if not heard a heartbeat in some time
         let Some(timestamps) = self.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             let conn = node
@@ -527,10 +534,10 @@ where
                 .await;
             match conn {
                 Ok(conn) => {
-                    received_packets = node.receive(conn, rx_buffer).await?;
+                    let (rec, rx_hw_timestamp) = node.receive(conn, rx_buffer).await?;
                     // Check for being heartbeat
-                    self.sync_epoch(&received_packets);
-                    return Ok(Some(received_packets));
+                    self.sync_epoch(&rec, rx_hw_timestamp);
+                    return Ok(Some(rec));
                 }
                 Err(e) => {
                     info!("Error in getting conn: {:?}", e);
@@ -547,7 +554,6 @@ where
         let slot = self.current_slot(self.current_gps_time(timestamps));
 
         debug!("current slot: {}", slot);
-        // TODO: Should move the sleep up to here instead, but this is how it is right now
         #[cfg(feature = "debug")]
         if let Some(pin) = self.debug_pin.as_mut() {
             let _ = pin.set_high();
@@ -558,34 +564,34 @@ where
         {
             debug!(" !!!  MY SLOT !!! ");
             // NOTE: Introduce a 50ms delay here, to ensure nodes are listening in your slot
-            Timer::after(Duration::from_millis(50)).await;
+            Timer::after(Duration::from_millis(100)).await;
             if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
                 // If should send hbt, update it's timestamp
-
-                if let Some(pkt) = self.hbt_pkt.take()
-                    && let Err(pkt) =
-                        tx_queue.push(self.update_heartbeat(pkt, my_tx_slot, node, tx_queue.len()))
+                if !tx_queue.is_full()
+                    && let Some(pkt) = self.hbt_pkt.take()
                 {
-                    // If queue full, then try and send it next time
-                    self.hbt_pkt = Some(pkt)
+                    // We update these deltas every time a heartbeat is sent
+                    let extracted_deltas = core::mem::take(&mut self.t3_deltas);
+                    let upd_pkt = self.update_heartbeat(pkt, my_tx_slot, extracted_deltas);
+                    if let Err(pkt) = tx_queue.push(upd_pkt) {
+                        // If queue full(???), then try and send it next time
+                        error!("Queue is full even though we just checked??");
+                        self.hbt_pkt = Some(pkt)
+                    }
                 }
-                // Now reset our feedbacks, to not send old data if a node's responce it lost
-                self.t3_deltas.clear();
-
                 node.transmit(tx_queue).await?;
                 tx_queue.clear();
             }
         } else {
             debug!(" -- NOT MY SLOT ---   ");
             let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_millis(200)))
+                .listen(rx_buffer, Some(core::time::Duration::from_millis(500)))
                 .await;
-            if let Ok(conn) = conn {
-                match node.receive(conn, rx_buffer).await {
-                    Ok(pkts) => received_packets = pkts,
-                    Err(_e) => (),
-                }
-                self.sync_epoch(&received_packets);
+            if let Ok(conn) = conn
+                && let Ok((pkts, rx_hw_timestamp)) = node.receive(conn, rx_buffer).await
+            {
+                self.sync_epoch(&pkts, rx_hw_timestamp);
+                received_packets = pkts;
             }
         }
         #[cfg(feature = "debug")]

@@ -138,8 +138,10 @@ where
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
         rec_buf: &[u8; TRANSMISSION_BUFFER],
-    ) -> Result<Vec<MHPacket<SIZE>, LEN>, RadioError> {
+    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Instant), RadioError> {
         // First we check if we actually got something
+        let rx_hardware_timestamp = Instant::now();
+        trace!("received pkts!");
         let (len, _rx_pkt_status) = match conn {
             Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
             Err(err) => match err {
@@ -163,7 +165,7 @@ where
         };
         trace!("Got packet!");
 
-        Ok(packets)
+        Ok((packets, rx_hardware_timestamp))
     }
 
     async fn listen(
