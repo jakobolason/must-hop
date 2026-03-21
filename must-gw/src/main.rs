@@ -10,6 +10,7 @@ use must_hop::node::{
     network_manager::NetworkManager,
     policy::{GatewayPolicy, RandomAccessMac, TdmaMac},
 };
+use rppal::gpio::Gpio;
 use std::io::Write;
 use tokio::time::Instant;
 
@@ -71,8 +72,10 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     // let pkt = node.receive((), &rec_buf).await?;
     // log::info!("got pkts: {:?} ", pkt);
     let gw_source_id = 1;
+    let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
+    let mut sync_pin = gpio.get(21).expect("Failed to get GPIO 21").into_output();
 
-    let mac = TdmaMac::<(), 128>::new(
+    let mac = TdmaMac::<_, 128>::new(
         embassy_time::Duration::from_secs(1),
         NonZeroU8::new(10).unwrap(),
         Some((
@@ -83,6 +86,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
             embassy_time::Instant::now(),
         )),
         Some(5),
+        Some(sync_pin),
         gw_source_id,
     );
     // let mac = RandomAccessMac::new();

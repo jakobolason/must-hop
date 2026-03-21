@@ -378,13 +378,18 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 // delta is our T3 - T2
                 let delta_down = my_stamp as i64 - hb.gps_time_ms as i64;
                 info!("Delta up:\t{}\t\t\t Delta down:\t{}", delta_up, delta_down);
-                let clock_offset = (delta_down - *delta_up as i64) / 2;
-                let nw_delay = (delta_down + *delta_up as i64) / 2;
-                info!(
-                    "clock offset:\t{}\t\tnetwork delay:\t{}",
-                    clock_offset, nw_delay
-                );
-                (nw_delay, clock_offset)
+                if delta_down.abs() > 300 || delta_up.abs() > 300 {
+                    info!("Rejected deltas!");
+                    (0, 0)
+                } else {
+                    let clock_offset = (delta_down - *delta_up as i64) / 2;
+                    let nw_delay = (delta_down + *delta_up as i64) / 2;
+                    info!(
+                        "clock offset:\t{}\t\tnetwork delay:\t{}",
+                        clock_offset, nw_delay
+                    );
+                    (nw_delay, clock_offset)
+                }
             } else {
                 (0, 0)
             };
@@ -408,7 +413,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         }
 
         // let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
-        let kp = 0.4;
+        let kp = 0.1;
         let err = skew - self.skew_ratio;
         let skew_ratio = self.skew_ratio + kp * err;
 
