@@ -319,7 +319,6 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
     }
 
     fn gps_time_at(&self, (base_gps_ms, sync_instant): (u64, Instant), at_instant: Instant) -> u64 {
-        // TODO: could add a multiplier here to fix drifting?
         let elapsed_ms = (at_instant - sync_instant).as_millis();
         let gw_elapsed_ms = (elapsed_ms as f32 * self.skew_ratio) as u64;
         // let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)

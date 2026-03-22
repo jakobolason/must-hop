@@ -105,7 +105,23 @@ $$
 
 Offset is the difference in perceived instant at N compared to the GW.
 
+## Block diagram
+
+```mermaid
+graph TD
+  GW["GW"]
+  dup["Δup"]
+  ddown["Δdown"]
+  TGk["T_G[k]"]
+  thw["T_hw[k]"]
+
+
+
+```
+
 ### Calculations with `skew_ratio`
+
+Pseudoc
 
 ```python
 # At timestamp

@@ -1,0 +1,31 @@
+direction: down
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+  }
+}
+
+classes: {
+  block: {
+    shape: rectangle
+    style: {fill: "#FFFFFF"; stroke: "#000"}
+  }
+  sum: {
+    shape: circle
+    width: 40
+    height: 40
+    style: {fill: transparent; stroke: "#333"; stroke-width: 2}
+  }
+}
+
+sums: "+" {class: sum}
+
+GW -> TG
+TG: |latex T_G[k] | {class: block}
+GW -> DU
+DU: |latex \Delta up | {class: block}
+TG -> delay
+delay: |latex z^{-1} | {class: block}
+TG -> sums
+delay -> sums
