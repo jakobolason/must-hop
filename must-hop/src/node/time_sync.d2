@@ -13,19 +13,106 @@ classes: {
   }
   sum: {
     shape: circle
-    width: 40
-    height: 40
+    width: 60
+    height: 60
     style: {fill: transparent; stroke: "#333"; stroke-width: 2}
+  }
+  split: {
+    shape: circle
+    width: 10
+    height: 10
+    style: {fill: "#000"; stroke: "#000"}
   }
 }
 
-sums: "+" {class: sum}
+sums: |latex \Sigma | {class: sum}
 
-GW -> TG
+GW -> HB
+HB: "Heartbeat Packet"
+HB -> TG
 TG: |latex T_G[k] | {class: block}
-GW -> DU
+HB -> DU
 DU: |latex \Delta up | {class: block}
-TG -> delay
+
+TG -- tg_split
+tg_split: "" {class: split}
+
+tg_split -> delay
 delay: |latex z^{-1} | {class: block}
-TG -> sums
-delay -> sums
+
+tg_split -> sums: {
+  target-arrowhead.label: "+"
+}
+
+delay -> sums: {
+  label: |latex T_G[k-1] |
+  target-arrowhead.label: "-"
+}
+
+THW -- thw_split
+thw_split: "" {class: split}
+THW: |latex t_{hw}[k] | {class: rectangle}
+TH_delay: |latex z^{-1} | {class: block}
+
+thw_split -> thw_sums: {
+  target-arrowhead.label: "+"
+}
+thw_split -> TH_delay
+TH_delay -> thw_sums: {
+  label: |latex t_{hw}[k-1] |
+  target-arrowhead.label: "-"
+}
+
+thw_sums: |latex \Sigma | {class: sum}
+
+# now getting error
+error_sum: |latex \Sigma | {class: sum}
+thw_sums -> error_sum: {
+  target-arrowhead.label: "-"
+  label: |latex \text{local}_{\text{diff}} |
+}
+sums -> error_sum: {
+  target-arrowhead.label: "+"
+  label: |latex \text{gw}_{\text{diff}} |
+}
+
+kp: |latex K_p |
+error_sum -> kp: {
+  label: "error"
+}
+
+SK_sum: |latex \Sigma | {class: sum}
+kp -> SK_sum
+SK_sum -> sk_split
+
+# feedback on controller:
+sk_split: "" {class: split}
+sk_split -> sk_delay
+sk_delay -> SK_sum: {
+  target-arrowhead.label: "+"
+  label: |latex S[k-1] |
+}
+sk_delay: |latex z^{-1} | {class: block}
+
+# Tx heartbeat (some time in future)
+now: "now()"
+now_sum: |latex \Sigma | {class: sum}
+now -> now_sum: {
+  target-arrowhead.label: "+"
+}
+thw_split -> now_sum: {
+  target-arrowhead.label: "-"
+}
+
+now_skewed: |latex \cdot | {class: sum}
+now_sum -> now_skewed
+sk_split -> now_skewed
+
+hb_sum: |latex \Sigma | {class: sum}
+now_skewed -> hb_sum: {
+  target-arrowhead.label: "+"
+}
+delay -> hb_sum: {
+  target-arrowhead.label: "+"
+}
+hb_sum -> GW
