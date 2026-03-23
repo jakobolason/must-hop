@@ -1,8 +1,7 @@
 direction: right
-
 vars: {
   d2-config: {
-    layout-engine: dagre
+    layout-engine: elk
   }
 }
 
@@ -25,7 +24,7 @@ classes: {
   }
 }
 
-time_stamp: {
+time_stamp: "Time stamp calculation" {
   TG: |latex T_G[k] | {class: block}
   TG_with_delay: |latex T_{G} + NW_{delay} | {class: sum}
   # Need a split for the actual T_G[k-1]
@@ -34,7 +33,7 @@ time_stamp: {
   delay: |latex z^{-1} | {class: block}
 
   delay_split: "" {class: split}
-  sums: |latex \Sigma | {class: sum}
+  sums: |latex \Delta \text{gw} | {class: sum}
 
   TGM1_split -> delay
   delay -- delay_split: |latex T_N[k-1] |
@@ -49,37 +48,85 @@ time_stamp: {
   TG_with_delay -- TGM1_split: |latex T_N[k] |
 }
 
-network_delay: {
+network_delay: "Network delay calculation" {
   DU: |latex \Delta up | {class: block}
+  # --- t_hw 
+
+  THW: |latex t_{hw}[k] | {class: block}
+  THW -- thw_split
+  thw_split: "" {class: split}
+  TH_delay: |latex z^{-1} | {class: block}
+  thw_split -> TH_delay
+
+  thw_sums: |latex \Sigma | {class: sum}
+  thw_split -> thw_sums: {
+    target-arrowhead.label: "+"
+  }
+  TH_delay -> thw_sums: {
+    label: |latex t_{hw}[k-1] |
+    target-arrowhead.label: "-"
+  }
+  thw_sums -- thw_sum_split: |latex \Delta \text{local} |
+  # calculate network delay
+  thw_sum_split: "" {class: split}
+  thw_sum_split -> dup_sum: {
+    target-arrowhead.label: "+"
+  }
+
+  dup_sum: |latex \Sigma | {class: sum}
+
+  delta_sum: |latex \Sigma | {class: sum}
+  dup_sum -> delta_sum: {
+    target-arrowhead.label: "+"
+  }
+  nw_delay_sum: |latex \Sigma | {class: sum}
+  delta_sum -> nw_delay_sum: {
+    target-arrowhead.label: "+"
+    label: |latex \Delta down |
+  }
+  DU -> nw_delay_sum: {
+    target-arrowhead.label: "+"
+    label: |latex \Delta up |
+  }
+
+  factor: |latex \frac{1}{2} | {class: sum}
+  nw_delay_sum -> factor
 }
 
-GW_Rx: "GW" {class: block}
-GW_Tx: "GW" {class: block}
-GW_Tx -> GW_Rx
+skew: "Calculation of skew" {
+  kp: |latex K_p | {class: block}
+  SK_sum: |latex \Sigma | {class: sum}
+  sk_split: "" {class: split}
+  sk_delay: |latex z^{-1} | {class: block}
 
-GW_Rx -> HB
+  kp -> SK_sum
+
+  # feedback on controller:
+  SK_sum -- sk_split: |latex S[k] |
+
+  sk_split -> sk_delay
+  sk_delay -> SK_sum: {
+    target-arrowhead.label: "+"
+    label: |latex S[k-1] |
+  }
+}
+
+GW: "GW" {class: block}
+
+GW -> HB
 HB: "Heartbeat Packet"
 HB -> time_stamp.TG
 HB -> network_delay.DU
 
-# --- t_hw 
+# --- Inter container routes ---
 
-THW: |latex t_{hw}[k] | {class: block}
-THW -- thw_split
-thw_split: "" {class: split}
-
-TH_delay: |latex z^{-1} | {class: block}
-thw_split -> TH_delay
-
-thw_sums: |latex \Sigma | {class: sum}
-thw_split -> thw_sums: {
+network_delay.factor -> time_stamp.TG_with_delay
+time_stamp.delay_split -> network_delay.dup_sum: {
   target-arrowhead.label: "+"
 }
-TH_delay -> thw_sums: {
-  label: |latex t_{hw}[k-1] |
+time_stamp.tg_split -> network_delay.delta_sum: {
   target-arrowhead.label: "-"
 }
-thw_sums -- thw_sum_split: |latex \Delta \text{local} |
 
 # now getting error
 error_sum: |latex \Sigma | {class: sum}
@@ -91,59 +138,12 @@ time_stamp.sums -> error_sum: {
   target-arrowhead.label: "+"
   label: |latex \Delta gw |
 }
-thw_sum_split -> error_sum: {
+network_delay.thw_sum_split -> error_sum: {
   target-arrowhead.label: "-"
 }
 
-kp: |latex K_p | {class: block}
-error_sum -> kp: {
+error_sum -> skew.kp: {
   label: "error"
-}
-
-SK_sum: |latex \Sigma | {class: sum}
-kp -> SK_sum
-
-# calculate network delay
-thw_sum_split: "" {class: split}
-thw_sum_split -> dup_sum: {
-  target-arrowhead.label: "+"
-}
-
-dup_sum: |latex \Sigma | {class: sum}
-time_stamp.delay_split -> dup_sum: {
-  target-arrowhead.label: "+"
-}
-delta_sum: |latex \Sigma | {class: sum}
-dup_sum -> delta_sum: {
-  target-arrowhead.label: "+"
-}
-time_stamp.tg_split -> delta_sum: {
-  target-arrowhead.label: "-"
-}
-
-nw_delay_sum: |latex \Sigma | {class: sum}
-delta_sum -> nw_delay_sum: {
-  target-arrowhead.label: "+"
-  label: |latex \Delta down |
-}
-network_delay.DU -> nw_delay_sum: {
-  target-arrowhead.label: "+"
-  label: |latex \Delta up |
-}
-
-factor: |latex \frac{1}{2} | {class: sum}
-nw_delay_sum -> factor
-factor -> time_stamp.TG_with_delay
-
-# feedback on controller:
-sk_split: "" {class: split}
-SK_sum -- sk_split: |latex S[k] |
-
-sk_delay: |latex z^{-1} | {class: block}
-sk_split -> sk_delay
-sk_delay -> SK_sum: {
-  target-arrowhead.label: "+"
-  label: |latex S[k-1] |
 }
 
 # Tx heartbeat (some time in future)
@@ -153,20 +153,21 @@ now_sum: |latex \Sigma | {class: sum}
 now -> now_sum: {
   target-arrowhead.label: "+"
 }
-thw_split -> now_sum: {
+network_delay.thw_split -> now_sum: {
   target-arrowhead.label: "-"
 }
 
 now_skewed: |latex \times | {class: sum}
 now_sum -> now_skewed
-sk_split -> now_skewed
+skew.sk_split -> now_skewed
 
 hb_sum: |latex \Sigma | {class: sum}
 now_skewed -> hb_sum: {
   target-arrowhead.label: "+"
+  label: "Time since last heartbeat"
 }
 time_stamp.TNK_split -> hb_sum: {
   target-arrowhead.label: "+"
 }
 
-hb_sum -> GW_Tx
+hb_sum -> GW: "Node's heartbeat broadcast"
