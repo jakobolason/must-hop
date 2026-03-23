@@ -1,8 +1,8 @@
-direction: down
+direction: right
 
 vars: {
   d2-config: {
-    layout-engine: elk
+    layout-engine: dagre
   }
 }
 
@@ -25,78 +25,131 @@ classes: {
   }
 }
 
-sums: |latex \Sigma | {class: sum}
+time_stamp: {
+  TG: |latex T_G[k] | {class: block}
+  TG_with_delay: |latex T_{G} + NW_{delay} | {class: sum}
+  # Need a split for the actual T_G[k-1]
+  TGM1_split: "" {class: split}
+  TNK_split: "" {class: split}
+  delay: |latex z^{-1} | {class: block}
 
-GW -> HB
+  delay_split: "" {class: split}
+  sums: |latex \Sigma | {class: sum}
+
+  TGM1_split -> delay
+  delay -- delay_split: |latex T_N[k-1] |
+  delay_split -> sums: {
+    target-arrowhead.label: "-"
+  }
+  TG -- tg_split
+  tg_split: "" {class: split}
+  TGM1_split -- TNK_split
+  TNK_split -> sums
+
+  TG_with_delay -- TGM1_split: |latex T_N[k] |
+}
+
+network_delay: {
+  DU: |latex \Delta up | {class: block}
+}
+
+GW_Rx: "GW" {class: block}
+GW_Tx: "GW" {class: block}
+GW_Tx -> GW_Rx
+
+GW_Rx -> HB
 HB: "Heartbeat Packet"
-HB -> TG
-TG: |latex T_G[k] | {class: block}
-HB -> DU
-DU: |latex \Delta up | {class: block}
+HB -> time_stamp.TG
+HB -> network_delay.DU
 
-TG -- tg_split
-tg_split: "" {class: split}
+# --- t_hw 
 
-tg_split -> delay
-delay: |latex z^{-1} | {class: block}
-
-tg_split -> sums: {
-  target-arrowhead.label: "+"
-}
-
-delay -> sums: {
-  label: |latex T_G[k-1] |
-  target-arrowhead.label: "-"
-}
-
+THW: |latex t_{hw}[k] | {class: block}
 THW -- thw_split
 thw_split: "" {class: split}
-THW: |latex t_{hw}[k] | {class: rectangle}
-TH_delay: |latex z^{-1} | {class: block}
 
+TH_delay: |latex z^{-1} | {class: block}
+thw_split -> TH_delay
+
+thw_sums: |latex \Sigma | {class: sum}
 thw_split -> thw_sums: {
   target-arrowhead.label: "+"
 }
-thw_split -> TH_delay
 TH_delay -> thw_sums: {
   label: |latex t_{hw}[k-1] |
   target-arrowhead.label: "-"
 }
-
-thw_sums: |latex \Sigma | {class: sum}
+thw_sums -- thw_sum_split: |latex \Delta \text{local} |
 
 # now getting error
 error_sum: |latex \Sigma | {class: sum}
-thw_sums -> error_sum: {
-  target-arrowhead.label: "-"
-  label: |latex \text{local}_{\text{diff}} |
-}
-sums -> error_sum: {
+time_stamp.tg_split -> time_stamp.TG_with_delay: {
   target-arrowhead.label: "+"
-  label: |latex \text{gw}_{\text{diff}} |
 }
 
-kp: |latex K_p |
+time_stamp.sums -> error_sum: {
+  target-arrowhead.label: "+"
+  label: |latex \Delta gw |
+}
+thw_sum_split -> error_sum: {
+  target-arrowhead.label: "-"
+}
+
+kp: |latex K_p | {class: block}
 error_sum -> kp: {
   label: "error"
 }
 
 SK_sum: |latex \Sigma | {class: sum}
 kp -> SK_sum
-SK_sum -> sk_split
+
+# calculate network delay
+thw_sum_split: "" {class: split}
+thw_sum_split -> dup_sum: {
+  target-arrowhead.label: "+"
+}
+
+dup_sum: |latex \Sigma | {class: sum}
+time_stamp.delay_split -> dup_sum: {
+  target-arrowhead.label: "+"
+}
+delta_sum: |latex \Sigma | {class: sum}
+dup_sum -> delta_sum: {
+  target-arrowhead.label: "+"
+}
+time_stamp.tg_split -> delta_sum: {
+  target-arrowhead.label: "-"
+}
+
+nw_delay_sum: |latex \Sigma | {class: sum}
+delta_sum -> nw_delay_sum: {
+  target-arrowhead.label: "+"
+  label: |latex \Delta down |
+}
+network_delay.DU -> nw_delay_sum: {
+  target-arrowhead.label: "+"
+  label: |latex \Delta up |
+}
+
+factor: |latex \frac{1}{2} | {class: sum}
+nw_delay_sum -> factor
+factor -> time_stamp.TG_with_delay
 
 # feedback on controller:
 sk_split: "" {class: split}
+SK_sum -- sk_split: |latex S[k] |
+
+sk_delay: |latex z^{-1} | {class: block}
 sk_split -> sk_delay
 sk_delay -> SK_sum: {
   target-arrowhead.label: "+"
   label: |latex S[k-1] |
 }
-sk_delay: |latex z^{-1} | {class: block}
 
 # Tx heartbeat (some time in future)
-now: "now()"
+now: "now()" {class: block}
 now_sum: |latex \Sigma | {class: sum}
+
 now -> now_sum: {
   target-arrowhead.label: "+"
 }
@@ -104,7 +157,7 @@ thw_split -> now_sum: {
   target-arrowhead.label: "-"
 }
 
-now_skewed: |latex \cdot | {class: sum}
+now_skewed: |latex \times | {class: sum}
 now_sum -> now_skewed
 sk_split -> now_skewed
 
@@ -112,7 +165,8 @@ hb_sum: |latex \Sigma | {class: sum}
 now_skewed -> hb_sum: {
   target-arrowhead.label: "+"
 }
-delay -> hb_sum: {
+time_stamp.TNK_split -> hb_sum: {
   target-arrowhead.label: "+"
 }
-hb_sum -> GW
+
+hb_sum -> GW_Tx
