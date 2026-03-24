@@ -369,7 +369,8 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         // Calculate skews
         // let my_stamp = self.current_gps_time((old_gps, last_stamp));
         let my_diff = (rx_hw_timestamp - last_stamp).as_millis();
-        let my_stamp = my_diff + old_gps;
+        let predicted_elapsed = (my_diff as f32 * self.skew_ratio) as u64;
+        let my_stamp = predicted_elapsed + old_gps;
 
         // Check if a t3 delta is availale for us
         let (delay, offset) =
@@ -396,30 +397,25 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         // Use the network delay to make up for transmission time, etc.
         let current_true_time = hb.gps_time_ms as i64 + delay;
         let gw_diff = current_true_time - old_gps as i64;
-        let skew = (gw_diff as f32) / (my_diff as f32);
+        // let skew = (gw_diff as f32) / (my_diff as f32);
+
+        // let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
+        let kp = 0.00005;
+        let err = gw_diff - predicted_elapsed as i64;
+        let skew_ratio = self.skew_ratio + kp * err as f32;
+        let time_sync = Some((current_true_time as u64, rx_hw_timestamp));
 
         // Debug info:
         if my_stamp != hb.gps_time_ms {
-            let skewed_stamp = old_gps + (gw_diff as u128) as u64;
             let delay: i64 = my_stamp as i64 - hb.gps_time_ms as i64;
-            let skewed_delay: i64 = skewed_stamp as i64 - hb.gps_time_ms as i64;
             info!(
-                "Mesured clock drift: {} ms, skewed drift: {}, ratio: {}\t self ratio: {}",
-                delay, skewed_delay, skew, self.skew_ratio
+                "Mesured clock drift: {} ms, error: {}, ratio: {}\t self ratio: {}",
+                delay, err, skew_ratio, self.skew_ratio
             );
         } else {
             info!("Perfectly synced?!");
         }
 
-        // let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
-        let kp = 0.1;
-        let err = skew - self.skew_ratio;
-        let skew_ratio = self.skew_ratio + kp * err;
-
-        // self.skew_gw_diff = gw_diff as u64;
-        // self.skew_local_diff = my_diff;
-
-        let time_sync = Some((current_true_time as u64, rx_hw_timestamp));
         (skew_ratio, time_sync)
     }
 

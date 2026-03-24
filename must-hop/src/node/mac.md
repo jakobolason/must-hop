@@ -121,7 +121,23 @@ graph TD
 
 ### Calculations with `skew_ratio`
 
-Pseudoc
+![block diagram](./time_sync.svg)
+<img src="./time_sync.svg">
+
+- Difference equations
+
+$$
+x[k] = \begin{bmatrix}T_n[k] \\ t_{hw}[k] \\ S[k]\end{bmatrix},\quad u[k] = \begin{bmatrix} T_G[k]\\ t_{hw}[k] \\ \Delta up[k] \end{bmatrix}
+$$
+
+$$
+\begin{aligned}
+T_N[k] &= T_G[k] + delay \\
+&= T_G[k] + (\frac{\Delta up + \Delta down}{2})\\
+&= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + \Delta local))}{2})  \\
+&= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + (t_{hw}[k] - t_{hw}[k-1]\cdot S[k]) ))}{2})
+\end{aligned}
+$$
 
 ```python
 # At timestamp

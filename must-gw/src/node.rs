@@ -149,8 +149,14 @@ impl MHNode<SIZE, LEN> for GWNode {
         //     Ok(Some(packet)) => packet,
         //     _ => Vec::new(),
         // };
-        let rx_hw_timestamp = Instant::now();
+        let mut rx_hw_timestamp = Instant::now();
         let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
+        let now_host = Instant::now();
+        let now_radio = self
+            .radio
+            .get_instcnt()
+            .unwrap_or(std::time::Duration::ZERO);
+
         for pkt in rec_buf
         /*.iter().chain(pkts.iter())*/
         {
@@ -167,6 +173,12 @@ impl MHNode<SIZE, LEN> for GWNode {
                 pkt.rssi,
                 pkt.snr
             );
+            // calculate the correct timestamp for receiving this packet
+            let pkt_hw_us = pkt.timestamp.as_micros() as u32;
+            let radio_now_us = now_radio.as_micros() as u32;
+            let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
+            rx_hw_timestamp = now_host - embassy_time::Duration::from_micros(age_us as u64);
+
             match postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes) {
                 Ok(packets) => {
                     log::info!(
