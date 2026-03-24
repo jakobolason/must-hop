@@ -105,6 +105,12 @@ impl<const SIZE: usize> RandomAccessMac<SIZE> {
     }
 }
 
+impl<const SIZE: usize> Default for RandomAccessMac<SIZE> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for RandomAccessMac<SIZE>
 where
     Node: MHNode<SIZE, LEN>,
@@ -222,7 +228,7 @@ impl SlotMask {
         let combined_mask = SlotMask {
             mask: self.mask | another_mask,
         };
-        let start_offset = (node_id % max_slots) as u8;
+        let start_offset = node_id % max_slots;
 
         (0..max_slots).find_map(|i| {
             let slot = (start_offset + i) % max_slots;
@@ -271,8 +277,6 @@ pub struct TdmaMac<P, const SIZE: usize> {
     node_id: u8,
     /// Ratio to try and mitigate clock drift at nodes with no HSE
     skew_ratio: f32,
-    skew_gw_diff: u64,
-    skew_local_diff: u64,
     gw_hops: u8,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     t3_deltas: Vec<(u8, i16), 5>,
@@ -303,8 +307,6 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
             skew_ratio: 1.0,
-            skew_gw_diff: 1,
-            skew_local_diff: 1,
             gw_hops: 255,
             t3_deltas: Vec::new(),
             #[cfg(feature = "debug")]

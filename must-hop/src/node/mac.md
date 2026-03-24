@@ -107,37 +107,38 @@ Offset is the difference in perceived instant at N compared to the GW.
 
 ## Block diagram
 
-```mermaid
-graph TD
-  GW["GW"]
-  dup["Δup"]
-  ddown["Δdown"]
-  TGk["T_G[k]"]
-  thw["T_hw[k]"]
-
-
-
-```
-
 ### Calculations with `skew_ratio`
 
 ![block diagram](./time_sync.svg)
-<img src="./time_sync.svg">
 
-- Difference equations
-
-$$
-x[k] = \begin{bmatrix}T_n[k] \\ t_{hw}[k] \\ S[k]\end{bmatrix},\quad u[k] = \begin{bmatrix} T_G[k]\\ t_{hw}[k] \\ \Delta up[k] \end{bmatrix}
-$$
+### Difference equations
 
 $$
-\begin{aligned}
-T_N[k] &= T_G[k] + delay \\
-&= T_G[k] + (\frac{\Delta up + \Delta down}{2})\\
-&= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + \Delta local))}{2})  \\
-&= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + (t_{hw}[k] - t_{hw}[k-1]\cdot S[k]) ))}{2})
-\end{aligned}
+x[k] = \begin{bmatrix}T_N[k] \\ t_{hw}[k] \\ S[k]\end{bmatrix},\quad u[k] = \begin{bmatrix} T_G[k]\\\Delta up[k] \end{bmatrix}
 $$
+
+- Calculation of $T_N[k]$
+  $$
+  \begin{aligned}
+  T_N[k] &= T_G[k] + delay \\
+  &= T_G[k] + (\frac{\Delta up + \Delta down}{2})\\
+  &= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + \Delta local))}{2})  \\
+  &= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + (t_{hw}[k] - t_{hw}[k-1]\cdot S[k]) ))}{2})
+  \end{aligned}
+  $$
+- Calculation of $t_{hw}[k]$
+  $$
+  t_{hw}[k] = t_{hw}[k]\\
+  $$
+- Calculation of skew ratio $S[k]$
+  $$
+  \begin{aligned}
+  S[k] &= S[k-1] +K_p \cdot \text{error}\\
+  &= S[k-1] + K_p \cdot (\Delta gw - \Delta local) \\
+  &= S[k-1] + K_p \cdot ((T_N[k] - T_N[k-1]) - (t_{hw}[k] - t_{hw}[k-1])\cdot S[k-1])\\
+  &=
+  \end{aligned}
+  $$
 
 ```python
 # At timestamp
