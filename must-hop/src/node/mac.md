@@ -113,6 +113,17 @@ Offset is the difference in perceived instant at N compared to the GW.
 
 ### Difference equations
 
+#### simple model first
+
+Without network delay.
+$$x[k]=T_N[k],\quad u[k]=S[k],\quad d[k]=\Delta t_{hw}[k]$$
+
+$$
+T_N[k+1] = T_N[k- + \Delta t_{hw}[k]\cdot u[k]
+$$
+
+#### now complicated
+
 $$
 x[k] = \begin{bmatrix}T_N[k] \\ t_{hw}[k] \\ S[k]\end{bmatrix},\quad u[k] = \begin{bmatrix} T_G[k]\\\Delta up[k] \end{bmatrix}
 $$
@@ -123,8 +134,8 @@ $$
   T_N[k] &= T_G[k] + delay \\
   &= T_G[k] + (\frac{\Delta up + \Delta down}{2})\\
   &= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + \Delta local))}{2})  \\
-  &= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + (t_{hw}[k] - t_{hw}[k-1])\cdot S[k]) ))}{2})\\
-  &= T_G[k](1 + 1/2) + \frac{\Delta up[k]}{2} +
+  &= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + (t_{hw}[k] - t_{hw}[k-1])\cdot S[k]) )}{2})\\
+  &= T_G[k](1 + 1/2) + \frac{1}{2}\Delta up[k] - \frac{1}{2}T_G[k-1] + \frac{1}{2}S[k]t_{hw}[k] - \frac{1}{2}S[k]t_{hw}[k-1]
   \end{aligned}
   $$
 - Calculation of $t_{hw}[k]$
@@ -138,7 +149,7 @@ $$
   S[k] &= S[k-1] +K_p \cdot \text{error}\\
   &= S[k-1] + K_p \cdot (\Delta gw - \Delta local) \\
   &= S[k-1] + K_p \cdot ((T_N[k] - T_N[k-1]) - (t_{hw}[k] - t_{hw}[k-1])\cdot S[k-1])\\
-  &=
+  &= S[k-1] + K_p (T_N[k] - T_N[k-1] - S[k]t_{hw}[k] - S[k-1]t_{hw}[k-1])
   \end{aligned}
   $$
 
