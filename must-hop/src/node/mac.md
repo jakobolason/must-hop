@@ -123,7 +123,8 @@ $$
   T_N[k] &= T_G[k] + delay \\
   &= T_G[k] + (\frac{\Delta up + \Delta down}{2})\\
   &= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + \Delta local))}{2})  \\
-  &= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + (t_{hw}[k] - t_{hw}[k-1]\cdot S[k]) ))}{2})
+  &= T_G[k] + (\frac{\Delta up + (T_G[k] - (T_G[k-1] + (t_{hw}[k] - t_{hw}[k-1])\cdot S[k]) ))}{2})\\
+  &= T_G[k](1 + 1/2) + \frac{\Delta up[k]}{2} +
   \end{aligned}
   $$
 - Calculation of $t_{hw}[k]$
@@ -131,6 +132,7 @@ $$
   t_{hw}[k] = t_{hw}[k]\\
   $$
 - Calculation of skew ratio $S[k]$
+
   $$
   \begin{aligned}
   S[k] &= S[k-1] +K_p \cdot \text{error}\\
@@ -138,6 +140,19 @@ $$
   &= S[k-1] + K_p \cdot ((T_N[k] - T_N[k-1]) - (t_{hw}[k] - t_{hw}[k-1])\cdot S[k-1])\\
   &=
   \end{aligned}
+  $$
+
+- State space matrices
+  $$
+  \begin{bmatrix}
+  T_N[k]\\ t_{hw}[k] \\ S[k]
+  \end{bmatrix} =
+  \begin{bmatrix}
+  -1 & 0 & 0 \\
+  0 & 0 & 0  \\
+  0 & 0 & 0
+  \end{bmatrix} \begin{bmatrix}T_N[k-1] \\ t_{hw}[k-1] \\ S[k-1]\end{bmatrix}
+  +\begin{bmatrix} T_G[k] & \Delta up[k]\end{bmatrix}\begin{bmatrix} 1 \\ 1 \\ 1\end{bmatrix}
   $$
 
 ```python
