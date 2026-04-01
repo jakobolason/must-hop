@@ -1,5 +1,6 @@
 /// This contains node implementations for Lora
 use super::node::{MHNode, MHPacket};
+use lora_modulation::BaseBandModulationParams;
 use lora_phy::mod_params::{
     Bandwidth, CodingRate, ModulationParams, PacketParams, SpreadingFactor,
 };
@@ -63,6 +64,18 @@ where
     _tp: TransmitParameters,
     pkt_params: PacketParams,
     mdltn_params: ModulationParams,
+}
+
+impl<'a, RK, DLY, const SIZE: usize, const LEN: usize> LoraNode<'a, RK, DLY, SIZE, LEN>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    fn calc_toa(&self, bytes: u32) -> u64 {
+        // Using the formula to calculate time-on-air
+        let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
+        todo!()
+    }
 }
 
 impl<RK, DLY, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN>
