@@ -536,9 +536,9 @@ where
                 .await;
             match conn {
                 Ok(conn) => {
-                    let (rec, rx_hw_timestamp) = node.receive(conn, rx_buffer).await?;
+                    let (rec, rx_pkt) = node.receive(conn, rx_buffer).await?;
                     // Check for being heartbeat
-                    self.sync_epoch(&rec, rx_hw_timestamp);
+                    self.sync_epoch(&rec, rx_pkt.instant);
                     return Ok(Some(rec));
                 }
                 Err(e) => {
@@ -590,9 +590,9 @@ where
                 .listen(rx_buffer, Some(core::time::Duration::from_millis(500)))
                 .await;
             if let Ok(conn) = conn
-                && let Ok((pkts, rx_hw_timestamp)) = node.receive(conn, rx_buffer).await
+                && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
             {
-                self.sync_epoch(&pkts, rx_hw_timestamp);
+                self.sync_epoch(&pkts, rx_pkt.instant);
                 received_packets = pkts;
             }
         }

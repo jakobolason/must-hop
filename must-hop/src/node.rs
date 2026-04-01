@@ -47,10 +47,11 @@ pub struct MHPacket<const SIZE: usize> {
     pub hop_to_gw: u8,
 }
 
+#[derive(Debug, Clone)]
 pub struct RxPacket {
     pub instant: Instant,
     pub payload_size: u8,
-    pub estimaed_toa: u32,
+    pub estimated_toa: u32,
 }
 
 /// Any radio wanting to be a node, has to be able to transmit and receive
@@ -76,7 +77,7 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
         &mut self,
         conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> impl Future<Output = Result<(Vec<MHPacket<SIZE>, LEN>, Instant), Self::Error>>;
+    ) -> impl Future<Output = Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), Self::Error>>;
 
     /// Make the node listen for a preample, giving a connection relative to the physical layer
     /// used. Optionally a duration to listen in can be given.

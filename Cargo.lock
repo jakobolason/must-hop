@@ -748,7 +748,6 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 [[package]]
 name = "lora-modulation"
 version = "0.1.5"
-source = "git+https://github.com/lora-rs/lora-rs.git?rev=a5172c1b#a5172c1b6f109c811459f047b985041efe14a829"
 dependencies = [
  "defmt 0.3.100",
 ]
@@ -756,7 +755,6 @@ dependencies = [
 [[package]]
 name = "lora-phy"
 version = "3.0.2-alpha"
-source = "git+https://github.com/lora-rs/lora-rs.git?rev=a5172c1b#a5172c1b6f109c811459f047b985041efe14a829"
 dependencies = [
  "defmt 0.3.100",
  "document-features",
@@ -782,7 +780,6 @@ dependencies = [
 [[package]]
 name = "lorawan"
 version = "0.9.1"
-source = "git+https://github.com/lora-rs/lora-rs.git?rev=a5172c1b#a5172c1b6f109c811459f047b985041efe14a829"
 dependencies = [
  "aes",
  "cmac",
@@ -794,7 +791,6 @@ dependencies = [
 [[package]]
 name = "lorawan-device"
 version = "0.12.2"
-source = "git+https://github.com/lora-rs/lora-rs.git?rev=a5172c1b#a5172c1b6f109c811459f047b985041efe14a829"
 dependencies = [
  "defmt 0.3.100",
  "document-features",
@@ -809,7 +805,6 @@ dependencies = [
 [[package]]
 name = "lorawan-macros"
 version = "0.1.0"
-source = "git+https://github.com/lora-rs/lora-rs.git?rev=a5172c1b#a5172c1b6f109c811459f047b985041efe14a829"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1357,3 +1352,8 @@ name = "winnow"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09dac053f1cd375980747450bfc7250c264eaae0583872e845c0c7cd578872b5"
+
+[[patch.unused]]
+name = "lora-modulation"
+version = "0.1.5"
+source = "git+https://github.com/lora-rs/lora-rs.git?rev=a5172c1b#a5172c1b6f109c811459f047b985041efe14a829"

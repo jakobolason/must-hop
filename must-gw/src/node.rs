@@ -143,7 +143,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         &mut self,
         _conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, Instant), Self::Error> {
+    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, must_hop::node::RxPacket), Self::Error> {
         // Check if any packets came in whilst transitioning from listen to receive
         // let pkts: Vec<RxPacket> = match self.radio.receive() {
         //     Ok(Some(packet)) => packet,
@@ -196,7 +196,14 @@ impl MHNode<SIZE, LEN> for GWNode {
                 }
             };
         }
-        Ok((rec_packets, rx_hw_timestamp))
+        Ok((
+            rec_packets,
+            must_hop::node::RxPacket {
+                instant: rx_hw_timestamp,
+                payload_size: 255,
+                estimated_toa: 0,
+            },
+        ))
     }
 
     async fn listen(

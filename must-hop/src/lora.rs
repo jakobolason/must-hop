@@ -1,3 +1,5 @@
+use crate::node::RxPacket;
+
 /// This contains node implementations for Lora
 use super::node::{MHNode, MHPacket};
 use lora_modulation::BaseBandModulationParams;
@@ -64,6 +66,7 @@ where
     _tp: TransmitParameters,
     pkt_params: PacketParams,
     mdltn_params: ModulationParams,
+    preamble_instant: Option<Instant>,
 }
 
 impl<'a, RK, DLY, const SIZE: usize, const LEN: usize> LoraNode<'a, RK, DLY, SIZE, LEN>
@@ -151,7 +154,7 @@ where
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
         rec_buf: &[u8; TRANSMISSION_BUFFER],
-    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Instant), RadioError> {
+    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), RadioError> {
         // First we check if we actually got something
         let rx_hardware_timestamp = Instant::now();
         trace!("received pkts!");
@@ -177,8 +180,14 @@ where
             }
         };
         trace!("Got packet!");
+        let estimated_toa = self.calc_toa(len);
+        let rx_pkt = RxPacket {
+            instant: self.preamble_instant.unwrap_or(rx_hardware_timestamp),
+            payload_size: len,
+            estimated_toa,
+        };
 
-        Ok((packets, rx_hardware_timestamp))
+        Ok((packets, rx_pkt))
     }
 
     async fn listen(
@@ -187,11 +196,12 @@ where
         with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, RadioError> {
         self.prepare_for_rx(RxMode::Continuous).await?;
+        let get_preamb_instant = || self.preamble_instant = Some(Instant::now());
         match with_timeout {
             Some(timeout) => {
                 match embassy_time::with_timeout(
                     embassy_time::Duration::from_micros(timeout.as_micros() as u64),
-                    self.lora.rx(&self.pkt_params, rec_buf),
+                    self.lora.rx(&self.pkt_params, rec_buf, get_preamb_instant),
                 )
                 .await
                 {
@@ -199,7 +209,10 @@ where
                     Err(_) => Err(RadioError::ReceiveTimeout),
                 }
             }
-            None => Ok(self.lora.rx(&self.pkt_params, rec_buf).await),
+            None => Ok(self
+                .lora
+                .rx(&self.pkt_params, rec_buf, get_preamb_instant)
+                .await),
         }
     }
 
@@ -229,6 +242,7 @@ where
             _tp: tp,
             pkt_params,
             mdltn_params,
+            preamble_instant: None,
         })
     }
 

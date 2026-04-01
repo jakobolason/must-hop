@@ -19,8 +19,10 @@ tokio = { version = "1.49.0", features = ["rt", "macros"], optional = true }
 
 embedded-hal = { version = "1.0.0", optional = true }
 
-lora-phy = { git = "https://github.com/lora-rs/lora-rs.git", rev = "a5172c1b" }
-lora-modulation = { git = "https://github.com/lora-rs/lora-rs.git", rev = "a5172c1b" }
+# lora-phy = { git = "https://github.com/lora-rs/lora-rs.git", rev = "a5172c1b" }
+# lora-modulation = { git = "https://github.com/lora-rs/lora-rs.git", rev = "a5172c1b" }
+lora-phy = { path = "../../../repos/pr-lora-rs/lora-phy" }
+lora-modulation = { path = "../../../repos/pr-lora-rs/lora-modulation" }
 
 [features]
 default = [
