@@ -71,10 +71,10 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
-    fn calc_toa(&self, bytes: u32) -> u64 {
+    fn calc_toa(&self, bytes: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
-        todo!()
+        bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes)
     }
 }
 

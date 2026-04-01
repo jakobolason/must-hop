@@ -47,6 +47,12 @@ pub struct MHPacket<const SIZE: usize> {
     pub hop_to_gw: u8,
 }
 
+pub struct RxPacket {
+    pub instant: Instant,
+    pub payload_size: u8,
+    pub estimaed_toa: u32,
+}
+
 /// Any radio wanting to be a node, has to be able to transmit and receive
 pub trait MHNode<const SIZE: usize, const LEN: usize> {
     #[cfg(not(feature = "in_std"))]
