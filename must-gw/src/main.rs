@@ -4,6 +4,7 @@ use std::{
 };
 
 use log::error;
+use loragw::RxPacket;
 use must_gw::{create_concentrator, node};
 use must_hop::node::{
     mesh_router::MeshRouter,
@@ -73,7 +74,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     // log::info!("got pkts: {:?} ", pkt);
     let gw_source_id = 1;
     let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
-    let mut sync_pin = gpio.get(21).expect("Failed to get GPIO 21").into_output();
+    let sync_pin = gpio.get(21).expect("Failed to get GPIO 21").into_output();
 
     let mac = TdmaMac::<_, 128>::new(
         embassy_time::Duration::from_secs(1),
@@ -99,7 +100,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     );
     log::info!("Now start loop..");
     loop {
-        let mut rec_buf = Vec::new();
+        let mut rec_buf = None;
         match router.tick(&mut rec_buf).await {
             Ok(res) => {
                 if !res.is_empty() {
@@ -108,11 +109,6 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
             }
             Err(e) => error!("Error in ticking: {:?}", e),
         }
-        // router.listen(&mut rec_buf).await?;
-        // let pkts = router.receive((), &rec_buf).await?;
-        // if !pkts.is_empty() {
-        //     log::info!("got pkts! : {:?}", pkts);
-        // }
     }
 }
 

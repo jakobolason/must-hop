@@ -145,11 +145,11 @@ impl MHNode<SIZE, LEN> for GWNode {
         _conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
     ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, must_hop::node::RxPacket), Self::Error> {
-        // Check if any packets came in whilst transitioning from listen to receive
-        // let pkts: Vec<RxPacket> = match self.radio.receive() {
-        //     Ok(Some(packet)) => packet,
-        //     _ => Vec::new(),
-        // };
+        // This is a hack, but we only want one entry
+        let Some(pkt) = rec_buf else {
+            return Err(loragw::Error::Generic);
+        };
+
         let rx_hw_timestamp = Instant::now();
         let mut rx_heartbeat_timestamp = None;
         let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
@@ -159,50 +159,39 @@ impl MHNode<SIZE, LEN> for GWNode {
             .get_instcnt()
             .unwrap_or(std::time::Duration::ZERO);
 
-        for pkt in rec_buf
-        /*.iter().chain(pkts.iter())*/
-        {
-            let pkt = match pkt {
-                RxPacket::LoRa(rx_packet) => rx_packet,
-                _ => continue,
-            };
-            let raw_bytes = &pkt.payload;
-            log::info!(
-                "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
-                pkt.spreading,
-                pkt.bandwidth,
-                pkt.freq,
-                pkt.rssi,
-                pkt.snr
-            );
+        let pkt = match pkt {
+            RxPacket::LoRa(rx_packet) => rx_packet,
+            RxPacket::FSK(_) => return Err(loragw::Error::Generic),
+        };
+        let raw_bytes = &pkt.payload;
+        log::info!(
+            "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
+            pkt.spreading,
+            pkt.bandwidth,
+            pkt.freq,
+            pkt.rssi,
+            pkt.snr
+        );
 
-            match postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes) {
-                Ok(packets) => {
-                    log::info!(
-                        "SUCCESS !!!! Received amount of packets: {:?}",
-                        packets.len()
-                    );
-                    for packet in packets {
-                        if packet.packet_type == PacketType::HeartBeat
-                            && rx_heartbeat_timestamp.is_none()
-                        {
-                            // The returned instant is the first heartbeat packet captured
-                            let pkt_hw_us = pkt.timestamp.as_micros() as u32;
-                            let radio_now_us = now_radio.as_micros() as u32;
-                            let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
-                            rx_heartbeat_timestamp =
-                                Some(now_host - embassy_time::Duration::from_micros(age_us as u64));
-                        }
-                        // log::info!("Packet {:?}", packet);
-                        rec_packets.push(packet).map_err(|_| loragw::Error::Data)?;
-                    }
-                }
-                Err(e) => {
-                    log::error!("Error deserializing MHPacket: {:?}", e);
-                    continue;
-                }
-            };
+        let packets = postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes)
+            .map_err(|_| loragw::Error::Generic)?;
+        log::info!(
+            "SUCCESS !!!! Received amount of packets: {:?}",
+            packets.len()
+        );
+        for packet in packets {
+            if packet.packet_type == PacketType::HeartBeat && rx_heartbeat_timestamp.is_none() {
+                // The returned instant is the first heartbeat packet captured
+                let pkt_hw_us = pkt.timestamp.as_micros() as u32;
+                let radio_now_us = now_radio.as_micros() as u32;
+                let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
+                rx_heartbeat_timestamp =
+                    Some(now_host - embassy_time::Duration::from_micros(age_us as u64));
+            }
+            // log::info!("Packet {:?}", packet);
+            rec_packets.push(packet).map_err(|_| loragw::Error::Data)?;
         }
+
         Ok((
             rec_packets,
             must_hop::node::RxPacket {
@@ -220,8 +209,6 @@ impl MHNode<SIZE, LEN> for GWNode {
     ) -> Result<Self::Connection, Self::Error> {
         let start_time = Instant::now();
         // let timeout = Duration::from_secs(1);
-        *rec_buf = None;
-
         loop {
             if let Some(pkt) = self.fetched_packets.pop_front() {
                 *rec_buf = Some(pkt);
