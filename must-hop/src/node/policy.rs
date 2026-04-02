@@ -1,7 +1,7 @@
 #[cfg(not(feature = "debug"))]
 use core::marker::PhantomData;
 
-use crate::node::{MHNode, PacketType};
+use crate::node::{MHNode, PacketType, RxPacket};
 
 #[cfg(not(feature = "in_std"))]
 use defmt::{debug, error, info};
@@ -358,7 +358,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
     fn update_skew_and_stamp(
         &self,
         hb: &SlotAllocation,
-        rx_hw_timestamp: Instant,
+        rx_pkt: RxPacket,
     ) -> (f32, Option<(u64, Instant)>) {
         let (old_gps, last_stamp) = match self.time_sync {
             Some(stamps) => stamps,
@@ -370,7 +370,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         };
         // Calculate skews
         // let my_stamp = self.current_gps_time((old_gps, last_stamp));
-        let my_diff = (rx_hw_timestamp - last_stamp).as_millis();
+        let my_diff = (rx_pkt.instant - last_stamp).as_millis();
         let predicted_elapsed = (my_diff as f32 * self.skew_ratio) as u64;
         let my_stamp = predicted_elapsed + old_gps;
 
@@ -405,7 +405,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         let kp = 0.00005;
         let err = gw_diff - predicted_elapsed as i64;
         let skew_ratio = self.skew_ratio + kp * err as f32;
-        let time_sync = Some((current_true_time as u64, rx_hw_timestamp));
+        let time_sync = Some((current_true_time as u64, rx_pkt.instant));
 
         // Debug info:
         if my_stamp != hb.gps_time_ms {
@@ -421,7 +421,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         (skew_ratio, time_sync)
     }
 
-    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_hw_timestamp: Instant) {
+    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
         for pkt in pkts {
             if pkt.packet_type == PacketType::HeartBeat
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
@@ -429,16 +429,15 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
                     // Calculate updated skew and timestamps
-                    let (skew_ratio, time_sync) =
-                        self.update_skew_and_stamp(&alloc, rx_hw_timestamp);
+                    let (skew_ratio, time_sync) = self.update_skew_and_stamp(&alloc, rx_pkt);
                     self.skew_ratio = skew_ratio;
                     self.time_sync = time_sync;
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {
                         // Cast to i64 to not panic at my_time < alloc
-                        (self.gps_time_at(stamps, rx_hw_timestamp) as i64
-                            - alloc.gps_time_ms as i64) as i16
+                        (self.gps_time_at(stamps, rx_pkt.instant) as i64 - alloc.gps_time_ms as i64)
+                            as i16
                     } else {
                         0
                     };
@@ -538,7 +537,7 @@ where
                 Ok(conn) => {
                     let (rec, rx_pkt) = node.receive(conn, rx_buffer).await?;
                     // Check for being heartbeat
-                    self.sync_epoch(&rec, rx_pkt.instant);
+                    self.sync_epoch(&rec, rx_pkt);
                     return Ok(Some(rec));
                 }
                 Err(e) => {
@@ -592,7 +591,7 @@ where
             if let Ok(conn) = conn
                 && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
             {
-                self.sync_epoch(&pkts, rx_pkt.instant);
+                self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
             }
         }

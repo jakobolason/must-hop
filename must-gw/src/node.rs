@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use embassy_time::{Duration, Instant, Timer};
 use log::trace;
 use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
-use must_hop::node::{MHNode, MHPacket};
+use must_hop::node::{MHNode, MHPacket, PacketType};
 use postcard::to_slice;
 
 const SIZE: usize = 128;
@@ -116,7 +116,7 @@ impl GWNode {
 impl MHNode<SIZE, LEN> for GWNode {
     type Error = loragw::Error;
     type Connection = ();
-    type ReceiveBuffer = Vec<RxPacket>;
+    type ReceiveBuffer = Option<RxPacket>;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
         packets
@@ -139,6 +139,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         Ok(())
     }
 
+    /// The returned instant is the first heartbeat packet captured
     async fn receive(
         &mut self,
         _conn: Self::Connection,
@@ -149,7 +150,8 @@ impl MHNode<SIZE, LEN> for GWNode {
         //     Ok(Some(packet)) => packet,
         //     _ => Vec::new(),
         // };
-        let mut rx_hw_timestamp = Instant::now();
+        let rx_hw_timestamp = Instant::now();
+        let mut rx_heartbeat_timestamp = None;
         let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
         let now_host = Instant::now();
         let now_radio = self
@@ -173,11 +175,6 @@ impl MHNode<SIZE, LEN> for GWNode {
                 pkt.rssi,
                 pkt.snr
             );
-            // calculate the correct timestamp for receiving this packet
-            let pkt_hw_us = pkt.timestamp.as_micros() as u32;
-            let radio_now_us = now_radio.as_micros() as u32;
-            let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
-            rx_hw_timestamp = now_host - embassy_time::Duration::from_micros(age_us as u64);
 
             match postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes) {
                 Ok(packets) => {
@@ -186,8 +183,18 @@ impl MHNode<SIZE, LEN> for GWNode {
                         packets.len()
                     );
                     for packet in packets {
+                        if packet.packet_type == PacketType::HeartBeat
+                            && rx_heartbeat_timestamp.is_none()
+                        {
+                            // The returned instant is the first heartbeat packet captured
+                            let pkt_hw_us = pkt.timestamp.as_micros() as u32;
+                            let radio_now_us = now_radio.as_micros() as u32;
+                            let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
+                            rx_heartbeat_timestamp =
+                                Some(now_host - embassy_time::Duration::from_micros(age_us as u64));
+                        }
                         // log::info!("Packet {:?}", packet);
-                        rec_packets.push(packet).map_err(|_| loragw::Error::Data)?
+                        rec_packets.push(packet).map_err(|_| loragw::Error::Data)?;
                     }
                 }
                 Err(e) => {
@@ -199,7 +206,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         Ok((
             rec_packets,
             must_hop::node::RxPacket {
-                instant: rx_hw_timestamp,
+                instant: rx_heartbeat_timestamp.unwrap_or(rx_hw_timestamp),
                 payload_size: 255,
                 estimated_toa: 0,
             },
@@ -213,11 +220,11 @@ impl MHNode<SIZE, LEN> for GWNode {
     ) -> Result<Self::Connection, Self::Error> {
         let start_time = Instant::now();
         // let timeout = Duration::from_secs(1);
-        rec_buf.clear();
+        *rec_buf = None;
 
         loop {
-            if !self.fetched_packets.is_empty() {
-                rec_buf.extend(self.fetched_packets.drain(..));
+            if let Some(pkt) = self.fetched_packets.pop_front() {
+                *rec_buf = Some(pkt);
                 return Ok(());
             }
             if let Some(packets) = self.radio.receive()? {
