@@ -18,3 +18,5 @@ heapless = "0.9.2"
 tokio = { version = "1.49.0", features = ["full"] }
 log = "0.4.19"
 embassy-time = { version = "0.5.0", features = ["std", "generic-queue-8"] }
+
+lora-modulation = { workspace = true }

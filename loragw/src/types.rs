@@ -1,3 +1,4 @@
+use lora_modulation::{CodingRate, SpreadingFactor};
 use serde::{Deserialize, Serialize};
 
 use crate::{error, llg};
@@ -73,6 +74,23 @@ impl TryFrom<u32> for Spreading {
         })
     }
 }
+
+impl From<Spreading> for SpreadingFactor {
+    fn from(spreading: Spreading) -> Self {
+        match spreading {
+            Spreading::Undefined => SpreadingFactor::_5,
+            Spreading::SF5 => SpreadingFactor::_5,
+            Spreading::SF6 => SpreadingFactor::_6,
+            Spreading::SF7 => SpreadingFactor::_7,
+            Spreading::SF8 => SpreadingFactor::_8,
+            Spreading::SF9 => SpreadingFactor::_9,
+            Spreading::SF10 => SpreadingFactor::_10,
+            Spreading::SF11 => SpreadingFactor::_11,
+            Spreading::SF12 => SpreadingFactor::_12,
+            Spreading::Multi => SpreadingFactor::_5,
+        }
+    }
+}
 /// Configured receive bandwidth.
 #[derive(Debug, Clone, Copy)]
 pub enum Bandwidth {
@@ -100,6 +118,17 @@ impl TryFrom<u32> for Bandwidth {
                 return Err(error::Error::Data);
             }
         })
+    }
+}
+
+impl From<Bandwidth> for lora_modulation::Bandwidth {
+    fn from(bw: Bandwidth) -> Self {
+        match bw {
+            Bandwidth::Undefined => lora_modulation::Bandwidth::_7KHz,
+            Bandwidth::BW125kHz => lora_modulation::Bandwidth::_125KHz,
+            Bandwidth::BW250kHz => lora_modulation::Bandwidth::_250KHz,
+            Bandwidth::BW500kHz => lora_modulation::Bandwidth::_500KHz,
+        }
     }
 }
 
@@ -132,6 +161,18 @@ impl TryFrom<u32> for Coderate {
                 return Err(error::Error::Data);
             }
         })
+    }
+}
+
+impl From<Coderate> for CodingRate {
+    fn from(cr: Coderate) -> Self {
+        match cr {
+            Coderate::Undefined => CodingRate::_4_5,
+            Coderate::Cr4_5 => CodingRate::_4_5,
+            Coderate::Cr4_6 => CodingRate::_4_6,
+            Coderate::Cr4_7 => CodingRate::_4_7,
+            Coderate::Cr4_8 => CodingRate::_4_8,
+        }
     }
 }
 

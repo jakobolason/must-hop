@@ -2,8 +2,11 @@ use std::collections::VecDeque;
 
 use embassy_time::{Duration, Instant, Timer};
 use log::trace;
-use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
-use must_hop::node::{MHNode, MHPacket, PacketType};
+use lora_modulation::BaseBandModulationParams;
+use loragw::{
+    Concentrator, Error, Running, RxPacket, RxPacketLoRa, TxPacket, TxPacketLoRa, TxStatus,
+};
+use must_hop::node::{MHNode, MHPacket};
 use postcard::to_slice;
 
 const SIZE: usize = 128;
@@ -111,6 +114,15 @@ impl GWNode {
             ..self.pkt_params.clone().into()
         }))
     }
+    fn calc_toa(&self, rx_pkt: &RxPacketLoRa) -> u32 {
+        // Using the formula to calculate time-on-air
+        let bb_mod = BaseBandModulationParams::new(
+            rx_pkt.spreading.into(),
+            rx_pkt.bandwidth.into(),
+            rx_pkt.coderate.into(),
+        );
+        bb_mod.time_on_air_us(None, true, rx_pkt.payload.len() as u8)
+    }
 }
 
 impl MHNode<SIZE, LEN> for GWNode {
@@ -150,8 +162,6 @@ impl MHNode<SIZE, LEN> for GWNode {
             return Err(loragw::Error::Generic);
         };
 
-        let rx_hw_timestamp = Instant::now();
-        let mut rx_heartbeat_timestamp = None;
         let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
         let now_host = Instant::now();
         let now_radio = self
@@ -179,15 +189,13 @@ impl MHNode<SIZE, LEN> for GWNode {
             "SUCCESS !!!! Received amount of packets: {:?}",
             packets.len()
         );
+
+        // Calculate our local ticks when this was captured
+        let pkt_hw_us = pkt.timestamp.as_micros() as u32;
+        let radio_now_us = now_radio.as_micros() as u32;
+        let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
+        let rx_heartbeat_timestamp = now_host - embassy_time::Duration::from_micros(age_us as u64);
         for packet in packets {
-            if packet.packet_type == PacketType::HeartBeat && rx_heartbeat_timestamp.is_none() {
-                // The returned instant is the first heartbeat packet captured
-                let pkt_hw_us = pkt.timestamp.as_micros() as u32;
-                let radio_now_us = now_radio.as_micros() as u32;
-                let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
-                rx_heartbeat_timestamp =
-                    Some(now_host - embassy_time::Duration::from_micros(age_us as u64));
-            }
             // log::info!("Packet {:?}", packet);
             rec_packets.push(packet).map_err(|_| loragw::Error::Data)?;
         }
@@ -195,9 +203,9 @@ impl MHNode<SIZE, LEN> for GWNode {
         Ok((
             rec_packets,
             must_hop::node::RxPacket {
-                instant: rx_heartbeat_timestamp.unwrap_or(rx_hw_timestamp),
-                payload_size: 255,
-                estimated_toa: 0,
+                instant: rx_heartbeat_timestamp,
+                payload_size: pkt.payload.len() as u8,
+                estimated_toa: self.calc_toa(pkt),
             },
         ))
     }
