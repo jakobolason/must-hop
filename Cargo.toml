@@ -7,8 +7,10 @@ exclude = [
   "examples/gateway/sx1302",
 ]
 
-[patch.crates-io]
-lora-modulation = { git = "https://github.com/lora-rs/lora-rs.git", rev = "a5172c1b" }
+[workspace.dependencies]
+
+lora-phy = { path = "../../repos/pr-lora-rs/lora-phy" }
+lora-modulation = { path = "../../repos/pr-lora-rs/lora-modulation" }
 
 [profile.dev]
 opt-level = "s"
