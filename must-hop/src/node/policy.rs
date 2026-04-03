@@ -359,6 +359,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         &self,
         hb: &SlotAllocation,
         rx_pkt: RxPacket,
+        sending_instant: Instant,
     ) -> (f32, Option<(u64, Instant)>) {
         let (old_gps, last_stamp) = match self.time_sync {
             Some(stamps) => stamps,
@@ -368,11 +369,20 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 return (1_f32, Some((hb.gps_time_ms, Instant::now())));
             }
         };
+
         // Calculate skews
         // let my_stamp = self.current_gps_time((old_gps, last_stamp));
-        let my_diff = (rx_pkt.instant - last_stamp).as_millis();
+        let my_diff = (sending_instant - last_stamp).as_millis();
         let predicted_elapsed = (my_diff as f32 * self.skew_ratio) as u64;
         let my_stamp = predicted_elapsed + old_gps;
+        // instant was just when we received the preamble. But perhaps the difference between that
+        // instant and now is the same as ToA
+        let now = Instant::now();
+        let difference = now - rx_pkt.rx_done_instant;
+        info!(
+            "now: {}, then: {}, difference {}, toa: {}, estimated send: {}",
+            now, rx_pkt.rx_done_instant, difference, rx_pkt.estimated_toa, sending_instant
+        );
 
         // Check if a t3 delta is availale for us
         let (delay, offset) =
@@ -405,7 +415,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         let kp = 0.00005;
         let err = gw_diff - predicted_elapsed as i64;
         let skew_ratio = self.skew_ratio + kp * err as f32;
-        let time_sync = Some((current_true_time as u64, rx_pkt.instant));
+        let time_sync = Some((current_true_time as u64, sending_instant));
 
         // Debug info:
         if my_stamp != hb.gps_time_ms {
@@ -426,18 +436,27 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             if pkt.packet_type == PacketType::HeartBeat
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
             {
+                // This is meant to approximate the local ticks when the hb packet was sent
+                let sending_instant = match rx_pkt.preamble_instant {
+                    Some(ins) => ins,
+                    // If no preamble instant, we approximate it
+                    None => {
+                        rx_pkt.rx_done_instant - Duration::from_millis(rx_pkt.estimated_toa as u64)
+                    }
+                };
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
                     // Calculate updated skew and timestamps
-                    let (skew_ratio, time_sync) = self.update_skew_and_stamp(&alloc, rx_pkt);
+                    let (skew_ratio, time_sync) =
+                        self.update_skew_and_stamp(&alloc, rx_pkt, sending_instant);
                     self.skew_ratio = skew_ratio;
                     self.time_sync = time_sync;
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {
                         // Cast to i64 to not panic at my_time < alloc
-                        (self.gps_time_at(stamps, rx_pkt.instant) as i64 - alloc.gps_time_ms as i64)
-                            as i16
+                        (self.gps_time_at(stamps, sending_instant) as i64
+                            - alloc.gps_time_ms as i64) as i16
                     } else {
                         0
                     };

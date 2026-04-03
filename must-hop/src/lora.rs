@@ -182,7 +182,8 @@ where
         trace!("Got packet!");
         let estimated_toa = self.calc_toa(len);
         let rx_pkt = RxPacket {
-            instant: self.preamble_instant.unwrap_or(rx_hardware_timestamp),
+            preamble_instant: Some(self.preamble_instant.unwrap_or(rx_hardware_timestamp)),
+            rx_done_instant: rx_hardware_timestamp,
             payload_size: len,
             estimated_toa,
         };

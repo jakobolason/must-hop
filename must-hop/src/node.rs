@@ -49,7 +49,8 @@ pub struct MHPacket<const SIZE: usize> {
 
 #[derive(Debug, Clone)]
 pub struct RxPacket {
-    pub instant: Instant,
+    pub preamble_instant: Option<Instant>,
+    pub rx_done_instant: Instant,
     pub payload_size: u8,
     pub estimated_toa: u32,
 }

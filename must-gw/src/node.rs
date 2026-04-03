@@ -203,7 +203,8 @@ impl MHNode<SIZE, LEN> for GWNode {
         Ok((
             rec_packets,
             must_hop::node::RxPacket {
-                instant: rx_heartbeat_timestamp,
+                preamble_instant: None,
+                rx_done_instant: rx_heartbeat_timestamp,
                 payload_size: pkt.payload.len() as u8,
                 estimated_toa: self.calc_toa(pkt),
             },
