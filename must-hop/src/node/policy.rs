@@ -366,7 +366,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             None => {
                 // Short circuit from function if not set
                 info!("TDMA: Initial epoch set");
-                return (1_f32, Some((hb.gps_time_ms, rx_pkt.instant)));
+                return (1_f32, Some((hb.gps_time_ms, sending_instant)));
             }
         };
 
@@ -378,10 +378,13 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         // instant was just when we received the preamble. But perhaps the difference between that
         // instant and now is the same as ToA
         let now = Instant::now();
-        let difference = now - rx_pkt.rx_done_instant;
+        let difference = now - sending_instant;
         info!(
-            "now: {}, then: {}, difference {}, toa: {}, estimated send: {}",
-            now, rx_pkt.rx_done_instant, difference, rx_pkt.estimated_toa, sending_instant
+            "now: {}, estimated send: {}, difference {}, toa: {}",
+            now.as_millis(),
+            sending_instant.as_millis(),
+            difference.as_millis(),
+            rx_pkt.estimated_toa,
         );
 
         // Check if a t3 delta is availale for us
@@ -412,7 +415,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         // let skew = (gw_diff as f32) / (my_diff as f32);
 
         // let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
-        let kp = 0.00005;
+        let kp = 0.00008;
         let err = gw_diff - predicted_elapsed as i64;
         let skew_ratio = self.skew_ratio + kp * err as f32;
         let time_sync = Some((current_true_time as u64, sending_instant));
@@ -438,10 +441,17 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             {
                 // This is meant to approximate the local ticks when the hb packet was sent
                 let sending_instant = match rx_pkt.preamble_instant {
-                    Some(ins) => ins,
+                    Some(ins) => {
+                        info!("preamble instant was Some!");
+                        ins
+                    }
                     // If no preamble instant, we approximate it
                     None => {
-                        rx_pkt.rx_done_instant - Duration::from_millis(rx_pkt.estimated_toa as u64)
+                        info!("preamble instant was None!");
+                        rx_pkt
+                            .rx_done_instant
+                            .checked_sub(Duration::from_micros(rx_pkt.estimated_toa as u64))
+                            .unwrap_or(rx_pkt.rx_done_instant)
                     }
                 };
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me

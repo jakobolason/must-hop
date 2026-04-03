@@ -184,6 +184,7 @@ where
 
         let rx_pkt = RxPacket {
             preamble_instant: self.preamble_instant.take(),
+            // preamble_instant: None,
             rx_done_instant: rx_hardware_timestamp,
             payload_size: len,
             estimated_toa,
@@ -198,7 +199,12 @@ where
         with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, RadioError> {
         self.prepare_for_rx(RxMode::Continuous).await?;
-        let get_preamb_instant = || self.preamble_instant = Some(Instant::now());
+        self.preamble_instant = None;
+        let get_preamb_instant = || {
+            if self.preamble_instant.is_none() {
+                self.preamble_instant = Some(Instant::now())
+            }
+        };
         match with_timeout {
             Some(timeout) => {
                 match embassy_time::with_timeout(

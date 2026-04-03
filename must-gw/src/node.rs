@@ -163,11 +163,6 @@ impl MHNode<SIZE, LEN> for GWNode {
         };
 
         let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
-        let now_host = Instant::now();
-        let now_radio = self
-            .radio
-            .get_instcnt()
-            .unwrap_or(std::time::Duration::ZERO);
 
         let pkt = match pkt {
             RxPacket::LoRa(rx_packet) => rx_packet,
@@ -189,12 +184,18 @@ impl MHNode<SIZE, LEN> for GWNode {
             "SUCCESS !!!! Received amount of packets: {:?}",
             packets.len()
         );
-
-        // Calculate our local ticks when this was captured
-        let pkt_hw_us = pkt.timestamp.as_micros() as u32;
-        let radio_now_us = now_radio.as_micros() as u32;
-        let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
-        let rx_heartbeat_timestamp = now_host - embassy_time::Duration::from_micros(age_us as u64);
+        let now_host = Instant::now();
+        let rx_heartbeat_timestamp = if let Ok(now_radio) = self.radio.get_instcnt() {
+            // Calculate our local ticks when this was captured
+            let pkt_hw_us = pkt.timestamp.as_micros() as u32;
+            let radio_now_us = now_radio.as_micros() as u32;
+            let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
+            now_host
+                .checked_sub(embassy_time::Duration::from_micros(age_us as u64))
+                .unwrap_or(now_host)
+        } else {
+            now_host
+        };
         for packet in packets {
             // log::info!("Packet {:?}", packet);
             rec_packets.push(packet).map_err(|_| loragw::Error::Data)?;
