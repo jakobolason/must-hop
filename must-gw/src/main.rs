@@ -96,7 +96,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         node,
         NetworkManager::new(gw_source_id, 10, 3),
         mac,
-        GatewayPolicy::new(30),
+        GatewayPolicy::new(10),
     );
     log::info!("Now start loop..");
     loop {

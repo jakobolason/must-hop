@@ -366,7 +366,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             None => {
                 // Short circuit from function if not set
                 info!("TDMA: Initial epoch set");
-                return (1_f32, Some((hb.gps_time_ms, Instant::now())));
+                return (1_f32, Some((hb.gps_time_ms, rx_pkt.instant)));
             }
         };
 
