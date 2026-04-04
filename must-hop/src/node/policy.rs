@@ -381,7 +381,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         let now = Instant::now();
         let difference = now - sending_instant;
         info!(
-            "now:\t\t\t{},\t estimated send:\t{},\tdifference:\t{},\ttoa:\t{}",
+            "now:\t | est. send:\t | diff:\t | toa:\t\n\t\t\t{}\t\t{}\t\t{}\t\t{}",
             now.as_millis(),
             sending_instant.as_millis(),
             difference.as_micros(),
@@ -393,15 +393,18 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == self.node_id) {
                 // delta is our T3 - T2
                 let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
-                info!("Delta up:\t\t{}\tDelta down:\t\t{}", delta_up, delta_down);
+
+                info!("Delta up: {} | Delta down: {}", delta_up, delta_down);
+
                 if delta_down.abs() > 300_000 || delta_up.abs() > 300_000 {
                     info!("Rejected deltas!");
                     (0, 0)
                 } else {
                     let clock_offset = (delta_down - *delta_up as i64) / 2;
                     let nw_delay = (delta_down + *delta_up as i64) / 2;
+
                     info!(
-                        "clock offset:\t\t{}\tnetwork delay:\t{}",
+                        "clock offset: {} | network delay: {}",
                         clock_offset, nw_delay
                     );
                     (nw_delay, clock_offset)
@@ -411,7 +414,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             };
 
         // Use the network delay to make up for transmission time, etc.
-        let current_true_time = hb.gps_time_us as i64 + delay;
+        let current_true_time = hb.gps_time_us as i64; // + delay;
         let gw_diff = current_true_time - old_gps as i64;
         // let skew = (gw_diff as f32) / (my_diff as f32);
 
@@ -425,7 +428,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         if my_stamp != hb.gps_time_us {
             let delay: i64 = my_stamp as i64 - hb.gps_time_us as i64;
             info!(
-                "Mesured clock drift:\t{} \terror:\t{},\t\tratio:\t{}\t\t self ratio:\t{}",
+                "Measured drift: {} | err: {} | ratio: {} | self ratio: {}",
                 delay, err, skew_ratio, self.skew_ratio
             );
         } else {

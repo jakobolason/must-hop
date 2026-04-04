@@ -124,7 +124,7 @@ impl GWNode {
         let total_toa_us = bb_mod.time_on_air_us(None, true, rx_pkt.payload.len() as u8);
         let t_sym_ms = bb_mod.symbols_to_ms(1) as f32;
         // calculate the time of just the preamble
-        let preamble_toa_ms = t_sym_ms * (1 as f32 + 4.25);
+        let preamble_toa_ms = t_sym_ms * (8_f32 + 4.25);
         let preamble_toa_us = (preamble_toa_ms * 1000.0) as u32;
         (preamble_toa_us, total_toa_us)
     }
