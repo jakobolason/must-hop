@@ -52,7 +52,7 @@ pub struct RxPacket {
     pub preamble_instant: Option<Instant>,
     pub rx_done_instant: Instant,
     pub payload_size: u8,
-    pub estimated_toa: u32,
+    pub estimated_toa: (u32, u32),
 }
 
 /// Any radio wanting to be a node, has to be able to transmit and receive

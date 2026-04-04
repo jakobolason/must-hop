@@ -74,10 +74,17 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
-    fn calc_toa(&self, bytes: u8) -> u32 {
+    fn calc_toa(&self, bytes: u8) -> (u32, u32) {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
-        bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes)
+        let total_toa_us =
+            bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes);
+
+        let t_sym_ms = bb_mod.symbols_to_ms(1) as f32;
+        // calculate the time of just the preamble
+        let preamble_toa_ms = t_sym_ms * (self._tp.pre_amp as f32 + 4.25);
+        let preamble_toa_us = (preamble_toa_ms * 1000.0) as u32;
+        (preamble_toa_us, total_toa_us)
     }
 }
 

@@ -83,7 +83,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards")
-                .as_millis() as u64,
+                .as_micros() as u64,
             embassy_time::Instant::now(),
         )),
         Some(5),
