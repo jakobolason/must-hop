@@ -381,11 +381,11 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         let now = Instant::now();
         let difference = now - sending_instant;
         info!(
-            "now:\t | est. send:\t | diff:\t | toa:\t\n\t\t\t{}\t\t{}\t\t{}\t\t{}",
-            now.as_millis(),
-            sending_instant.as_millis(),
-            difference.as_micros(),
-            rx_pkt.estimated_toa.1,
+            "now:\t | est. send:\t | diff:\t | toa:\n\t\t{}s\t{}s\t{}ms\t{}ms",
+            now.as_millis() as f32 / 1000.0,
+            sending_instant.as_millis() as f32 / 1000.0,
+            difference.as_micros() as f32 / 1000.0,
+            rx_pkt.estimated_toa.1 as f32 / 1000.0,
         );
 
         // Check if a t3 delta is availale for us
@@ -394,7 +394,11 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 // delta is our T3 - T2
                 let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
 
-                info!("Delta up: {} | Delta down: {}", delta_up, delta_down);
+                info!(
+                    "Delta up: {} | Delta down: {}",
+                    *delta_up as f32 / 1000.0,
+                    delta_down as f32 / 1000.0
+                );
 
                 if delta_down.abs() > 300_000 || delta_up.abs() > 300_000 {
                     info!("Rejected deltas!");
@@ -405,7 +409,8 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
 
                     info!(
                         "clock offset: {} | network delay: {}",
-                        clock_offset, nw_delay
+                        clock_offset as f32 / 1000.0,
+                        nw_delay as f32 / 1000.0
                     );
                     (nw_delay, clock_offset)
                 }
@@ -414,22 +419,25 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             };
 
         // Use the network delay to make up for transmission time, etc.
-        let current_true_time = hb.gps_time_us as i64; // + delay;
+        let current_true_time = hb.gps_time_us as i64; // - delay;
         let gw_diff = current_true_time - old_gps as i64;
         // let skew = (gw_diff as f32) / (my_diff as f32);
 
         // let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
-        let kp = 0.00000008;
+        let kp = 0.00000005;
         let err = gw_diff - predicted_elapsed as i64;
         let skew_ratio = self.skew_ratio + kp * err as f32;
-        let time_sync = Some((current_true_time as u64, sending_instant));
+        let time_sync = Some(((current_true_time - delay) as u64, sending_instant));
 
         // Debug info:
         if my_stamp != hb.gps_time_us {
             let delay: i64 = my_stamp as i64 - hb.gps_time_us as i64;
             info!(
                 "Measured drift: {} | err: {} | ratio: {} | self ratio: {}",
-                delay, err, skew_ratio, self.skew_ratio
+                delay as f32 / 1000_f32,
+                err as f32 / 1000_f32,
+                skew_ratio,
+                self.skew_ratio
             );
         } else {
             info!("Perfectly synced?!");
@@ -447,15 +455,19 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 let sending_instant = match rx_pkt.preamble_instant {
                     Some(ins) => {
                         info!("preamble instant was Some!");
-                        ins.checked_sub(Duration::from_micros(rx_pkt.estimated_toa.0 as u64))
-                            .unwrap_or(ins)
+                        ins.checked_sub(Duration::from_micros(
+                            (rx_pkt.estimated_toa.0 as f32 * self.skew_ratio) as u64,
+                        ))
+                        .unwrap_or(ins)
                     }
                     // If no preamble instant, we approximate it
                     None => {
                         info!("preamble instant was None!");
                         rx_pkt
                             .rx_done_instant
-                            .checked_sub(Duration::from_micros(rx_pkt.estimated_toa.1 as u64))
+                            .checked_sub(Duration::from_micros(
+                                (rx_pkt.estimated_toa.1 as f32 * self.skew_ratio) as u64,
+                            ))
                             .unwrap_or(rx_pkt.rx_done_instant)
                     }
                 };
@@ -522,6 +534,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 0
             }
         };
+        info!("Set tx timestamp at ticks: {}", Instant::now());
         let allocation = SlotAllocation {
             my_slot: my_tx_slot,
             known_slots: self.known_slots_mask.as_u32(),

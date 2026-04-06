@@ -101,7 +101,6 @@ impl GWNode {
     }
     fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<TxPacket, Error> {
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
-        log::info!("BUFFER SIZE IS: {}", SIZE);
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
             Err(e) => {
@@ -109,6 +108,7 @@ impl GWNode {
                 return Err(Error::Data);
             }
         };
+        log::info!("BUFFER SIZE IS: {}", used_slice.len());
         Ok(TxPacket::LoRa(TxPacketLoRa {
             payload: used_slice.to_vec(),
             ..self.pkt_params.clone().into()
@@ -151,7 +151,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         trace!(
             "[TX DURATION] millis: {},\t ticks: {}",
             only_tx.as_millis(),
-            only_tx
+            after
         );
         Ok(())
     }
