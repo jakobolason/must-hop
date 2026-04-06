@@ -181,6 +181,7 @@ pub async fn lora_task(
         NonZeroU8::new(10).unwrap(),
         None,
         None,
+        Some(1.0223),
         Some(debug_pin),
         source_id,
     );
@@ -192,11 +193,11 @@ pub async fn lora_task(
         let mut receiving_buffer = [00u8; MAX_RADIO_BUFFER];
 
         // Before letting router do its thing, we check if we want to send something
-        // if let Ok(data) = channel.try_receive()
-        //     && let Err(e) = router.queue_payload(data.into(), 1)
-        // {
-        //     error!("Error queing sensor data: {:?}", e);
-        // }
+        if let Ok(data) = channel.try_receive()
+            && let Err(e) = router.queue_payload(data.into(), 1)
+        {
+            error!("Error queing sensor data: {:?}", e);
+        }
 
         // TODO: This should take in the Option<Data> from above
         match router.tick(&mut receiving_buffer).await {

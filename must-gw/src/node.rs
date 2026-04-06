@@ -151,7 +151,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         trace!(
             "[TX DURATION] millis: {},\t ticks: {}",
             only_tx.as_millis(),
-            after
+            after.as_micros()
         );
         Ok(())
     }

@@ -87,6 +87,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
             embassy_time::Instant::now(),
         )),
         Some(5),
+        None,
         Some(sync_pin),
         gw_source_id,
     );

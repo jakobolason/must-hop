@@ -269,8 +269,9 @@ pub struct TdmaMac<P, const SIZE: usize> {
     slot_duration: Duration,
     slots_per_frame: u8,
     my_tx_slot: Option<u8>,
-    /// a tuple of timestamp in micros, and instant when that timestamp was true
+    /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,
+    /// A mask to know what other node's one know
     known_slots_mask: SlotMask,
     hbt_pkt: Option<MHPacket<SIZE>>,
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
@@ -296,6 +297,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         slots_per_frame: core::num::NonZeroU8,
         time_sync: Option<(u64, Instant)>,
         my_tx_slot: Option<u8>,
+        known_skew_ratio: Option<f32>,
         #[cfg(feature = "debug")] debug_pin: Option<P>,
         node_id: u8,
     ) -> Self {
@@ -307,7 +309,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             time_sync,
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
-            skew_ratio: 1.0,
+            skew_ratio: known_skew_ratio.unwrap_or(1_f32),
             gw_hops: 255,
             t3_deltas: Vec::new(),
             #[cfg(feature = "debug")]
@@ -367,7 +369,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             None => {
                 // Short circuit from function if not set
                 info!("TDMA: Initial epoch set");
-                return (1_f32, Some((hb.gps_time_us, sending_instant)));
+                return (self.skew_ratio, Some((hb.gps_time_us, sending_instant)));
             }
         };
 
@@ -419,7 +421,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             };
 
         // Use the network delay to make up for transmission time, etc.
-        let current_true_time = hb.gps_time_us as i64; // - delay;
+        let current_true_time = hb.gps_time_us as i64 - delay;
         let gw_diff = current_true_time - old_gps as i64;
         // let skew = (gw_diff as f32) / (my_diff as f32);
 
@@ -446,31 +448,43 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         (skew_ratio, time_sync)
     }
 
+    /// Use ToA calculation together with other delay variables to approximate what our local
+    /// instant was, when the heartbeat packet with the timestamp was created.
+    fn approximate_transmit_instant(&self, rx_pkt: &RxPacket) -> Instant {
+        let without_toa = match rx_pkt.preamble_instant {
+            Some(ins) => {
+                info!("preamble instant was Some!");
+                ins.checked_sub(Duration::from_micros(
+                    (rx_pkt.estimated_toa.0 as f32 * self.skew_ratio) as u64,
+                ))
+                .unwrap_or(ins)
+            }
+            // If no preamble instant, we approximate it
+            None => {
+                info!("preamble instant was None!");
+                rx_pkt
+                    .rx_done_instant
+                    .checked_sub(Duration::from_micros(
+                        (rx_pkt.estimated_toa.1 as f32 * self.skew_ratio) as u64,
+                    ))
+                    .unwrap_or(rx_pkt.rx_done_instant)
+            }
+        };
+        // TODO: Byte slicing and SPI1 delay
+        let tau_gw = Duration::from_millis(2);
+
+        // TODO: Own SPI2 delay approximate
+
+        without_toa - tau_gw
+    }
+
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
         for pkt in pkts {
             if pkt.packet_type == PacketType::HeartBeat
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
             {
                 // This is meant to approximate the local ticks when the hb packet was sent
-                let sending_instant = match rx_pkt.preamble_instant {
-                    Some(ins) => {
-                        info!("preamble instant was Some!");
-                        ins.checked_sub(Duration::from_micros(
-                            (rx_pkt.estimated_toa.0 as f32 * self.skew_ratio) as u64,
-                        ))
-                        .unwrap_or(ins)
-                    }
-                    // If no preamble instant, we approximate it
-                    None => {
-                        info!("preamble instant was None!");
-                        rx_pkt
-                            .rx_done_instant
-                            .checked_sub(Duration::from_micros(
-                                (rx_pkt.estimated_toa.1 as f32 * self.skew_ratio) as u64,
-                            ))
-                            .unwrap_or(rx_pkt.rx_done_instant)
-                    }
-                };
+                let sending_instant = self.approximate_transmit_instant(&rx_pkt);
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
                     // Calculate updated skew and timestamps
@@ -534,7 +548,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 0
             }
         };
-        info!("Set tx timestamp at ticks: {}", Instant::now());
+        info!("Set tx timestamp at ticks: {}", Instant::now().as_micros());
         let allocation = SlotAllocation {
             my_slot: my_tx_slot,
             known_slots: self.known_slots_mask.as_u32(),

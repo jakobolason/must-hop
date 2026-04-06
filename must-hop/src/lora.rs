@@ -131,9 +131,9 @@ where
         self.lora
             .prepare_for_tx(&self.mdltn_params, &mut self.pkt_params, 20, used_slice)
             .await?;
-
+        let now_sending = Instant::now();
         self.lora.tx().await?;
-        trace!("Transmit successfull!");
+        trace!("Transmit successfull! micros: {}", now_sending.as_micros());
         let after = Instant::now();
         let tx_dur = after - now;
         let only_tx = after - before_tx;
@@ -143,7 +143,7 @@ where
             tx_dur
         );
         trace!(
-            "[TX DURATION] millis: {},\t ticks: {}",
+            "[ONLY TX DURATION] millis: {},\t ticks: {}",
             only_tx.as_millis(),
             only_tx
         );
