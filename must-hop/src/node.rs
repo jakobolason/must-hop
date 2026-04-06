@@ -3,6 +3,7 @@
 /// implemented by the radio used on the specific device
 use core::future::Future;
 use core::time::Duration;
+use embassy_time::Instant;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +47,14 @@ pub struct MHPacket<const SIZE: usize> {
     pub hop_to_gw: u8,
 }
 
+#[derive(Debug, Clone)]
+pub struct RxPacket {
+    pub preamble_instant: Option<Instant>,
+    pub rx_done_instant: Instant,
+    pub payload_size: u8,
+    pub estimated_toa: (u32, u32),
+}
+
 /// Any radio wanting to be a node, has to be able to transmit and receive
 pub trait MHNode<const SIZE: usize, const LEN: usize> {
     #[cfg(not(feature = "in_std"))]
@@ -69,12 +78,17 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
         &mut self,
         conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> impl Future<Output = Result<Vec<MHPacket<SIZE>, LEN>, Self::Error>>;
-    // TODO: Make the 5 a generic
+    ) -> impl Future<Output = Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), Self::Error>>;
 
+    /// Make the node listen for a preample, giving a connection relative to the physical layer
+    /// used. Optionally a duration to listen in can be given.
     fn listen(
         &mut self,
         rec_buf: &mut Self::ReceiveBuffer,
         with_timeout: Option<Duration>,
     ) -> impl Future<Output = Result<Self::Connection, Self::Error>>;
+
+    /// For time sensitive packets and physical layers with predictable Tx times, this can be used
+    /// to send a timestamp which might be closer to the actual timestamp.
+    fn calc_tx_delay(&self, payload_len: usize) -> Duration;
 }

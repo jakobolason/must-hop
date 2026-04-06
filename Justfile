@@ -76,12 +76,12 @@ run-rak:
 
 # Runs the RAK3272s example ona  remote probe-rs server
 [group('probe-rs')]
-remote-run:
+remote-run id:
     @echo "Flashing remotely to Pi..."
     cd examples/lora/rak3272s && \
     CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
     --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN" \
-    cargo run --release --bin main
+    SOURCEID={{id}} cargo run --release --bin main
 
 # Attach to a remote probe-rs server
 [group('probe-rs')]
@@ -115,10 +115,21 @@ deploy-gw-pi: build-gw-pi
 [group('Pi deployments')]
 run-gw: deploy-gw-pi
   @echo "Running GW on pi"
-  ssh {{PI_USER}}@{{PI_HOST}} 'pkill -9 must-gw || true \
-    && chmod +x {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw \
+  ssh -t {{PI_USER}}@{{PI_HOST}} 'chmod +x {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw \
     && RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
     {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
+
+[group('Analysis')]
+analyze-drift data_file="example.csv":
+  @echo "Running analysis on {{data_file}} .."
+  cd analysis/scripts && uv run ./calculate_clock_drift.py ../data/{{data_file}}
+
+[group('Analysis')]
+node-drift:
+  @echo "Running node drift analysis .."
+  cd analysis/scripts && uv run ./node_offset.py 
+
+
 
 # Format all code in the workspace
 [group('utils')]

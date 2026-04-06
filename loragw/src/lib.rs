@@ -244,6 +244,14 @@ impl Concentrator<Running> {
         rx_status.try_into()
     }
 
+    pub fn get_instcnt(&self) -> Result<std::time::Duration> {
+        let mut inst_cnt_us: u32 = 0;
+        unsafe {
+            llg::lgw_get_instcnt(&mut inst_cnt_us);
+        }
+        Ok(std::time::Duration::from_micros(inst_cnt_us as u64))
+    }
+
     /// Perform a non-blocking read of up to 16 packets from
     /// concentrator's FIFO.
     pub fn receive(&self) -> Result<Option<Vec<RxPacket>>> {
@@ -419,7 +427,7 @@ impl Concentrator<Running> {
         unsafe {
             hal_call!(lgw_status(
                 {
-                    log::error!("[WARN] remove hardcoded RF chain argument from status calls");
+                    log::warn!("[WARN] remove hardcoded RF chain argument from status calls");
                     0u8
                 },
                 TX_STATUS,

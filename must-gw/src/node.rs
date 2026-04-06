@@ -1,8 +1,11 @@
 use std::collections::VecDeque;
 
 use embassy_time::{Duration, Instant, Timer};
-use log::trace;
-use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
+use log::{error, trace};
+use lora_modulation::BaseBandModulationParams;
+use loragw::{
+    Concentrator, Error, Running, RxPacket, RxPacketLoRa, TxPacket, TxPacketLoRa, TxStatus,
+};
 use must_hop::node::{MHNode, MHPacket};
 use postcard::to_slice;
 
@@ -98,7 +101,6 @@ impl GWNode {
     }
     fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<TxPacket, Error> {
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
-        log::info!("BUFFER SIZE IS: {}", SIZE);
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
             Err(e) => {
@@ -106,74 +108,116 @@ impl GWNode {
                 return Err(Error::Data);
             }
         };
+        log::info!("BUFFER SIZE IS: {}", used_slice.len());
         Ok(TxPacket::LoRa(TxPacketLoRa {
             payload: used_slice.to_vec(),
             ..self.pkt_params.clone().into()
         }))
+    }
+    fn calc_toa(&self, rx_pkt: &RxPacketLoRa) -> (u32, u32) {
+        // Using the formula to calculate time-on-air
+        let bb_mod = BaseBandModulationParams::new(
+            rx_pkt.spreading.into(),
+            rx_pkt.bandwidth.into(),
+            rx_pkt.coderate.into(),
+        );
+        let total_toa_us = bb_mod.time_on_air_us(None, true, rx_pkt.payload.len() as u8);
+        let t_sym_ms = bb_mod.symbols_to_ms(1) as f32;
+        // calculate the time of just the preamble
+        let preamble_toa_ms = t_sym_ms * (8_f32 + 4.25);
+        let preamble_toa_us = (preamble_toa_ms * 1000.0) as u32;
+        (preamble_toa_us, total_toa_us)
     }
 }
 
 impl MHNode<SIZE, LEN> for GWNode {
     type Error = loragw::Error;
     type Connection = ();
-    type ReceiveBuffer = Vec<RxPacket>;
+    type ReceiveBuffer = Option<RxPacket>;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
         packets
             .iter()
             .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
+        let before = Instant::now();
         let tx_pkt = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
             embassy_time::Timer::after(Duration::from_millis(5)).await;
         }
-        self.radio.transmit(tx_pkt)
+        self.radio.transmit(tx_pkt)?;
+        let after = Instant::now();
+        let only_tx = after - before;
+
+        trace!(
+            "[TX DURATION] millis: {},\t ticks: {}",
+            only_tx.as_millis(),
+            after.as_micros()
+        );
+        Ok(())
     }
 
+    /// The returned instant is the first heartbeat packet captured
     async fn receive(
         &mut self,
         _conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> Result<heapless::Vec<MHPacket<SIZE>, LEN>, Self::Error> {
-        // Check if any packets came in whilst transitioning from listen to receive
-        // let pkts: Vec<RxPacket> = match self.radio.receive() {
-        //     Ok(Some(packet)) => packet,
-        //     _ => Vec::new(),
-        // };
+    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, must_hop::node::RxPacket), Self::Error> {
+        // This is a hack, but we only want one entry
+        let Some(pkt) = rec_buf else {
+            return Err(loragw::Error::Generic);
+        };
+
         let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
-        for pkt in rec_buf
-        /*.iter().chain(pkts.iter())*/
-        {
-            let pkt = match pkt {
-                RxPacket::LoRa(rx_packet) => rx_packet,
-                _ => continue,
-            };
-            let raw_bytes = &pkt.payload;
-            log::info!(
-                "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
-                pkt.spreading,
-                pkt.bandwidth,
-                pkt.freq,
-                pkt.rssi,
-                pkt.snr
-            );
-            match postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes) {
-                Ok(packets) => {
-                    log::info!(
-                        "SUCCESS !!!! Received amount of packets: {:?}",
-                        packets.len()
-                    );
-                    for packet in packets {
-                        // log::info!("Packet {:?}", packet);
-                        rec_packets.push(packet).map_err(|_| loragw::Error::Data)?
-                    }
-                }
-                Err(e) => {
-                    log::error!("Error deserializing MHPacket: {:?}", e);
-                    continue;
-                }
-            };
+
+        let pkt = match pkt {
+            RxPacket::LoRa(rx_packet) => rx_packet,
+            RxPacket::FSK(_) => return Err(loragw::Error::Generic),
+        };
+        let raw_bytes = &pkt.payload;
+        log::info!(
+            "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
+            pkt.spreading,
+            pkt.bandwidth,
+            pkt.freq,
+            pkt.rssi,
+            pkt.snr
+        );
+
+        let packets = postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes)
+            .map_err(|_| {
+                error!("Could not convert to bytes!");
+                loragw::Error::Generic
+            })?;
+        log::info!(
+            "SUCCESS !!!! Received amount of packets: {:?}",
+            packets.len()
+        );
+        let now_host = Instant::now();
+        let rx_heartbeat_timestamp = if let Ok(now_radio) = self.radio.get_instcnt() {
+            // Calculate our local ticks when this was captured
+            let pkt_hw_us = pkt.timestamp.as_micros() as u32;
+            let radio_now_us = now_radio.as_micros() as u32;
+            let age_us = radio_now_us.wrapping_sub(pkt_hw_us);
+            now_host
+                .checked_sub(embassy_time::Duration::from_micros(age_us as u64))
+                .unwrap_or(now_host)
+        } else {
+            now_host
+        };
+        for packet in packets {
+            // log::info!("Packet {:?}", packet);
+            rec_packets.push(packet).map_err(|_| loragw::Error::Data)?;
         }
-        Ok(rec_packets)
+
+        Ok((
+            rec_packets,
+            must_hop::node::RxPacket {
+                preamble_instant: None,
+                rx_done_instant: rx_heartbeat_timestamp,
+                payload_size: pkt.payload.len() as u8,
+                estimated_toa: self.calc_toa(pkt),
+            },
+        ))
     }
 
     async fn listen(
@@ -183,11 +227,9 @@ impl MHNode<SIZE, LEN> for GWNode {
     ) -> Result<Self::Connection, Self::Error> {
         let start_time = Instant::now();
         // let timeout = Duration::from_secs(1);
-        rec_buf.clear();
-
         loop {
-            if !self.fetched_packets.is_empty() {
-                rec_buf.extend(self.fetched_packets.drain(..));
+            if let Some(pkt) = self.fetched_packets.pop_front() {
+                *rec_buf = Some(pkt);
                 return Ok(());
             }
             if let Some(packets) = self.radio.receive()? {
@@ -203,5 +245,8 @@ impl MHNode<SIZE, LEN> for GWNode {
             }
             Timer::after(Duration::from_millis(5)).await;
         }
+    }
+    fn calc_tx_delay(&self, payload_len: usize) -> core::time::Duration {
+        core::time::Duration::from_millis(60 * payload_len as u64)
     }
 }

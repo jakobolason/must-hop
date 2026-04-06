@@ -10,6 +10,7 @@ use must_hop::node::{
     network_manager::NetworkManager,
     policy::{GatewayPolicy, RandomAccessMac, TdmaMac},
 };
+use rppal::gpio::Gpio;
 use std::io::Write;
 use tokio::time::Instant;
 
@@ -71,31 +72,35 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     // let pkt = node.receive((), &rec_buf).await?;
     // log::info!("got pkts: {:?} ", pkt);
     let gw_source_id = 1;
+    let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
+    let sync_pin = gpio.get(21).expect("Failed to get GPIO 21").into_output();
 
-    let mac = TdmaMac::new(
+    let mac = TdmaMac::<_, 128>::new(
         embassy_time::Duration::from_secs(1),
         NonZeroU8::new(10).unwrap(),
         Some((
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards")
-                .as_millis() as u64,
+                .as_micros() as u64,
             embassy_time::Instant::now(),
         )),
         Some(5),
+        None,
+        Some(sync_pin),
         gw_source_id,
     );
     // let mac = RandomAccessMac::new();
     log::info!("Now making mesh router ...");
     let mut router = MeshRouter::new(
         node,
-        NetworkManager::new(gw_source_id as u8, 10, 3),
+        NetworkManager::new(gw_source_id, 10, 3),
         mac,
-        GatewayPolicy::new(30),
+        GatewayPolicy::new(10),
     );
     log::info!("Now start loop..");
     loop {
-        let mut rec_buf = Vec::new();
+        let mut rec_buf = None;
         match router.tick(&mut rec_buf).await {
             Ok(res) => {
                 if !res.is_empty() {
@@ -104,11 +109,6 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
             }
             Err(e) => error!("Error in ticking: {:?}", e),
         }
-        // router.listen(&mut rec_buf).await?;
-        // let pkts = router.receive((), &rec_buf).await?;
-        // if !pkts.is_empty() {
-        //     log::info!("got pkts! : {:?}", pkts);
-        // }
     }
 }
 

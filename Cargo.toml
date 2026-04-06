@@ -7,6 +7,10 @@ exclude = [
   "examples/gateway/sx1302",
 ]
 
+[workspace.dependencies]
+
+lora-phy = { path = "../../repos/pr-lora-rs/lora-phy" }
+lora-modulation = { path = "../../repos/pr-lora-rs/lora-modulation" }
 
 [profile.dev]
 opt-level = "s"

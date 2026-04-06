@@ -1,5 +1,8 @@
+use crate::node::RxPacket;
+
 /// This contains node implementations for Lora
 use super::node::{MHNode, MHPacket};
+use lora_modulation::BaseBandModulationParams;
 use lora_phy::mod_params::{
     Bandwidth, CodingRate, ModulationParams, PacketParams, SpreadingFactor,
 };
@@ -63,6 +66,26 @@ where
     _tp: TransmitParameters,
     pkt_params: PacketParams,
     mdltn_params: ModulationParams,
+    preamble_instant: Option<Instant>,
+}
+
+impl<'a, RK, DLY, const SIZE: usize, const LEN: usize> LoraNode<'a, RK, DLY, SIZE, LEN>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    fn calc_toa(&self, bytes: u8) -> (u32, u32) {
+        // Using the formula to calculate time-on-air
+        let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
+        let total_toa_us =
+            bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes);
+
+        let t_sym_ms = bb_mod.symbols_to_ms(1) as f32;
+        // calculate the time of just the preamble
+        let preamble_toa_ms = t_sym_ms * (self._tp.pre_amp as f32 + 4.25);
+        let preamble_toa_us = (preamble_toa_ms * 1000.0) as u32;
+        (preamble_toa_us, total_toa_us)
+    }
 }
 
 impl<RK, DLY, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN>
@@ -108,9 +131,9 @@ where
         self.lora
             .prepare_for_tx(&self.mdltn_params, &mut self.pkt_params, 20, used_slice)
             .await?;
-
+        let now_sending = Instant::now();
         self.lora.tx().await?;
-        trace!("Transmit successfull!");
+        trace!("Transmit successfull! micros: {}", now_sending.as_micros());
         let after = Instant::now();
         let tx_dur = after - now;
         let only_tx = after - before_tx;
@@ -120,7 +143,7 @@ where
             tx_dur
         );
         trace!(
-            "[TX DURATION] millis: {},\t ticks: {}",
+            "[ONLY TX DURATION] millis: {},\t ticks: {}",
             only_tx.as_millis(),
             only_tx
         );
@@ -138,8 +161,10 @@ where
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
         rec_buf: &[u8; TRANSMISSION_BUFFER],
-    ) -> Result<Vec<MHPacket<SIZE>, LEN>, RadioError> {
+    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), RadioError> {
         // First we check if we actually got something
+        let rx_hardware_timestamp = Instant::now();
+        trace!("received pkts!");
         let (len, _rx_pkt_status) = match conn {
             Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
             Err(err) => match err {
@@ -162,12 +187,17 @@ where
             }
         };
         trace!("Got packet!");
+        let estimated_toa = self.calc_toa(len);
 
-        // TODO: Check if this should be retransmitted
-        // if (packet.to != me)
-        // transmit(lora, packet, tp).await?;
+        let rx_pkt = RxPacket {
+            preamble_instant: self.preamble_instant.take(),
+            // preamble_instant: None,
+            rx_done_instant: rx_hardware_timestamp,
+            payload_size: len,
+            estimated_toa,
+        };
 
-        Ok(packets)
+        Ok((packets, rx_pkt))
     }
 
     async fn listen(
@@ -176,11 +206,17 @@ where
         with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, RadioError> {
         self.prepare_for_rx(RxMode::Continuous).await?;
+        self.preamble_instant = None;
+        let get_preamb_instant = || {
+            if self.preamble_instant.is_none() {
+                self.preamble_instant = Some(Instant::now())
+            }
+        };
         match with_timeout {
             Some(timeout) => {
                 match embassy_time::with_timeout(
                     embassy_time::Duration::from_micros(timeout.as_micros() as u64),
-                    self.lora.rx(&self.pkt_params, rec_buf),
+                    self.lora.rx(&self.pkt_params, rec_buf, get_preamb_instant),
                 )
                 .await
                 {
@@ -188,8 +224,15 @@ where
                     Err(_) => Err(RadioError::ReceiveTimeout),
                 }
             }
-            None => Ok(self.lora.rx(&self.pkt_params, rec_buf).await),
+            None => Ok(self
+                .lora
+                .rx(&self.pkt_params, rec_buf, get_preamb_instant)
+                .await),
         }
+    }
+
+    fn calc_tx_delay(&self, payload_len: usize) -> Duration {
+        Duration::from_millis(60 * payload_len as u64)
     }
 }
 
@@ -214,6 +257,7 @@ where
             _tp: tp,
             pkt_params,
             mdltn_params,
+            preamble_instant: None,
         })
     }
 

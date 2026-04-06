@@ -28,6 +28,7 @@ pub enum Error {
     Data,
     BuilderError(BuilderError),
     Toml(toml::de::Error),
+    Generic,
 }
 
 impl From<toml::de::Error> for Error {
@@ -54,6 +55,7 @@ impl fmt::Display for Error {
                 BuilderError::NotConnected => write!(f, "builder error: not connected"),
             },
             Error::Toml(_err) => write!(f, "Error from toml"),
+            Error::Generic => write!(f, "Generic error, should've been logged"),
         }
     }
 }
