@@ -4,7 +4,6 @@ use std::{
 };
 
 use log::error;
-use loragw::RxPacket;
 use must_gw::{create_concentrator, node};
 use must_hop::node::{
     mesh_router::MeshRouter,

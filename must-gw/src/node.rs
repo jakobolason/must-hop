@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use embassy_time::{Duration, Instant, Timer};
-use log::trace;
+use log::{error, trace};
 use lora_modulation::BaseBandModulationParams;
 use loragw::{
     Concentrator, Error, Running, RxPacket, RxPacketLoRa, TxPacket, TxPacketLoRa, TxStatus,
@@ -184,7 +184,10 @@ impl MHNode<SIZE, LEN> for GWNode {
         );
 
         let packets = postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes)
-            .map_err(|_| loragw::Error::Generic)?;
+            .map_err(|_| {
+                error!("Could not convert to bytes!");
+                loragw::Error::Generic
+            })?;
         log::info!(
             "SUCCESS !!!! Received amount of packets: {:?}",
             packets.len()

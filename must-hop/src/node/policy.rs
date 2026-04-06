@@ -255,7 +255,7 @@ struct SlotAllocation {
 }
 
 #[cfg(feature = "debug")]
-pub trait DebugPin: embedded_hal::digital::OutputPin {}
+pub trait DebugPin: OutputPin {}
 #[cfg(feature = "debug")]
 impl<T: embedded_hal::digital::OutputPin> DebugPin for T {}
 
@@ -323,12 +323,12 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         self.gps_time_at(stamps, Instant::now())
     }
 
-    fn gps_time_at(&self, (base_gps_ms, sync_instant): (u64, Instant), at_instant: Instant) -> u64 {
-        let elapsed_ms = (at_instant - sync_instant).as_micros();
-        let gw_elapsed_ms = (elapsed_ms as f32 * self.skew_ratio) as u64;
+    fn gps_time_at(&self, (base_gps_us, sync_instant): (u64, Instant), at_instant: Instant) -> u64 {
+        let elapsed_us = (at_instant - sync_instant).as_micros();
+        let gw_elapsed_us = (elapsed_us as f32 * self.skew_ratio) as u64;
         // let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
         //     / self.skew_local_diff as u128) as u64;
-        base_gps_ms + gw_elapsed_ms
+        base_gps_us + gw_elapsed_us
     }
 
     fn calc_nextslot_time(&self, timestamps: (u64, Instant)) -> Instant {
@@ -347,9 +347,9 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         Instant::now() + Duration::from_micros(node_offset.saturating_sub(guard_band))
     }
 
-    pub fn current_slot(&self, current_time_ms: u64) -> u8 {
-        let frame_duration_ms = (self.slot_duration.as_micros()) * (self.slots_per_frame as u64);
-        let time_in_frame = current_time_ms % frame_duration_ms;
+    pub fn current_slot(&self, current_time_us: u64) -> u8 {
+        let frame_duration_us = (self.slot_duration.as_micros()) * (self.slots_per_frame as u64);
+        let time_in_frame = current_time_us % frame_duration_us;
 
         // Add half of slot duration to achieve 'round to nearest' int division
         let slot_dur = self.slot_duration.as_micros();
