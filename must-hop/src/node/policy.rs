@@ -426,7 +426,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                     let nw_delay = (delta_down + *delta_up as i64) / 2;
 
                     info!(
-                        "clock offset: {} | network delay: {}",
+                        "clock offset: {} ms | network delay: {} ms",
                         clock_offset as f32 / 1000.0,
                         nw_delay as f32 / 1000.0
                     );
@@ -454,7 +454,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         if my_stamp != hb.gps_time_us {
             let delay: i64 = my_stamp as i64 - hb.gps_time_us as i64;
             info!(
-                "Measured drift: {} | err: {} | ratio: {} | self ratio: {}",
+                "Measured drift: {} ms | err: {} ms | ratio: {} | self ratio: {}",
                 delay as f32 / 1000_f32,
                 err as f32 / 1000_f32,
                 skew_ratio,

@@ -1,5 +1,6 @@
 set shell := ["bash", "-c"]
 set dotenv-load := true
+
 PI_HOST := env_var_or_default("HOST_URL", "localhost")
 PI_USER := env_var_or_default("PI_USER", "pi")
 PI_TARGET_DIR := "/home/" + PI_USER + "/must-hop"
@@ -39,6 +40,7 @@ test-sim:
     cargo test --test network_simulation --features "in_std"
 
 # Use these to hint at using bacon, because this just takes more to type
+
 # Start Bacon for live feedback
 [group('Tests')]
 bacon:
@@ -81,7 +83,7 @@ remote-run id:
     cd examples/lora/rak3272s && \
     CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
     --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN" \
-    SOURCEID={{id}} cargo run --release --bin main
+    SOURCEID={{ id }} cargo run --release --bin main
 
 # Attach to a remote probe-rs server
 [group('probe-rs')]
@@ -103,33 +105,31 @@ build-gw-ex:
 
 [group('Pi deployments')]
 build-gw-pi:
-  @echo "Cross compiling must-gw for Pi 4B"
-  cross build --target aarch64-unknown-linux-gnu -p must-gw --release
+    @echo "Cross compiling must-gw for Pi 4B"
+    cross build --target aarch64-unknown-linux-gnu -p must-gw --release
 
 [group('Pi deployments')]
 deploy-gw-pi: build-gw-pi
-  @echo "Copying binary GW to pi"
-  ssh {{PI_USER}}@{{PI_HOST}} 'mkdir -p {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release && rm -f {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
-  scp target/aarch64-unknown-linux-gnu/release/must-gw {{PI_USER}}@{{PI_HOST}}:{{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw
+    @echo "Copying binary GW to pi"
+    ssh {{ PI_USER }}@{{ PI_HOST }} 'mkdir -p {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release && rm -f {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
+    scp target/aarch64-unknown-linux-gnu/release/must-gw {{ PI_USER }}@{{ PI_HOST }}:{{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw
 
 [group('Pi deployments')]
 run-gw: deploy-gw-pi
-  @echo "Running GW on pi"
-  ssh -t {{PI_USER}}@{{PI_HOST}} 'chmod +x {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw \
-    && RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
-    {{PI_TARGET_DIR}}/target/aarch64-unknown-linux-gnu/release/must-gw'
+    @echo "Running GW on pi"
+    ssh -tt {{ PI_USER }}@{{ PI_HOST }} 'chmod +x {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw \
+      && RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
+      {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 [group('Analysis')]
 analyze-drift data_file="example.csv":
-  @echo "Running analysis on {{data_file}} .."
-  cd analysis/scripts && uv run ./calculate_clock_drift.py ../data/{{data_file}}
+    @echo "Running analysis on {{ data_file }} .."
+    cd analysis/scripts && uv run ./calculate_clock_drift.py ../data/{{ data_file }}
 
 [group('Analysis')]
 node-drift:
-  @echo "Running node drift analysis .."
-  cd analysis/scripts && uv run ./node_offset.py 
-
-
+    @echo "Running node drift analysis .."
+    cd analysis/scripts && uv run ./node_offset.py 
 
 # Format all code in the workspace
 [group('utils')]

@@ -1,0 +1,14 @@
+[package]
+name = "must-dash"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.30.0"
+crossterm = "0.29.0"
+ansi-to-tui = "8.0.1"
+
+tokio = { version = "1.52.1", features = ["full"] }
+nix = { version = "0.31.2", features = ["signal"] }
+
+regex = "1.12.3"
