@@ -181,7 +181,7 @@ pub async fn lora_task(
         NonZeroU8::new(10).unwrap(),
         None,
         None,
-        Some(1.0223),
+        Some(20334395),
         Some(debug_pin),
         source_id,
     );

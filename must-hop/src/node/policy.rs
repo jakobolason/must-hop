@@ -278,16 +278,24 @@ pub struct TdmaMac<P, const SIZE: usize> {
     /// biggest chance of two nodes not having the same u32 representation
     node_id: u8,
     /// Ratio to try and mitigate clock drift at nodes with no HSE
-    skew_ratio: f32,
+    v_s: i64,
     gw_hops: u8,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     t3_deltas: Vec<(u8, i32), 5>,
+    prev_err: i64,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
 
     #[cfg(not(feature = "debug"))]
     _marker: PhantomData<P>,
 }
+
+const KP: f32 = 0.4;
+const KI: f32 = 0.5;
+
+// unit conversion mu secs error(1e-6) -> PPB output (1e-9)
+const KP_PPB: i64 = (KP * 50.0) as i64;
+const KI_PPB: i64 = (KI * 50.0) as i64;
 
 impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
     pub fn new(
@@ -297,7 +305,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         slots_per_frame: core::num::NonZeroU8,
         time_sync: Option<(u64, Instant)>,
         my_tx_slot: Option<u8>,
-        known_skew_ratio: Option<f32>,
+        known_skew_ratio: Option<i64>,
         #[cfg(feature = "debug")] debug_pin: Option<P>,
         node_id: u8,
     ) -> Self {
@@ -309,9 +317,10 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             time_sync,
             known_slots_mask: SlotMask::default(),
             hbt_pkt: None,
-            skew_ratio: known_skew_ratio.unwrap_or(1_f32),
+            v_s: known_skew_ratio.unwrap_or(0_i64),
             gw_hops: 255,
             t3_deltas: Vec::new(),
+            prev_err: 0,
             #[cfg(feature = "debug")]
             debug_pin,
             #[cfg(not(feature = "debug"))]
@@ -325,7 +334,8 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
 
     fn gps_time_at(&self, (base_gps_us, sync_instant): (u64, Instant), at_instant: Instant) -> u64 {
         let elapsed_us = (at_instant - sync_instant).as_micros();
-        let gw_elapsed_us = (elapsed_us as f32 * self.skew_ratio) as u64;
+        // FIXME:
+        let gw_elapsed_us = self.calc_drift_duration(elapsed_us);
         // let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
         //     / self.skew_local_diff as u128) as u64;
         base_gps_us + gw_elapsed_us
@@ -340,9 +350,11 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
         // let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
         //     / self.skew_gw_diff as u128) as u64;
-        let node_offset = (next_slot_start_offset as f32 / self.skew_ratio) as u64;
+        let drift_correction_us = (next_slot_start_offset as i64 * self.v_s) / 1_000_000_000;
+        let node_offset = (next_slot_start_offset as i64 - drift_correction_us) as u64;
 
         // Wake up just a bit before the slot starts to ensure listening at correct time
+        // FIXME: If everyone does this, then everyone just wakes up 5ms before
         let guard_band = 5000;
         Instant::now() + Duration::from_micros(node_offset.saturating_sub(guard_band))
     }
@@ -356,6 +368,10 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
 
+    fn calc_drift_duration(&self, duration: u64) -> u64 {
+        (duration as i64 + (duration as i64 * self.v_s) / 1_000_000_000) as u64
+    }
+
     /// Given a heartbeat packet from a nearer-gw node, this calculates the new timestamp and the
     /// new skew ratio for the node to be properly synchronized.
     fn update_skew_and_stamp(
@@ -363,20 +379,20 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         hb: &SlotAllocation,
         rx_pkt: RxPacket,
         sending_instant: Instant,
-    ) -> (f32, Option<(u64, Instant)>) {
+    ) -> (i64, Option<(u64, Instant)>, i64) {
         let (old_gps, last_stamp) = match self.time_sync {
             Some(stamps) => stamps,
             None => {
                 // Short circuit from function if not set
                 info!("TDMA: Initial epoch set");
-                return (self.skew_ratio, Some((hb.gps_time_us, sending_instant)));
+                return (self.v_s, Some((hb.gps_time_us, sending_instant)), 0);
             }
         };
 
         // Calculate skews
         // let my_stamp = self.current_gps_time((old_gps, last_stamp));
         let my_diff = (sending_instant - last_stamp).as_micros();
-        let predicted_elapsed = (my_diff as f32 * self.skew_ratio) as u64;
+        let predicted_elapsed = self.calc_drift_duration(my_diff);
         let my_stamp = predicted_elapsed + old_gps;
         // instant was just when we received the preamble. But perhaps the difference between that
         // instant and now is the same as ToA
@@ -422,14 +438,17 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
 
         // Use the network delay to make up for transmission time, etc.
         let current_true_time = hb.gps_time_us as i64 - delay;
-        let gw_diff = current_true_time - old_gps as i64;
-        // let skew = (gw_diff as f32) / (my_diff as f32);
+        let time_sync = Some(((current_true_time) as u64, sending_instant));
 
-        // let skew_ratio = (skew * 0.2) + (self.skew_ratio * 0.8);
-        let kp = 0.00000005;
+        // Now update drift
+        let gw_diff = current_true_time - old_gps as i64;
+
         let err = gw_diff - predicted_elapsed as i64;
-        let skew_ratio = self.skew_ratio + kp * err as f32;
-        let time_sync = Some(((current_true_time - delay) as u64, sending_instant));
+
+        let delta_err = err - self.prev_err;
+        let delta_u = (KP_PPB * delta_err) + (KI_PPB * err);
+
+        let skew_ratio = self.v_s + delta_u;
 
         // Debug info:
         if my_stamp != hb.gps_time_us {
@@ -439,13 +458,13 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 delay as f32 / 1000_f32,
                 err as f32 / 1000_f32,
                 skew_ratio,
-                self.skew_ratio
+                self.v_s
             );
         } else {
             info!("Perfectly synced?!");
         }
 
-        (skew_ratio, time_sync)
+        (skew_ratio, time_sync, err)
     }
 
     /// Use ToA calculation together with other delay variables to approximate what our local
@@ -455,7 +474,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             Some(ins) => {
                 info!("preamble instant was Some!");
                 ins.checked_sub(Duration::from_micros(
-                    (rx_pkt.estimated_toa.0 as f32 * self.skew_ratio) as u64,
+                    self.calc_drift_duration(rx_pkt.estimated_toa.0 as u64),
                 ))
                 .unwrap_or(ins)
             }
@@ -465,17 +484,17 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 rx_pkt
                     .rx_done_instant
                     .checked_sub(Duration::from_micros(
-                        (rx_pkt.estimated_toa.1 as f32 * self.skew_ratio) as u64,
+                        self.calc_drift_duration(rx_pkt.estimated_toa.1 as u64),
                     ))
                     .unwrap_or(rx_pkt.rx_done_instant)
             }
         };
         // TODO: Byte slicing and SPI1 delay
-        let tau_gw = Duration::from_millis(2);
+        // let tau_gw = Duration::from_millis(2);
 
         // TODO: Own SPI2 delay approximate
 
-        without_toa - tau_gw
+        without_toa //- tau_gw
     }
 
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
@@ -488,10 +507,11 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
                     // Calculate updated skew and timestamps
-                    let (skew_ratio, time_sync) =
+                    let (skew_ratio, time_sync, err) =
                         self.update_skew_and_stamp(&alloc, rx_pkt, sending_instant);
-                    self.skew_ratio = skew_ratio;
+                    self.v_s = skew_ratio;
                     self.time_sync = time_sync;
+                    self.prev_err = err;
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {
