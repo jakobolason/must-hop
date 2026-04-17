@@ -11,6 +11,8 @@ command = [
   "must-gw",
   "--features",
   "in_std",
+  "-p",
+  "must-dash",
 ]
 need_stdout = false
 

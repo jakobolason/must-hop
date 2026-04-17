@@ -7,6 +7,8 @@ edition = "2024"
 ratatui = "0.30.0"
 crossterm = "0.29.0"
 ansi-to-tui = "8.0.1"
+strip-ansi-escapes = "0.2.1"
+portable-pty = "0.9.0"
 
 tokio = { version = "1.52.1", features = ["full"] }
 nix = { version = "0.31.2", features = ["signal"] }

@@ -121,6 +121,10 @@ run-gw: deploy-gw-pi
       && RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
       {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
+[group('Dashboard')]
+dash:
+    cargo run --release -p must-dash
+
 [group('Analysis')]
 analyze-drift data_file="example.csv":
     @echo "Running analysis on {{ data_file }} .."
