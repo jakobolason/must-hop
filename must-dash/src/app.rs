@@ -41,7 +41,6 @@ impl RollingStat {
             return None;
         }
         let mut sorted: Vec<_> = self.values.iter().copied().collect();
-        // f32 doesn't implement Ord perfectly due to NaN, so we use partial_cmp
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let mid = sorted.len() / 2;
         if sorted.len() % 2 == 0 {
@@ -57,13 +56,12 @@ pub struct App {
     pub gw_logs: VecDeque<String>,
     pub focus: Focus,
 
-    // Rolling Metrics (last 10 values)
-    pub drift: RollingStat,
+    pub delay: RollingStat,
     pub err: RollingStat,
-    pub ratio: RollingStat,
-    pub self_ratio: RollingStat,
-    pub delta_up: RollingStat,   // <--- NEW
-    pub delta_down: RollingStat, // <--- NEW
+    pub prev_speed: RollingStat,
+    pub new_speed: RollingStat,
+    pub delta_up: RollingStat,
+    pub delta_down: RollingStat,
 
     pub shutting_down: bool,
 }
@@ -71,8 +69,7 @@ pub struct App {
 static DRIFT_REGEX: OnceLock<Regex> = OnceLock::new();
 fn get_regex() -> &'static Regex {
     DRIFT_REGEX.get_or_init(|| {
-        // Added 'ms' after the first two capture groups
-        Regex::new(r"Measured drift:\s*([-\d.]+)\s*ms\s*\|\s*err:\s*([-\d.]+)\s*ms\s*\|\s*ratio:\s*([-\d]+)\s*\|\s*self ratio:\s*([-\d]+)").unwrap()
+        Regex::new(r"Measured delay:\s*([-\d.]+)\s*ms\s*\|\s*err:\s*([-\d.]+)\s*ms\s*\|\s*prev speed:\s*([-\d]+)\s*\|\s*new speed:\s*([-\d]+)").unwrap()
     })
 }
 
@@ -96,12 +93,12 @@ impl App {
             node_logs: VecDeque::with_capacity(500),
             gw_logs: VecDeque::with_capacity(500),
             focus: Focus::Logs, // Default focus
-            drift: RollingStat::new(10),
-            err: RollingStat::new(10),
-            ratio: RollingStat::new(10),
-            self_ratio: RollingStat::new(10),
-            delta_up: RollingStat::new(10),   // <--- NEW
-            delta_down: RollingStat::new(10), // <--- NEW
+            delay: RollingStat::new(30),
+            err: RollingStat::new(30),
+            prev_speed: RollingStat::new(30),
+            new_speed: RollingStat::new(30),
+            delta_up: RollingStat::new(30),
+            delta_down: RollingStat::new(30),
             shutting_down: false,
         }
     }
@@ -121,20 +118,19 @@ impl App {
                 && let Some(caps) = get_regex().captures(&clean_log)
             {
                 if let Ok(d) = caps[1].parse::<f32>() {
-                    self.drift.push(d);
+                    self.delay.push(d);
                 }
                 if let Ok(e) = caps[2].parse::<f32>() {
                     self.err.push(e);
                 }
                 if let Ok(r) = caps[3].parse::<f32>() {
-                    self.ratio.push(r);
+                    self.prev_speed.push(r);
                 }
                 if let Ok(sr) = caps[4].parse::<f32>() {
-                    self.self_ratio.push(sr);
+                    self.new_speed.push(sr);
                 }
             }
         } else if log.contains("Delta up:") {
-            // <--- NEW PARSING LOGIC
             let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
             if let Ok(clean_log) = String::from_utf8(stripped_bytes)
                 && let Some(caps) = get_delta_regex().captures(&clean_log)
@@ -148,7 +144,6 @@ impl App {
             }
         }
 
-        // ... (rest of your add_node_log logic remains the same)
         if overwrite {
             if let Some(last) = self.node_logs.back_mut() {
                 *last = log;

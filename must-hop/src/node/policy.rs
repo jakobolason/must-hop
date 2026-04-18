@@ -283,6 +283,7 @@ pub struct TdmaMac<P, const SIZE: usize> {
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     t3_deltas: Vec<(u8, i32), 5>,
     prev_err: i64,
+    prev_delay: i64,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
 
@@ -294,6 +295,7 @@ const KP: f32 = 0.4;
 const KI: f32 = 0.5;
 
 // unit conversion mu secs error(1e-6) -> PPB output (1e-9)
+// Not necessarily PPB here
 const KP_PPB: i64 = (KP * 50.0) as i64;
 const KI_PPB: i64 = (KI * 50.0) as i64;
 
@@ -321,6 +323,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
             gw_hops: 255,
             t3_deltas: Vec::new(),
             prev_err: 0,
+            prev_delay: 0,
             #[cfg(feature = "debug")]
             debug_pin,
             #[cfg(not(feature = "debug"))]
@@ -368,6 +371,7 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
 
+    /// v_s is current error, so this maps the error to drift ppb
     fn calc_drift_duration(&self, duration: u64) -> u64 {
         (duration as i64 + (duration as i64 * self.v_s) / 1_000_000_000) as u64
     }
@@ -379,13 +383,13 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         hb: &SlotAllocation,
         rx_pkt: RxPacket,
         sending_instant: Instant,
-    ) -> (i64, Option<(u64, Instant)>, i64) {
+    ) -> (i64, Option<(u64, Instant)>, i64, i64) {
         let (old_gps, last_stamp) = match self.time_sync {
             Some(stamps) => stamps,
             None => {
                 // Short circuit from function if not set
                 info!("TDMA: Initial epoch set");
-                return (self.v_s, Some((hb.gps_time_us, sending_instant)), 0);
+                return (self.v_s, Some((hb.gps_time_us, sending_instant)), 0, 0);
             }
         };
 
@@ -407,37 +411,34 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         );
 
         // Check if a t3 delta is availale for us
-        let (delay, offset) =
-            if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == self.node_id) {
-                // delta is our T3 - T2
-                let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
+        let delay = if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == self.node_id) {
+            // delta is our T3 - T2
+            let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
 
-                info!(
-                    "Delta up: {} | Delta down: {}",
-                    *delta_up as f32 / 1000.0,
-                    delta_down as f32 / 1000.0
-                );
+            info!(
+                "Delta up: {} | Delta down: {}",
+                *delta_up as f32 / 1000.0,
+                delta_down as f32 / 1000.0
+            );
 
-                if delta_down.abs() > 300_000 || delta_up.abs() > 300_000 {
-                    info!("Rejected deltas!");
-                    (0, 0)
-                } else {
-                    let clock_offset = (delta_down - *delta_up as i64) / 2;
-                    let nw_delay = (delta_down + *delta_up as i64) / 2;
-
-                    info!(
-                        "clock offset: {} ms | network delay: {} ms",
-                        clock_offset as f32 / 1000.0,
-                        nw_delay as f32 / 1000.0
-                    );
-                    (nw_delay, clock_offset)
-                }
+            if delta_down.abs() > 300_000 || delta_up.abs() > 300_000 {
+                info!("Rejected deltas!");
+                0
             } else {
-                (0, 0)
-            };
+                let nw_delay = (delta_down + *delta_up as i64) / 2;
+
+                info!("network delay: {} ms", nw_delay as f32 / 1000.0);
+                nw_delay
+            }
+        } else {
+            0
+        };
+
+        // Simple filter ofr now
+        let avg_delay = (self.prev_delay + delay) / 2;
 
         // Use the network delay to make up for transmission time, etc.
-        let current_true_time = hb.gps_time_us as i64 - delay;
+        let current_true_time = hb.gps_time_us as i64 - avg_delay;
         let time_sync = Some(((current_true_time) as u64, sending_instant));
 
         // Now update drift
@@ -448,23 +449,23 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
         let delta_err = err - self.prev_err;
         let delta_u = (KP_PPB * delta_err) + (KI_PPB * err);
 
-        let skew_ratio = self.v_s + delta_u;
+        let new_speed = self.v_s + delta_u;
 
         // Debug info:
         if my_stamp != hb.gps_time_us {
             let delay: i64 = my_stamp as i64 - hb.gps_time_us as i64;
             info!(
-                "Measured drift: {} ms | err: {} ms | ratio: {} | self ratio: {}",
+                "Measured delay: {} ms | err: {} ms | prev speed: {} | new speed: {}",
                 delay as f32 / 1000_f32,
                 err as f32 / 1000_f32,
-                skew_ratio,
-                self.v_s
+                self.v_s,
+                new_speed,
             );
         } else {
             info!("Perfectly synced?!");
         }
 
-        (skew_ratio, time_sync, err)
+        (new_speed, time_sync, err, avg_delay)
     }
 
     /// Use ToA calculation together with other delay variables to approximate what our local
@@ -507,11 +508,12 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
                     // Calculate updated skew and timestamps
-                    let (skew_ratio, time_sync, err) =
+                    let (skew_ratio, time_sync, err, delay) =
                         self.update_skew_and_stamp(&alloc, rx_pkt, sending_instant);
                     self.v_s = skew_ratio;
                     self.time_sync = time_sync;
                     self.prev_err = err;
+                    self.prev_delay = delay;
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {

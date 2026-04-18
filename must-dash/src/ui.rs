@@ -25,11 +25,11 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // --- 1. Analytics Header (Medians) ---
     let header_text = format!(
-        " 📡 Medians (last 10) | Drift: {}ms | Err: {}ms | Ratio: {} | Self Ratio: {}  [Press TAB to switch focus] ",
-        format_opt(app.drift.median()),
+        "  Medians (last 10) | Error: {}ms | Err: {}ms | Ratio: {} | Self Ratio: {}  [Press TAB to switch focus] ",
+        format_opt(app.delay.median()),
         format_opt(app.err.median()),
-        format_opt(app.ratio.median()),
-        format_opt(app.self_ratio.median()),
+        format_opt(app.prev_speed.median()),
+        format_opt(app.new_speed.median()),
     );
 
     let header = Paragraph::new(header_text)
@@ -60,19 +60,19 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // We base the loop on the longest list we might have.
     // Usually drift and delta_up will be the exact same length.
-    let max_len = app.drift.values.len().max(app.delta_up.values.len());
+    let max_len = app.delay.values.len().max(app.delta_up.values.len());
 
     for i in 0..max_len {
         // Safely extract from parallel arrays, formatting if present
-        let drift_str = app
-            .drift
+        let delay_str = app
+            .delay
             .values
             .get(i)
             .map(|&v| format!("{:.3}ms", v))
             .unwrap_or_else(|| "--".to_string());
 
-        let ratio_str = app
-            .ratio
+        let speed = app
+            .new_speed
             .values
             .get(i)
             .map(|&v| format!("{:.0}", v))
@@ -94,10 +94,10 @@ pub fn draw(f: &mut Frame, app: &App) {
 
         // Format the expanded row
         history_items.push(ListItem::new(format!(
-            "Entry {i:02}: Drift = {drift:<10} | Ratio = {ratio:<10} | Δ Up = {up:<8} | Δ Down = {down}",
+            "Entry {i:02}: Drift = {drift:<10} | speed = {ratio:<10} | Δ Up = {up:<8} | Δ Down = {down}",
             i = i + 1,
-            drift = drift_str,
-            ratio = ratio_str,
+            drift = delay_str,
+            ratio = speed,
             up = up_str,
             down = down_str
         )));
