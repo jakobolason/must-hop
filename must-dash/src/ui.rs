@@ -1,17 +1,122 @@
-use crate::app::{App, Focus};
+use crate::app::{App, AppView, DashFocus, LandingFocus};
 use ansi_to_tui::IntoText;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
 pub fn draw(f: &mut Frame, app: &App) {
+    match app.view {
+        AppView::Landing => draw_landing(f, app),
+        AppView::Dashboard => draw_dash(f, app),
+    }
+
+    if app.shutting_down {
+        let area = centered_rect(60, 20, f.area());
+        f.render_widget(Clear, area); // Clears the background logs behind the popup
+        let popup = Paragraph::new("\nShutting down background processes gracefully...\n\nDisconnecting SSH and Debug Probe.")
+            .block(Block::default().title(" Exiting ").borders(Borders::ALL).style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)))
+            .alignment(Alignment::Center);
+        f.render_widget(popup, area);
+    }
+}
+
+fn draw_landing(f: &mut Frame, app: &App) {
+    let area = centered_rect(40, 60, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Configuration Setup ")
+        .borders(Borders::ALL);
+    f.render_widget(block, area);
+
+    let inner_area = area.inner(Margin {
+        vertical: 2,
+        horizontal: 2,
+    });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // KP
+            Constraint::Length(3), // KI
+            Constraint::Length(3), // SOURCEID
+            Constraint::Length(2), // Spacer
+            Constraint::Length(3), // Start Button
+        ])
+        .split(inner_area);
+
+    let active_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let inactive_style = Style::default().fg(Color::DarkGray);
+
+    let kp_style = if app.landing_focus == LandingFocus::Kp {
+        active_style
+    } else {
+        inactive_style
+    };
+    let ki_style = if app.landing_focus == LandingFocus::Ki {
+        active_style
+    } else {
+        inactive_style
+    };
+    let src_style = if app.landing_focus == LandingFocus::SourceId {
+        active_style
+    } else {
+        inactive_style
+    };
+    let start_style = if app.landing_focus == LandingFocus::Start {
+        active_style
+    } else {
+        inactive_style
+    };
+
+    let kp_p = Paragraph::new(app.env_vars.kp.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" KP (Environment Variable) "),
+        )
+        .style(kp_style);
+    f.render_widget(kp_p, chunks[0]);
+
+    let ki_p = Paragraph::new(app.env_vars.ki.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" KI (Environment Variable) "),
+        )
+        .style(ki_style);
+    f.render_widget(ki_p, chunks[1]);
+
+    let src_p = Paragraph::new(app.env_vars.source_id.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" SOURCEID (Environment Variable) "),
+        )
+        .style(src_style);
+    f.render_widget(src_p, chunks[2]);
+
+    let start_text = if app.landing_focus == LandingFocus::Start {
+        " [ START PROGRAM ] "
+    } else {
+        "   START PROGRAM   "
+    };
+    let start_p = Paragraph::new(start_text)
+        .block(Block::default().borders(Borders::ALL))
+        .style(start_style)
+        .alignment(Alignment::Center);
+    f.render_widget(start_p, chunks[4]);
+}
+
+fn draw_dash(f: &mut Frame, app: &App) {
     // Determine heights based on what is in focus
-    let (data_constraint, log_constraint) = match app.focus {
-        Focus::Data => (Constraint::Percentage(50), Constraint::Percentage(50)),
-        Focus::Logs => (Constraint::Length(3), Constraint::Min(0)), // Data collapses to 3 lines
+    let (data_constraint, log_constraint) = match app.dash_focus {
+        DashFocus::Data => (Constraint::Percentage(50), Constraint::Percentage(50)),
+        DashFocus::Logs => (Constraint::Length(3), Constraint::Min(0)), // Data collapses to 3 lines
     };
 
     let main_chunks = Layout::default()
@@ -25,11 +130,11 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // --- 1. Analytics Header (Medians) ---
     let header_text = format!(
-        "  Medians (last 10) | Error: {}ms | Err: {}ms | Ratio: {} | Self Ratio: {}  [Press TAB to switch focus] ",
-        format_opt(app.delay.median()),
-        format_opt(app.err.median()),
-        format_opt(app.prev_speed.median()),
-        format_opt(app.new_speed.median()),
+        "  Medians (last 10) | Error: {}ms | Err: {}ms | Ratio: {} | Self Ratio: {}  [TAB: Focus | ESC: Back | Q: Quit] ",
+        format_opt(app.dash_stats.delay.median()),
+        format_opt(app.dash_stats.err.median()),
+        format_opt(app.dash_stats.prev_speed.median()),
+        format_opt(app.dash_stats.new_speed.median()),
     );
 
     let header = Paragraph::new(header_text)
@@ -41,8 +146,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         );
     f.render_widget(header, main_chunks[0]);
 
-    // --- 2. Middle Row (Data View) ---
-    let data_title = if app.focus == Focus::Data {
+    let data_title = if app.dash_focus == DashFocus::Data {
         " Data History (FOCUSED) "
     } else {
         " Data History "
@@ -50,7 +154,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     let data_block = Block::default()
         .borders(Borders::ALL)
         .title(data_title)
-        .style(if app.focus == Focus::Data {
+        .style(if app.dash_focus == DashFocus::Data {
             Style::default().fg(Color::LightCyan)
         } else {
             Style::default().fg(Color::DarkGray)
@@ -60,11 +164,17 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // We base the loop on the longest list we might have.
     // Usually drift and delta_up will be the exact same length.
-    let max_len = app.delay.values.len().max(app.delta_up.values.len());
+    let max_len = app
+        .dash_stats
+        .delay
+        .values
+        .len()
+        .max(app.dash_stats.delta_up.values.len());
 
     for i in 0..max_len {
         // Safely extract from parallel arrays, formatting if present
         let delay_str = app
+            .dash_stats
             .delay
             .values
             .get(i)
@@ -72,6 +182,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             .unwrap_or_else(|| "--".to_string());
 
         let speed = app
+            .dash_stats
             .new_speed
             .values
             .get(i)
@@ -79,6 +190,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             .unwrap_or_else(|| "--".to_string());
 
         let up_str = app
+            .dash_stats
             .delta_up
             .values
             .get(i)
@@ -86,6 +198,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             .unwrap_or_else(|| "--".to_string());
 
         let down_str = app
+            .dash_stats
             .delta_down
             .values
             .get(i)
@@ -112,7 +225,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[2]);
 
-    let log_title_style = if app.focus == Focus::Logs {
+    let log_title_style = if app.dash_focus == DashFocus::Logs {
         Style::default().fg(Color::White)
     } else {
         Style::default().fg(Color::DarkGray)
@@ -151,15 +264,6 @@ pub fn draw(f: &mut Frame, app: &App) {
         .len()
         .saturating_sub(log_chunks[1].height as usize - 2);
     f.render_widget(gw_panel.scroll((gw_scroll as u16, 0)), log_chunks[1]);
-
-    if app.shutting_down {
-        let area = centered_rect(60, 20, f.area());
-        f.render_widget(Clear, area); // Clears the background logs behind the popup
-        let popup = Paragraph::new("\nShutting down background processes gracefully...\n\nDisconnecting SSH and Debug Probe.")
-            .block(Block::default().title(" Exiting ").borders(Borders::ALL).style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)))
-            .alignment(Alignment::Center);
-        f.render_widget(popup, area);
-    }
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

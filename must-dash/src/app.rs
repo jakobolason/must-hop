@@ -1,6 +1,6 @@
 use crossterm::event::KeyCode;
 use regex::Regex;
-use std::{collections::VecDeque, sync::OnceLock};
+use std::{collections::VecDeque, env, sync::OnceLock};
 
 pub enum AppEvent {
     Input(KeyCode),
@@ -99,6 +99,12 @@ impl DashStats {
     }
 }
 
+impl Default for DashStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct App {
     pub view: AppView,
     pub landing_focus: LandingFocus,
@@ -137,24 +143,72 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
+        let kp = env::var("KP").unwrap_or("0".to_string());
+        let ki = env::var("KI").unwrap_or("0".to_string());
+        let source_id = env::var("SOURCEID").unwrap_or("0".to_string());
+
         Self {
+            landing_focus: LandingFocus::Kp,
+            dash_focus: DashFocus::Logs,
+            view: AppView::Landing,
+            env_vars: EnvVars { kp, ki, source_id },
+
             node_logs: VecDeque::with_capacity(500),
             gw_logs: VecDeque::with_capacity(500),
-            focus: Focus::Logs, // Default focus
-            delay: RollingStat::new(30),
-            err: RollingStat::new(30),
-            prev_speed: RollingStat::new(30),
-            new_speed: RollingStat::new(30),
-            delta_up: RollingStat::new(30),
-            delta_down: RollingStat::new(30),
+
+            dash_stats: DashStats::new(),
             shutting_down: false,
         }
     }
 
-    pub fn toggle_focus(&mut self) {
-        self.focus = match self.focus {
-            Focus::Data => Focus::Logs,
-            Focus::Logs => Focus::Data,
+    pub fn reset_data(&mut self) {
+        self.node_logs.clear();
+        self.gw_logs.clear();
+        self.dash_stats = DashStats::new();
+    }
+
+    pub fn next_landing_focus(&mut self) {
+        self.landing_focus = match self.landing_focus {
+            LandingFocus::Kp => LandingFocus::Ki,
+            LandingFocus::Ki => LandingFocus::SourceId,
+            LandingFocus::SourceId => LandingFocus::Start,
+            LandingFocus::Start => LandingFocus::Kp,
+        }
+    }
+
+    pub fn prev_landing_focus(&mut self) {
+        self.landing_focus = match self.landing_focus {
+            LandingFocus::Kp => LandingFocus::Start,
+            LandingFocus::Ki => LandingFocus::Kp,
+            LandingFocus::SourceId => LandingFocus::Ki,
+            LandingFocus::Start => LandingFocus::SourceId,
+        };
+    }
+
+    pub fn type_char(&mut self, c: char) {
+        let s = match self.landing_focus {
+            LandingFocus::Kp => &mut self.env_vars.kp,
+            LandingFocus::Ki => &mut self.env_vars.ki,
+            LandingFocus::SourceId => &mut self.env_vars.source_id,
+            LandingFocus::Start => return,
+        };
+        s.push(c);
+    }
+
+    pub fn backspace(&mut self) {
+        let s = match self.landing_focus {
+            LandingFocus::Kp => &mut self.env_vars.kp,
+            LandingFocus::Ki => &mut self.env_vars.ki,
+            LandingFocus::SourceId => &mut self.env_vars.source_id,
+            LandingFocus::Start => return,
+        };
+        s.pop();
+    }
+
+    pub fn toggle_dash_focus(&mut self) {
+        self.dash_focus = match self.dash_focus {
+            DashFocus::Data => DashFocus::Logs,
+            DashFocus::Logs => DashFocus::Data,
         };
     }
 
@@ -166,16 +220,16 @@ impl App {
                 && let Some(caps) = get_regex().captures(&clean_log)
             {
                 if let Ok(d) = caps[1].parse::<f32>() {
-                    self.delay.push(d);
+                    self.dash_stats.delay.push(d);
                 }
                 if let Ok(e) = caps[2].parse::<f32>() {
-                    self.err.push(e);
+                    self.dash_stats.err.push(e);
                 }
                 if let Ok(r) = caps[3].parse::<f32>() {
-                    self.prev_speed.push(r);
+                    self.dash_stats.prev_speed.push(r);
                 }
                 if let Ok(sr) = caps[4].parse::<f32>() {
-                    self.new_speed.push(sr);
+                    self.dash_stats.new_speed.push(sr);
                 }
             }
         } else if log.contains("Delta up:") {
@@ -184,10 +238,10 @@ impl App {
                 && let Some(caps) = get_delta_regex().captures(&clean_log)
             {
                 if let Ok(up) = caps[1].parse::<f32>() {
-                    self.delta_up.push(up);
+                    self.dash_stats.delta_up.push(up);
                 }
                 if let Ok(down) = caps[2].parse::<f32>() {
-                    self.delta_down.push(down);
+                    self.dash_stats.delta_down.push(down);
                 }
             }
         }
