@@ -6,12 +6,8 @@ use crossterm::{
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, process::Stdio, time::Duration};
-use tokio::{
-    io::{AsyncReadExt, BufReader},
-    process::Command,
-    sync::mpsc,
-};
+use std::{io, time::Duration};
+use tokio::sync::mpsc;
 
 use must_dash::app::{App, AppEvent};
 use must_dash::ui;
@@ -126,17 +122,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         |text, overwrite| AppEvent::NodeLog { text, overwrite },
     );
 
-    // spawn_log_reader(
-    //     node_child.stdout.take().unwrap(),
-    //     tx.clone(),
-    //     |text, overwrite| AppEvent::NodeLog { text, overwrite },
-    // );
-    // spawn_log_reader(
-    //     node_child.stderr.take().unwrap(),
-    //     tx.clone(),
-    //     |text, overwrite| AppEvent::NodeLog { text, overwrite },
-    // );
-
     // GW process
     let mut gw_child = spawn_pty_reader(
         "just",
@@ -149,17 +134,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tx.clone(),
         |text, overwrite| AppEvent::GwLog { text, overwrite },
     );
-
-    // spawn_log_reader(
-    //     gw_child.stdout.take().unwrap(),
-    //     tx.clone(),
-    //     |text, overwrite| AppEvent::GwLog { text, overwrite },
-    // );
-    // spawn_log_reader(
-    //     gw_child.stderr.take().unwrap(),
-    //     tx.clone(),
-    //     |text, overwrite| AppEvent::GwLog { text, overwrite },
-    // );
 
     let mut app = App::new();
     loop {
@@ -189,14 +163,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = signal::kill(Pid::from_raw(-(pid as i32)), Signal::SIGINT);
     }
     let _ = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(1),
         tokio::task::spawn_blocking(move || {
             let _ = node_child.wait();
         }),
     )
     .await;
     let _ = tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(1),
         tokio::task::spawn_blocking(move || {
             let _ = gw_child.wait();
         }),

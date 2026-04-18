@@ -2,9 +2,9 @@ use super::{MHPacket, PacketType};
 use core::cmp::{max, min};
 
 #[cfg(not(feature = "in_std"))]
-use defmt::{debug, error, trace};
+use defmt::{error, trace};
 #[cfg(feature = "in_std")]
-use log::{debug, error, trace};
+use log::{error, trace};
 
 use embassy_time::{Duration, Instant};
 use heapless::Vec;

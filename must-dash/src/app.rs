@@ -10,7 +10,21 @@ pub enum AppEvent {
 }
 
 #[derive(PartialEq)]
-pub enum Focus {
+pub enum AppView {
+    Landing,
+    Dashboard,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum LandingFocus {
+    Kp,
+    Ki,
+    SourceId,
+    Start,
+}
+
+#[derive(PartialEq)]
+pub enum DashFocus {
     Data,
     Logs,
 }
@@ -51,17 +65,51 @@ impl RollingStat {
     }
 }
 
-pub struct App {
-    pub node_logs: VecDeque<String>,
-    pub gw_logs: VecDeque<String>,
-    pub focus: Focus,
+impl Default for RollingStat {
+    fn default() -> Self {
+        Self::new(10)
+    }
+}
 
+pub struct EnvVars {
+    pub kp: String,
+    pub ki: String,
+    pub source_id: String,
+}
+
+pub struct DashStats {
     pub delay: RollingStat,
     pub err: RollingStat,
     pub prev_speed: RollingStat,
     pub new_speed: RollingStat,
     pub delta_up: RollingStat,
     pub delta_down: RollingStat,
+}
+
+impl DashStats {
+    pub fn new() -> Self {
+        Self {
+            delay: RollingStat::default(),
+            err: RollingStat::default(),
+            prev_speed: RollingStat::default(),
+            new_speed: RollingStat::default(),
+            delta_up: RollingStat::default(),
+            delta_down: RollingStat::default(),
+        }
+    }
+}
+
+pub struct App {
+    pub view: AppView,
+    pub landing_focus: LandingFocus,
+    pub dash_focus: DashFocus,
+
+    pub env_vars: EnvVars,
+
+    pub node_logs: VecDeque<String>,
+    pub gw_logs: VecDeque<String>,
+
+    pub dash_stats: DashStats,
 
     pub shutting_down: bool,
 }

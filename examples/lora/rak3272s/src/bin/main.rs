@@ -6,46 +6,46 @@
 #[path = "../iv.rs"]
 mod iv;
 
-use core::num::NonZeroU8;
-
 use defmt::{error, info};
 use embassy_executor::Spawner;
-use embassy_stm32::peripherals;
-use embassy_stm32::rcc::LsConfig;
-use embassy_stm32::rng;
-use embassy_stm32::rng::Rng;
+use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel, channel::Channel};
+
 use embassy_stm32::{
     Config, bind_interrupts,
     gpio::{Level, Output, Speed},
+    mode::Async,
+    peripherals,
+    rcc::LsConfig,
     rcc::{MSIRange, Sysclk, mux},
+    rng,
+    rng::Rng,
     spi::Spi,
+    spi::mode::Master,
 };
-use embassy_sync::channel;
-use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel::Channel};
-use embassy_time::Duration;
-use embassy_time::Instant;
+
 use embassy_time::{Delay, Timer};
 use heapless::Vec;
-use lora_phy::LoRa;
-use lora_phy::mod_params::RadioError;
-use lora_phy::mod_params::{Bandwidth, CodingRate, SpreadingFactor};
-use lora_phy::sx126x;
-use lora_phy::sx126x::{Stm32wl, Sx126x};
-use must_hop::lora::LoraNode;
-use must_hop::node::MHPacket;
-use must_hop::node::policy::NodePolicy;
-use must_hop::node::{
-    mesh_router, network_manager,
-    policy::{RandomAccessMac, TdmaMac},
+
+use lora_phy::{
+    LoRa,
+    mod_params::RadioError,
+    mod_params::{Bandwidth, CodingRate, SpreadingFactor},
+    sx126x,
+    sx126x::{Stm32wl, Sx126x},
+};
+
+use must_hop::{
+    lora::{LoraNode, TransmitParameters},
+    node::{
+        mesh_router, network_manager,
+        policy::NodePolicy,
+        policy::{RandomAccessMac, TdmaMac},
+    },
 };
 use {defmt_rtt as _, panic_probe as _};
 
 use self::iv::{InterruptHandler, Stm32wlInterfaceVariant, SubghzSpiDevice};
 
-use embassy_stm32::spi::mode::Master;
-
-use embassy_stm32::mode::Async;
-use must_hop::{lora::TransmitParameters, tasks::lora};
 use postcard::to_slice;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -59,6 +59,8 @@ static CHANNEL: Channel<ThreadModeRawMutex, SensorData, 3> = Channel::new();
 // environment values
 include!(concat!(env!("OUT_DIR"), "/source_id.rs"));
 const DEFAULT_SOURCEID: u8 = 2;
+const DEFAULT_KI: i64 = 25;
+const DEFAULT_KP: i64 = 20;
 
 bind_interrupts!(struct Irqs{
     SUBGHZ_RADIO => InterruptHandler;
@@ -145,6 +147,14 @@ const MAX_PACK_LEN: usize = 40;
 const MAX_RADIO_BUFFER: usize = 256; // kB
 const LEN: usize = 5; // floor(256/MAX_PACK_LEN)
 
+// const KP: f32 = 0.4;
+// const KI: f32 = 0.5;
+//
+// // unit conversion mu secs error(1e-6) -> PPB output (1e-9)
+// // Not necessarily PPB here
+// const KP_PPB: i64 = (KP * 50.0) as i64;
+// const KI_PPB: i64 = (KI * 50.0) as i64;
+
 #[embassy_executor::task]
 pub async fn lora_task(
     mut lora: Stm32wlLoRa<'static, Master>,
@@ -176,15 +186,14 @@ pub async fn lora_task(
         }
     };
     // let mac = RandomAccessMac::new();
-    let mac = TdmaMac::new(
-        Duration::from_secs(1),
-        NonZeroU8::new(10).unwrap(),
-        None,
-        None,
-        Some(20334395),
-        Some(debug_pin),
-        source_id,
-    );
+
+    let ki = KI.unwrap_or(DEFAULT_KP);
+    let kp = KP.unwrap_or(DEFAULT_KP);
+    let mac = TdmaMac::default()
+        .set_controller(20334395, kp, ki)
+        .set_debug_pin(debug_pin)
+        .set_expected_slot(source_id)
+        .build();
     let nm =
         network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(source_id, timeout, max_retries);
     let mut router = mesh_router::MeshRouter::new(node, nm, mac, NodePolicy);

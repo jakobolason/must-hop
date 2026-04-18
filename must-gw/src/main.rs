@@ -1,7 +1,4 @@
-use std::{
-    num::NonZeroU8,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::error;
 use must_gw::{create_concentrator, node};
@@ -75,21 +72,18 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
     let sync_pin = gpio.get(21).expect("Failed to get GPIO 21").into_output();
 
-    let mac = TdmaMac::<_, 128>::new(
-        embassy_time::Duration::from_secs(1),
-        NonZeroU8::new(10).unwrap(),
-        Some((
+    let mac = TdmaMac::default()
+        .set_debug_pin(sync_pin)
+        .set_expected_slot(gw_source_id)
+        .set_time_sync((
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards")
                 .as_micros() as u64,
             embassy_time::Instant::now(),
-        )),
-        Some(5),
-        None,
-        Some(sync_pin),
-        gw_source_id,
-    );
+        ))
+        .build();
+
     // let mac = RandomAccessMac::new();
     log::info!("Now making mesh router ...");
     let mut router = MeshRouter::new(

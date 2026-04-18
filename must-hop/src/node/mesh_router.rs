@@ -176,42 +176,42 @@ where
     //     self.send_packets(&timeouted_pkts).await
     // }
 
-    async fn send_packets(
-        &mut self,
-        // pkts: Vec<MHPacket<SIZE>, LEN>,
-        pkts: &[MHPacket<SIZE>],
-    ) -> Result<(), MeshRouterError<Node::Error>> {
-        self.node
-            .transmit(pkts)
-            .await
-            .map_err(MeshRouterError::Node)?;
-        Ok(())
-    }
+    // async fn send_packets(
+    //     &mut self,
+    //     // pkts: Vec<MHPacket<SIZE>, LEN>,
+    //     pkts: &[MHPacket<SIZE>],
+    // ) -> Result<(), MeshRouterError<Node::Error>> {
+    //     self.node
+    //         .transmit(pkts)
+    //         .await
+    //         .map_err(MeshRouterError::Node)?;
+    //     Ok(())
+    // }
 
-    /// Handles that when receiving, the packet type can be stream, therefore this keeps on
-    /// listening. Then adds packets to be sent on via the NetworkManager. Lastly, those packets
-    /// are sent again if not meant for this node
-    pub async fn receive(
-        &mut self,
-        conn: Node::Connection,
-        receiving_buffer: &Node::ReceiveBuffer,
-    ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
-        // TODO: should be able to receieve multiple packets
-        let (pkts, rx_hw_timestamp) = self
-            .node
-            .receive(conn, receiving_buffer)
-            .await
-            .map_err(MeshRouterError::Node)?;
-        trace!("Done receiving, handling {} pkts", pkts.len());
-
-        let (to_send, my_pkt) = self.manager.handle_packets(pkts)?;
-        trace!("GOT {} packets for me!", my_pkt.len());
-        trace!("GOT {} packets which should be sent on!", to_send.len());
-        if !to_send.is_empty() {
-            self.send_packets(&to_send).await?;
-        }
-        Ok(my_pkt)
-    }
+    // /// Handles that when receiving, the packet type can be stream, therefore this keeps on
+    // /// listening. Then adds packets to be sent on via the NetworkManager. Lastly, those packets
+    // /// are sent again if not meant for this node
+    // pub async fn receive(
+    //     &mut self,
+    //     conn: Node::Connection,
+    //     receiving_buffer: &Node::ReceiveBuffer,
+    // ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
+    //     // TODO: should be able to receieve multiple packets
+    //     let (pkts, rx_hw_timestamp) = self
+    //         .node
+    //         .receive(conn, receiving_buffer)
+    //         .await
+    //         .map_err(MeshRouterError::Node)?;
+    //     trace!("Done receiving, handling {} pkts", pkts.len());
+    //
+    //     let (to_send, my_pkt) = self.manager.handle_packets(pkts)?;
+    //     trace!("GOT {} packets for me!", my_pkt.len());
+    //     trace!("GOT {} packets which should be sent on!", to_send.len());
+    //     if !to_send.is_empty() {
+    //         self.send_packets(&to_send).await?;
+    //     }
+    //     Ok(my_pkt)
+    // }
 
     // only for tests
     #[doc(hidden)]
