@@ -74,7 +74,8 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
 
     let mac = TdmaMac::default()
         .set_debug_pin(sync_pin)
-        .set_expected_slot(gw_source_id)
+        .set_node_id(1)
+        .set_tx_slot(1)
         .set_time_sync((
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

@@ -192,7 +192,7 @@ pub async fn lora_task(
     let mac = TdmaMac::default()
         .set_controller(20334395, kp, ki)
         .set_debug_pin(debug_pin)
-        .set_expected_slot(source_id)
+        .set_node_id(source_id)
         .build();
     let nm =
         network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(source_id, timeout, max_retries);

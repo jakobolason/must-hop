@@ -61,8 +61,7 @@ impl Controller {
         let (old_gps, last_stamp) = match time_sync {
             Some(stamps) => stamps,
             None => {
-                // Short circuit from function if not set
-                info!("TDMA: Initial epoch set");
+                info!("[SYNC] Initial epoch set");
                 return (self.v_s, Some((hb.gps_time_us, sending_instant)), 0, 0);
             }
         };
@@ -70,14 +69,14 @@ impl Controller {
         // Calculate skews
         // let my_stamp = self.current_gps_time((old_gps, last_stamp));
         let my_diff = (sending_instant - last_stamp).as_micros();
-        let predicted_elapsed = self.calc_drift_duration(my_diff);
+        let predicted_elapsed = my_diff + self.calc_drift_duration(my_diff);
         let my_stamp = predicted_elapsed + old_gps;
         // instant was just when we received the preamble. But perhaps the difference between that
         // instant and now is the same as ToA
         let now = Instant::now();
         let difference = now - sending_instant;
         info!(
-            "now:\t | est. send:\t | diff:\t | toa:\n\t\t{}s\t{}s\t{}ms\t{}ms",
+            "[TIMING] now: {}s | send: {}s | diff: {}ms | toa: {}ms",
             now.as_millis() as f32 / 1000.0,
             sending_instant.as_millis() as f32 / 1000.0,
             difference.as_micros() as f32 / 1000.0,
@@ -88,20 +87,24 @@ impl Controller {
         let delay = if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == node_id) {
             // delta is our T3 - T2
             let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
-
-            info!(
-                "Delta up: {} | Delta down: {}",
-                *delta_up as f32 / 1000.0,
-                delta_down as f32 / 1000.0
-            );
-
+            let up_ms = *delta_up as f32 / 1000.0;
+            let down_ms = delta_down as f32 / 1000.0;
             if delta_down.abs() > 300_000 || delta_up.abs() > 300_000 {
-                info!("Rejected deltas!");
+                // 2A. DELTAS REJECTED LOG
+                info!(
+                    "[DELTAS] up: {}ms | down: {}ms | status: REJECTED",
+                    up_ms, down_ms
+                );
                 0
             } else {
                 let nw_delay = (delta_down + *delta_up as i64) / 2;
-
-                info!("network delay: {} ms", nw_delay as f32 / 1000.0);
+                // 2B. DELTAS ACCEPTED LOG
+                info!(
+                    "[DELTAS] up: {}ms | down: {}ms | nw_delay: {}ms",
+                    up_ms,
+                    down_ms,
+                    nw_delay as f32 / 1000.0
+                );
                 nw_delay
             }
         } else {
@@ -127,16 +130,16 @@ impl Controller {
 
         // Debug info:
         if my_stamp != hb.gps_time_us {
-            let delay: i64 = my_stamp as i64 - hb.gps_time_us as i64;
+            let measured_delay: i64 = my_stamp as i64 - hb.gps_time_us as i64;
             info!(
-                "Measured delay: {} ms | err: {} ms | prev speed: {} | new speed: {}",
-                delay as f32 / 1000_f32,
-                err as f32 / 1000_f32,
+                "[SYNC]   delay: {}ms | err: {}ms | v_prev: {} | v_new: {}",
+                measured_delay as f32 / 1000.0,
+                err as f32 / 1000.0,
                 self.v_s,
                 new_speed,
             );
         } else {
-            info!("Perfectly synced?!");
+            info!("[SYNC]   Perfectly synced?!");
         }
 
         (new_speed, time_sync, err, avg_delay)

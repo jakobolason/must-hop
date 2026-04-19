@@ -130,7 +130,7 @@ fn draw_dash(f: &mut Frame, app: &App) {
 
     // --- 1. Analytics Header (Medians) ---
     let header_text = format!(
-        "  Medians (last 10) | Error: {}ms | Err: {}ms | Ratio: {} | Self Ratio: {}  [TAB: Focus | ESC: Back | Q: Quit] ",
+        "  Medians (last 10) | Error: {}ms | Err: {}ms | Prev Speed: {} | New speed: {}  [TAB: Focus | ESC: Back | Q: Quit] ",
         format_opt(app.dash_stats.delay.median()),
         format_opt(app.dash_stats.err.median()),
         format_opt(app.dash_stats.prev_speed.median()),

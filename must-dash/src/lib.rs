@@ -44,33 +44,33 @@ fn spawn_pty_reader(
     tokio::task::spawn_blocking(move || {
         let mut buf = Vec::new();
         let mut byte = [0u8; 1];
-        let mut last_was_cr = false;
         loop {
-            match master_reader.read(&mut byte) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {
-                    let b = byte[0];
-                    if b == b'\r' {
+            if let Ok(0) | Err(_) = master_reader.read(&mut byte) {
+                break;
+            }
+            match byte[0] {
+                b'\r' => {
+                    if !buf.is_empty() {
                         let line = String::from_utf8_lossy(&buf).into_owned();
                         let _ = tx.blocking_send(event_mapper(line, true));
                         buf.clear();
-                        last_was_cr = true;
-                    } else if b == b'\n' {
-                        if last_was_cr {
-                            let _ = tx.blocking_send(event_mapper("".to_string(), false));
-                            last_was_cr = false;
-                        } else {
-                            let line = String::from_utf8_lossy(&buf).into_owned();
-                            if !line.is_empty() {
-                                let _ = tx.blocking_send(event_mapper(line, true));
-                            }
-                            let _ = tx.blocking_send(event_mapper("".to_string(), false));
-                            buf.clear();
-                        }
-                    } else {
-                        last_was_cr = false;
-                        buf.push(b);
                     }
+                }
+                b'\n' => {
+                    if !buf.is_empty() {
+                        let line = String::from_utf8_lossy(&buf).into_owned();
+                        if !line.is_empty() {
+                            let _ = tx.blocking_send(event_mapper(line, true));
+                        }
+                        buf.clear();
+                    }
+                    let _ = tx.blocking_send(event_mapper(String::new(), false));
+                }
+                b'\x08' => {
+                    buf.pop();
+                }
+                b => {
+                    buf.push(b);
                 }
             }
         }
@@ -221,4 +221,3 @@ async fn shutdown_processes(node_child: Option<ChildProcess>, gw_child: Option<C
         .await;
     }
 }
-

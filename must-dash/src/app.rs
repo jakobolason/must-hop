@@ -123,7 +123,9 @@ pub struct App {
 static DRIFT_REGEX: OnceLock<Regex> = OnceLock::new();
 fn get_regex() -> &'static Regex {
     DRIFT_REGEX.get_or_init(|| {
-        Regex::new(r"Measured delay:\s*([-\d.]+)\s*ms\s*\|\s*err:\s*([-\d.]+)\s*ms\s*\|\s*prev speed:\s*([-\d]+)\s*\|\s*new speed:\s*([-\d]+)").unwrap()
+        Regex::new(r"Measured delay:\s*([-\d.]+)\s*ms\s*\|\s*err:\s*([-\d.]+)\s*ms\s*\|\s*prev speed:\s*([-\d.]+)\s*\|\s*new speed:\s*([-\d.]+)").unwrap()
+     // Regex::new(    r"Measured delay:\s*([-\d.]+)\s*ms\s*\|\s*err:\s*([-\d.]+)\s*ms\s*\|\s*prev speed:\s*([-\d]+)\s*\|\s*new speed:\s*([-\d]+)").unwrap()
+
     })
 }
 
@@ -143,9 +145,9 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
-        let kp = env::var("KP").unwrap_or("0".to_string());
-        let ki = env::var("KI").unwrap_or("0".to_string());
-        let source_id = env::var("SOURCEID").unwrap_or("0".to_string());
+        let kp = env::var("KP").unwrap_or("20".to_string());
+        let ki = env::var("KI").unwrap_or("25".to_string());
+        let source_id = env::var("SOURCEID").unwrap_or("7".to_string());
 
         Self {
             landing_focus: LandingFocus::Kp,
@@ -214,34 +216,78 @@ impl App {
 
     pub fn add_node_log(&mut self, log: String, overwrite: bool) {
         // 1. Optimize: Only run expensive regex if the log contains the keyword
-        if log.contains("Measured drift:") {
+        // if log.contains("Measured drift:") {
+        //     let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
+        //     if let Ok(clean_log) = String::from_utf8(stripped_bytes)
+        //         && let Some(caps) = get_regex().captures(&clean_log)
+        //     {
+        //         if let Ok(d) = caps[1].parse::<f32>() {
+        //             self.dash_stats.delay.push(d);
+        //         }
+        //         if let Ok(e) = caps[2].parse::<f32>() {
+        //             self.dash_stats.err.push(e);
+        //         }
+        //         if let Ok(r) = caps[3].parse::<f32>() {
+        //             self.dash_stats.prev_speed.push(r);
+        //         }
+        //         if let Ok(sr) = caps[4].parse::<f32>() {
+        //             self.dash_stats.new_speed.push(sr);
+        //         }
+        //     }
+        // } else if log.contains("Delta up:") {
+        //     let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
+        //     if let Ok(clean_log) = String::from_utf8(stripped_bytes)
+        //         && let Some(caps) = get_delta_regex().captures(&clean_log)
+        //     {
+        //         if let Ok(up) = caps[1].parse::<f32>() {
+        //             self.dash_stats.delta_up.push(up);
+        //         }
+        //         if let Ok(down) = caps[2].parse::<f32>() {
+        //             self.dash_stats.delta_down.push(down);
+        //         }
+        //     }
+        // } else
+        if log.contains("[SYNC]") && log.contains("|") {
             let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
-            if let Ok(clean_log) = String::from_utf8(stripped_bytes)
-                && let Some(caps) = get_regex().captures(&clean_log)
-            {
-                if let Ok(d) = caps[1].parse::<f32>() {
-                    self.dash_stats.delay.push(d);
-                }
-                if let Ok(e) = caps[2].parse::<f32>() {
-                    self.dash_stats.err.push(e);
-                }
-                if let Ok(r) = caps[3].parse::<f32>() {
-                    self.dash_stats.prev_speed.push(r);
-                }
-                if let Ok(sr) = caps[4].parse::<f32>() {
-                    self.dash_stats.new_speed.push(sr);
+            if let Ok(clean_log) = String::from_utf8(stripped_bytes) {
+                // 1. Get everything after "[SYNC]   "
+                if let Some(data_str) = clean_log.split("[SYNC]").nth(1) {
+                    // 2. Split into [" delay: 1.115ms ", " err: -1.115ms ", " v_prev: 17794275 ", " v_new: 17752705"]
+                    let parts: Vec<&str> = data_str.split('|').collect();
+
+                    if parts.len() >= 4 {
+                        // 3. Extract values using quick string manipulation
+                        if let Some(delay_val) = extract_value(parts[0]) {
+                            self.dash_stats.delay.push(delay_val);
+                        }
+                        if let Some(err_val) = extract_value(parts[1]) {
+                            self.dash_stats.err.push(err_val);
+                        }
+                        if let Some(prev_val) = extract_value(parts[2]) {
+                            self.dash_stats.prev_speed.push(prev_val);
+                        }
+                        if let Some(new_val) = extract_value(parts[3]) {
+                            self.dash_stats.new_speed.push(new_val);
+                        }
+                    }
                 }
             }
-        } else if log.contains("Delta up:") {
+        } else if log.contains("[DELTAS]") && log.contains("|") {
             let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
-            if let Ok(clean_log) = String::from_utf8(stripped_bytes)
-                && let Some(caps) = get_delta_regex().captures(&clean_log)
-            {
-                if let Ok(up) = caps[1].parse::<f32>() {
-                    self.dash_stats.delta_up.push(up);
-                }
-                if let Ok(down) = caps[2].parse::<f32>() {
-                    self.dash_stats.delta_down.push(down);
+            if let Ok(clean_log) = String::from_utf8(stripped_bytes) {
+                //  Get everything after "[DELTAS]   "
+                if let Some(data_str) = clean_log.split("[DELTAS]").nth(1) {
+                    // split into ["up: {}ms", "down: {}ms", ".."]
+                    let parts: Vec<&str> = data_str.split('|').collect();
+
+                    if parts.len() >= 2 {
+                        if let Some(delay_val) = extract_value(parts[0]) {
+                            self.dash_stats.delta_up.push(delay_val);
+                        }
+                        if let Some(err_val) = extract_value(parts[1]) {
+                            self.dash_stats.delta_down.push(err_val);
+                        }
+                    }
                 }
             }
         }
@@ -276,4 +322,14 @@ impl App {
             self.gw_logs.pop_front();
         }
     }
+}
+
+fn extract_value(part: &str) -> Option<f32> {
+    part.split(':') // Split into " delay" and " 1.115ms "
+        .nth(1)? // Get the value side
+        .trim() // Remove surrounding spaces
+        .trim_end_matches("ms") // Remove 'ms' if it exists
+        .trim() // Clean up any remaining space
+        .parse::<f32>() // Convert to float
+        .ok()
 }

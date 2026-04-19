@@ -196,9 +196,13 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
-    pub fn set_expected_slot(self, my_tx_slot: u8) -> Self {
+    pub fn set_node_id(self, node_id: u8) -> Self {
+        Self { node_id, ..self }
+    }
+
+    pub fn set_tx_slot(self, tx_slot: u8) -> Self {
         Self {
-            my_tx_slot: Some(my_tx_slot),
+            my_tx_slot: Some(tx_slot),
             ..self
         }
     }
@@ -249,7 +253,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
 impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
     fn default() -> Self {
         TdmaMac::new(
-            Duration::from_secs(10),
+            Duration::from_secs(1),
             NonZeroU8::new(10).unwrap(),
             None,
             None,
@@ -264,7 +268,6 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
     fn gps_time_at(&self, (base_gps_us, sync_instant): (u64, Instant), at_instant: Instant) -> u64 {
         let elapsed_us = (at_instant - sync_instant).as_micros();
-        // FIXME:
         let gw_elapsed_us = elapsed_us + self.controller.calc_drift_duration(elapsed_us);
         // let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
         //     / self.skew_local_diff as u128) as u64;
@@ -349,7 +352,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                         rx_pkt,
                         sending_instant,
                         self.time_sync,
-                        self.node_id,
+                        self.my_tx_slot.unwrap_or(self.node_id),
                     );
                     // self.v_s = skew_ratio;
                     self.time_sync = time_sync;
