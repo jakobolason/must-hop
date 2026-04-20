@@ -195,6 +195,8 @@ fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect) {
     let plot_width = area.width.saturating_sub(2) as usize;
     let chart_data = app.dash_stats.get_chart_data(plot_width);
 
+    let zero_ref_line = [(0.0, 0.0), (chart_data.x_bounds[1], 0.0)];
+
     let datasets = vec![
         Dataset::default()
             .name("Delay")
@@ -220,6 +222,12 @@ fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect) {
             .graph_type(GraphType::Scatter)
             .style(Style::default().fg(Color::Green))
             .data(&chart_data.hw),
+        Dataset::default()
+            .name("0 ms ref")
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(Color::Gray))
+            .data(&zero_ref_line),
     ];
 
     let chart = Chart::new(datasets)
@@ -240,7 +248,11 @@ fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect) {
 fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect) {
     let log_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Percentage(45),
+            Constraint::Percentage(5),
+        ])
         .split(area);
 
     let log_title_style = if app.dash_focus == DashFocus::Logs {
@@ -286,6 +298,32 @@ fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect) {
         .len()
         .saturating_sub(log_chunks[1].height as usize - 2);
     f.render_widget(gw_panel.scroll((gw_scroll as u16, 0)), log_chunks[1]);
+
+    // --- Delay Logs
+    let delay_raw = app
+        .dash_stats
+        .hardware_delay
+        .values
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let delay_text = delay_raw
+        .into_text()
+        .unwrap_or_else(|_| ratatui::text::Text::raw(&delay_raw));
+    let delay_panel = Paragraph::new(delay_text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Measured delay between GW and Node")
+            .style(log_title_style),
+    );
+    let delay_scroll = app
+        .dash_stats
+        .hardware_delay
+        .values
+        .len()
+        .saturating_sub(log_chunks[2].height as usize - 2);
+    f.render_widget(delay_panel.scroll((delay_scroll as u16, 0)), log_chunks[2]);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

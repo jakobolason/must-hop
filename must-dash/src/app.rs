@@ -67,7 +67,7 @@ impl RollingStat {
 
 impl Default for RollingStat {
     fn default() -> Self {
-        Self::new(50)
+        Self::new(200)
     }
 }
 
@@ -94,6 +94,8 @@ pub struct DashStats {
     pub delta_up: RollingStat,
     pub delta_down: RollingStat,
     pub hardware_delay: RollingStat,
+    pub mean_hardware_delay: RollingStat,
+    pub last_hw_idx: usize,
 }
 
 impl DashStats {
@@ -106,60 +108,53 @@ impl DashStats {
             delta_up: RollingStat::default(),
             delta_down: RollingStat::default(),
             hardware_delay: RollingStat::default(),
+            mean_hardware_delay: RollingStat::default(),
+            last_hw_idx: 0,
         }
     }
     pub fn get_history_lines(&self, max_lines: usize) -> Vec<String> {
         let mut items = Vec::new();
         let len = self.delay.values.len();
-        let hw_len = self.hardware_delay.values.len();
-        let synchronized_hw_len = hw_len - (hw_len % 10);
+        // let hw_len = self.hardware_delay.values.len();
+        // let synchronized_hw_len = hw_len - (hw_len % 10);
 
         let start = len.saturating_sub(max_lines);
 
+        let to_str = |rs: &RollingStat, i: usize| {
+            rs.values
+                .get(i)
+                .map_or("--".to_string(), |&v| format!("{:.3}ms", v))
+        };
+
         for i in start..len {
-            let delay_str = self
-                .delay
-                .values
-                .get(i)
-                .map_or("--".to_string(), |&v| format!("{:.3}ms", v));
-            let speed = self
-                .new_speed
-                .values
-                .get(i)
-                .map_or("--".to_string(), |&v| format!("{:.0}", v));
-            let up_str = self
-                .delta_up
-                .values
-                .get(i)
-                .map_or("--".to_string(), |&v| format!("{:.3}", v));
-            let down_str = self
-                .delta_down
-                .values
-                .get(i)
-                .map_or("--".to_string(), |&v| format!("{:.3}", v));
+            let delay_str = to_str(&self.delay, i);
+            let speed = to_str(&self.new_speed, i);
+            let up_str = to_str(&self.delta_up, i);
+            let down_str = to_str(&self.delta_down, i);
+            let hw_delay = to_str(&self.mean_hardware_delay, i);
 
-            let dist_from_end = len.saturating_sub(1).saturating_sub(i);
-            let hw_end = synchronized_hw_len.saturating_sub(dist_from_end * 10);
-            let hw_start = hw_end.saturating_sub(10);
+            // let dist_from_end = len.saturating_sub(1).saturating_sub(i);
+            // let hw_end = synchronized_hw_len.saturating_sub(dist_from_end * 10);
+            // let hw_start = hw_end.saturating_sub(10);
 
-            let mut hw_sum = 0.0;
-            let mut hw_count = 0;
-            for j in hw_start..hw_end {
-                if let Some(&v) = self.hardware_delay.values.get(j) {
-                    hw_sum += v;
-                    hw_count += 1;
-                }
-            }
-
-            let hw_delays_str = if hw_count == 0 {
-                "--".to_string()
-            } else {
-                format!("{:.3}", hw_sum / hw_count as f32)
-            };
+            // let mut hw_sum = 0.0;
+            // let mut hw_count = 0;
+            // for j in hw_start..hw_end {
+            //     if let Some(&v) = self.hardware_delay.values.get(j) {
+            //         hw_sum += v;
+            //         hw_count += 1;
+            //     }
+            // }
+            //
+            // let hw_delays_str = if hw_count == 0 {
+            //     "--".to_string()
+            // } else {
+            //     format!("{:.3}", hw_sum / hw_count as f32)
+            // };
 
             items.push(format!(
                 "HB packet {:02}: Delay = {:<10} | speed = {:<10} | Δ Up = {:<8} | Δ Down = {:<8} | hw delay = {}",
-                i + 1, delay_str, speed, up_str, down_str, hw_delays_str
+                i + 1, delay_str, speed, up_str, down_str, hw_delay
             ));
         }
         items
@@ -169,6 +164,7 @@ impl DashStats {
     pub fn get_chart_data(&self, max_x_points: usize) -> ChartData {
         // Prevent 0 width division issues
         let num_points = max_x_points.max(1);
+        // 10 hw values per 1 heartbeat value
         let hw_ratio = 10.0;
 
         let extract = |deque: &VecDeque<f32>| -> Vec<(f64, f64)> {
@@ -187,12 +183,7 @@ impl DashStats {
 
         let max_hw_points = (num_points as f64 * hw_ratio) as usize;
         let hw_len = self.hardware_delay.values.len();
-        let actual_hw_points = hw_len.min(max_hw_points);
         let hw_start = hw_len.saturating_sub(max_hw_points);
-
-        let sw_len = self.delay.values.len();
-        let current_sw_max_x = (sw_len.min(num_points).saturating_sub(1)) as f64;
-
         let hw: Vec<(f64, f64)> = self
             .hardware_delay
             .values
@@ -200,14 +191,12 @@ impl DashStats {
             .skip(hw_start)
             .enumerate()
             .map(|(i, &v)| {
-                let dist_from_end = (actual_hw_points.saturating_sub(1).saturating_sub(i)) as f64;
-                let x = current_sw_max_x - (dist_from_end / hw_ratio);
+                let x = i as f64 / hw_ratio; // 0, 0.1, 0.2, 0.3, ...
                 (x, v as f64)
             })
-            .filter(|&(x, _)| x >= 0.0)
             .collect();
 
-        // Calculate Y-axis bounds dynamically
+        // Calculate Y-axis bounds
         let mut min_val = f64::INFINITY;
         let mut max_val = f64::NEG_INFINITY;
         for &(_, y) in delay
@@ -373,6 +362,19 @@ impl App {
                         }
                     }
                 }
+                // at sync we calc mean of hw delays
+                let measured_delays: Vec<f32> = self
+                    .dash_stats
+                    .hardware_delay
+                    .values
+                    .iter()
+                    .skip(self.dash_stats.last_hw_idx)
+                    .copied()
+                    .collect();
+                let sum: f32 = measured_delays.iter().sum();
+                let mean = sum / measured_delays.len() as f32;
+                self.dash_stats.mean_hardware_delay.push(mean);
+                self.dash_stats.last_hw_idx = self.dash_stats.hardware_delay.values.len() - 1;
             }
         } else if log.contains("[DELTAS]") && log.contains("|") {
             let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
