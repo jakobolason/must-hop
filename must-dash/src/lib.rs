@@ -12,6 +12,26 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::Mutex;
+
+static DEBUG_LOG: std::sync::LazyLock<Mutex<std::fs::File>> = std::sync::LazyLock::new(|| {
+    Mutex::new(
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/must-dash-debug.log")
+            .expect("Failed to open debug log"),
+    )
+});
+
+pub fn debug_log(msg: &str) {
+    if let Ok(mut f) = DEBUG_LOG.lock() {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
 type ChildProcess = Box<dyn portable_pty::Child + Send + Sync>;
 fn spawn_pty_reader(
     program: &str,
@@ -42,35 +62,65 @@ fn spawn_pty_reader(
     let child = pair.slave.spawn_command(cmd).expect("Failed to spawn");
 
     let mut master_reader = pair.master.try_clone_reader().unwrap();
+    let program = args[0].to_string().clone();
+
     tokio::task::spawn_blocking(move || {
         let mut buf = Vec::new();
         let mut byte = [0u8; 1];
+        let mut pending_cr = false;
+        let log = |st: &str| {
+            if program == "remote-run" {
+                debug_log(st);
+            }
+        };
         loop {
             if let Ok(0) | Err(_) = master_reader.read(&mut byte) {
                 break;
             }
             match byte[0] {
                 b'\r' => {
-                    if !buf.is_empty() {
-                        let line = String::from_utf8_lossy(&buf).into_owned();
-                        let _ = tx.blocking_send(event_mapper(line, true));
-                        buf.clear();
+                    log(&format!(
+                        "CR (pending_cr was: {}), buf so far: {:?}",
+                        pending_cr,
+                        String::from_utf8_lossy(&buf)
+                    ));
+                    if pending_cr {
+                        // Back-to-back \r\r — flush previous as overwrite
+                        if !buf.is_empty() {
+                            let line = String::from_utf8_lossy(&buf).into_owned();
+                            let _ = tx.blocking_send(event_mapper(line, true));
+                            buf.clear();
+                        }
                     }
+                    pending_cr = true;
                 }
                 b'\n' => {
+                    pending_cr = false;
                     if !buf.is_empty() {
                         let line = String::from_utf8_lossy(&buf).into_owned();
-                        if !line.is_empty() {
-                            let _ = tx.blocking_send(event_mapper(line, true));
-                        }
+                        debug_log(&format!("NEWLINE: {:?}", line));
+                        let is_erase_line = buf.starts_with(b"\x1b[2K");
+                        let _ = tx.blocking_send(event_mapper(line, is_erase_line));
                         buf.clear();
                     }
-                    let _ = tx.blocking_send(event_mapper(String::new(), false));
                 }
                 b'\x08' => {
+                    pending_cr = false;
                     buf.pop();
                 }
                 b => {
+                    if pending_cr {
+                        // \r was standalone (progress overwrite) — flush buffer now
+                        if !buf.is_empty() {
+                            let line = String::from_utf8_lossy(&buf).into_owned();
+                            let _ = tx.blocking_send(event_mapper(line, true));
+                            buf.clear();
+                        }
+                        pending_cr = false;
+                    }
+                    if byte[0] < 0x20 || byte[0] == 0x7f {
+                        log(&format!("CTRL: 0x{:02x}", byte[0]));
+                    }
                     buf.push(b);
                 }
             }
@@ -79,6 +129,7 @@ fn spawn_pty_reader(
 
     child
 }
+
 fn spawn_children(
     app: &App,
     tx: Sender<AppEvent>,
@@ -150,6 +201,7 @@ pub async fn run_app(
 
     let quit_fn = |app: &mut App, terminal: &mut Terminal<_>| {
         app.shutting_down = true;
+        app.reset_data();
         let _ = terminal.draw(|f| ui::draw(f, app));
     };
 
@@ -177,11 +229,10 @@ pub async fn run_app(
                         KeyCode::Up => app.prev_landing_focus(),
                         KeyCode::Down | KeyCode::Tab => app.next_landing_focus(),
                         KeyCode::Enter => {
-                            if app.landing_focus == LandingFocus::Start {
-                                app.view = AppView::Dashboard;
-                                (node_child, gw_child, delay_child) =
-                                    spawn_children(&app, tx.clone());
-                            }
+                            // if app.landing_focus == LandingFocus::Start {
+                            app.view = AppView::Dashboard;
+                            (node_child, gw_child, delay_child) = spawn_children(&app, tx.clone());
+                            // }
                         }
                         KeyCode::Backspace => app.backspace(),
                         KeyCode::Char(c) => app.type_char(c),
@@ -199,6 +250,7 @@ pub async fn run_app(
                                 delay_child.take(),
                             ])
                             .await;
+                            app.reset_data();
                             app.view = AppView::Landing;
                         }
                         KeyCode::Tab => app.toggle_dash_focus(),

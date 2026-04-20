@@ -240,8 +240,8 @@ pub struct App {
 
     pub env_vars: EnvVars,
 
-    pub node_logs: VecDeque<String>,
-    pub gw_logs: VecDeque<String>,
+    pub node_logs: Vec<String>,
+    pub gw_logs: Vec<String>,
 
     pub dash_stats: DashStats,
 
@@ -266,8 +266,8 @@ impl App {
             view: AppView::Landing,
             env_vars: EnvVars { kp, ki, source_id },
 
-            node_logs: VecDeque::with_capacity(500),
-            gw_logs: VecDeque::with_capacity(500),
+            node_logs: Vec::new(),
+            gw_logs: Vec::new(),
 
             dash_stats: DashStats::new(),
             shutting_down: false,
@@ -332,6 +332,15 @@ impl App {
     }
 
     pub fn add_node_log(&mut self, log: String, overwrite: bool) {
+        let stripped = strip_ansi_escapes::strip(log.as_bytes());
+        let clean = String::from_utf8_lossy(&stripped);
+        let visible = clean.trim();
+
+        // Drop pure cursor-movement lines with no visible content
+        if visible.is_empty() && overwrite {
+            return;
+        }
+
         if log.contains("[SYNC]") && log.contains("|") {
             let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
             if let Ok(clean_log) = String::from_utf8(stripped_bytes) {
@@ -390,34 +399,34 @@ impl App {
         }
 
         if overwrite {
-            if let Some(last) = self.node_logs.back_mut() {
+            if let Some(last) = self.node_logs.last_mut() {
                 *last = log;
             } else {
-                self.node_logs.push_back(log);
+                self.node_logs.push(log);
             }
         } else {
-            self.node_logs.push_back(log);
+            self.node_logs.push(log);
         }
 
-        if self.node_logs.len() > 500 {
-            self.node_logs.pop_front();
-        }
+        // if self.node_logs.len() > 500 {
+        //     self.node_logs.pop_front();
+        // }
     }
 
     pub fn add_gw_log(&mut self, log: String, overwrite: bool) {
-        if overwrite {
-            if let Some(last) = self.gw_logs.back_mut() {
-                *last = log;
-            } else {
-                self.gw_logs.push_back(log);
-            }
-        } else {
-            self.gw_logs.push_back(log);
-        }
+        // if overwrite {
+        //     if let Some(last) = self.gw_logs.back_mut() {
+        //         *last = log;
+        //     } else {
+        //         self.gw_logs.push_back(log);
+        //     }
+        // } else {
+        self.gw_logs.push(log);
+        // }
 
-        if self.gw_logs.len() > 500 {
-            self.gw_logs.pop_front();
-        }
+        // if self.gw_logs.len() > 500 {
+        //     self.gw_logs.pop_front();
+        // }
     }
 }
 
