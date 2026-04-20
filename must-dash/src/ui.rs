@@ -46,6 +46,7 @@ fn draw_landing(f: &mut Frame, app: &App) {
             Constraint::Length(3), // SOURCEID
             Constraint::Length(2), // Spacer
             Constraint::Length(3), // Start Button
+            Constraint::Length(3), // Save button
         ])
         .split(inner_area);
 
@@ -53,26 +54,12 @@ fn draw_landing(f: &mut Frame, app: &App) {
         .fg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
     let inactive_style = Style::default().fg(Color::DarkGray);
-
-    let kp_style = if app.landing_focus == LandingFocus::Kp {
-        active_style
-    } else {
-        inactive_style
-    };
-    let ki_style = if app.landing_focus == LandingFocus::Ki {
-        active_style
-    } else {
-        inactive_style
-    };
-    let src_style = if app.landing_focus == LandingFocus::SourceId {
-        active_style
-    } else {
-        inactive_style
-    };
-    let start_style = if app.landing_focus == LandingFocus::Start {
-        active_style
-    } else {
-        inactive_style
+    let chosen_style = |cmp: LandingFocus| {
+        if app.landing_focus == cmp {
+            active_style
+        } else {
+            inactive_style
+        }
     };
 
     let kp_p = Paragraph::new(app.env_vars.kp.as_str())
@@ -81,7 +68,7 @@ fn draw_landing(f: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .title(" KP (Environment Variable) "),
         )
-        .style(kp_style);
+        .style(chosen_style(LandingFocus::Kp));
     f.render_widget(kp_p, chunks[0]);
 
     let ki_p = Paragraph::new(app.env_vars.ki.as_str())
@@ -90,7 +77,7 @@ fn draw_landing(f: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .title(" KI (Environment Variable) "),
         )
-        .style(ki_style);
+        .style(chosen_style(LandingFocus::Ki));
     f.render_widget(ki_p, chunks[1]);
 
     let src_p = Paragraph::new(app.env_vars.source_id.as_str())
@@ -99,7 +86,7 @@ fn draw_landing(f: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .title(" SOURCEID (Environment Variable) "),
         )
-        .style(src_style);
+        .style(chosen_style(LandingFocus::SourceId));
     f.render_widget(src_p, chunks[2]);
 
     let start_text = if app.landing_focus == LandingFocus::Start {
@@ -108,10 +95,27 @@ fn draw_landing(f: &mut Frame, app: &App) {
         "   START PROGRAM   "
     };
     let start_p = Paragraph::new(start_text)
-        .block(Block::default().borders(Borders::ALL))
-        .style(start_style)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title_bottom("{ enter }"),
+        )
+        .style(chosen_style(LandingFocus::Start))
         .alignment(Alignment::Center);
     f.render_widget(start_p, chunks[4]);
+
+    // Show a save button if a run was made before
+    if !app.node_logs.is_empty() {
+        let save_button = Paragraph::new("Save data")
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title_bottom("{ s/S }"),
+            )
+            .style(chosen_style(LandingFocus::Save))
+            .alignment(Alignment::Center);
+        f.render_widget(save_button, chunks[5]);
+    }
 }
 
 // NOTE: Dashboard

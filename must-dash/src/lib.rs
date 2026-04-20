@@ -226,13 +226,21 @@ pub async fn run_app(
                                 AppView::Dashboard => app.view = AppView::Landing,
                             }
                         }
-                        KeyCode::Up => app.prev_landing_focus(),
+                        KeyCode::Up | KeyCode::BackTab => app.prev_landing_focus(),
                         KeyCode::Down | KeyCode::Tab => app.next_landing_focus(),
+                        KeyCode::Char('s') | KeyCode::Char('S') => {
+                            app.save_data();
+                        }
                         KeyCode::Enter => {
-                            // if app.landing_focus == LandingFocus::Start {
-                            app.view = AppView::Dashboard;
-                            (node_child, gw_child, delay_child) = spawn_children(&app, tx.clone());
-                            // }
+                            if app.landing_focus == LandingFocus::Save {
+                                app.save_data();
+                            } else {
+                                // Resets logs and data for new run
+                                app.reset_data();
+                                app.view = AppView::Dashboard;
+                                (node_child, gw_child, delay_child) =
+                                    spawn_children(&app, tx.clone());
+                            }
                         }
                         KeyCode::Backspace => app.backspace(),
                         KeyCode::Char(c) => app.type_char(c),
@@ -250,7 +258,6 @@ pub async fn run_app(
                                 delay_child.take(),
                             ])
                             .await;
-                            app.reset_data();
                             app.view = AppView::Landing;
                         }
                         KeyCode::Tab => app.toggle_dash_focus(),

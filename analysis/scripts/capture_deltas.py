@@ -22,8 +22,8 @@ OUTPUT_FILE = "/tmp/timing_delta.csv"
 # WaveForms always shows 10 divisions, so total window = Base × 10.
 _DIVISIONS      = 10
 _WINDOW_S       = (TIME_BASE_MS_PER_DIV / 1000.0) * _DIVISIONS
-_CLOCK_HZ       = 100_000_000          # Digital Discovery internal clock
-_DIVIDER        = round(_CLOCK_HZ / SAMPLE_RATE_HZ)
+# _CLOCK_HZ       = 100_000_000          # Digital Discovery internal clock
+# _DIVIDER        = round(_CLOCK_HZ / SAMPLE_RATE_HZ)
 NUM_SAMPLES     = round(SAMPLE_RATE_HZ * _WINDOW_S)
 
 # FDwfDigitalInTriggerPositionSet takes the number of samples captured *after*
@@ -43,6 +43,7 @@ except ImportError:
 
 dwf = cdll.LoadLibrary("libdwf.so")
 
+
 # ── Open device ───────────────────────────────────────────────────────────
 hdwf = c_int()
 print("Opening Digital Discovery...")
@@ -54,6 +55,12 @@ if hdwf.value == hdwfNone.value:
 
 print("Device opened.")
 
+hzSys = c_double()
+dwf.FDwfDigitalInInternalClockInfo(hdwf, byref(hzSys))
+_CLOCK_HZ = hzSys.value
+_DIVIDER = int(round(_CLOCK_HZ / SAMPLE_RATE_HZ))
+
+dwf.FDwfDigitalInTriggerAutoTimeoutSet(hdwf, c_double(0))
 # ── Configure logic analyser ──────────────────────────────────────────────
 dwf.FDwfDigitalInDividerSet(hdwf, c_int(_DIVIDER))
 dwf.FDwfDigitalInSampleFormatSet(hdwf, c_int(16))   # 16-bit words, DIN0–DIN15
@@ -89,7 +96,7 @@ try:
             dwf.FDwfDigitalInStatus(hdwf, c_int(1), byref(status))
             if status.value == stsDone.value:
                 break
-            time.sleep(0.01)
+            time.sleep(0.001)
 
         dwf.FDwfDigitalInStatusData(hdwf, rgwData, c_int(NUM_SAMPLES * 2))
 
@@ -99,7 +106,6 @@ try:
             if not (rgwData[i-1] & _TRIG_MASK) and (rgwData[i] & _TRIG_MASK):
                 idx_trig = i
                 break
-
         # Find the nearest SIGNAL_PIN rising edge
         idx_sig = -1
         if idx_trig != -1:

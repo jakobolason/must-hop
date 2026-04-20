@@ -1,5 +1,5 @@
 use crossterm::event::KeyCode;
-use std::{collections::VecDeque, env};
+use std::env;
 
 pub enum AppEvent {
     Input(KeyCode),
@@ -21,6 +21,7 @@ pub enum LandingFocus {
     Ki,
     SourceId,
     Start,
+    Save,
 }
 
 #[derive(PartialEq)]
@@ -28,44 +29,6 @@ pub enum DashFocus {
     Data,
     Logs,
 }
-
-// Helper struct to keep a rolling history of floats and compute medians
-// pub struct Vec<f32> {
-//     pub: VecDeque<f32>,
-//     capacity: usize,
-// }
-//
-// impl Vec<f32> {
-//     fn new(capacity: usize) -> Self {
-//         Self {
-//            : VecDeque::with_capacity(capacity),
-//         }
-//     }
-//
-//     fn push(&mut self, val: f32) {
-//         self.push_back(val);
-//     }
-//
-//     pub fn median(&self) -> Option<f32> {
-//         if self.is_empty() {
-//             return None;
-//         }
-//         let mut sorted: Vec<_> = self.iter().copied().collect();
-//         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-//         let mid = sorted.len() / 2;
-//         if sorted.len() % 2 == 0 {
-//             Some((sorted[mid - 1] + sorted[mid]) / 2.0)
-//         } else {
-//             Some(sorted[mid])
-//         }
-//     }
-// }
-
-// impl Default for Vec<f32> {
-//     fn default() -> Self {
-//         Self::new(200)
-//     }
-// }
 
 pub struct EnvVars {
     pub kp: String,
@@ -127,25 +90,6 @@ impl DashStats {
             let up_str = to_str(&self.delta_up, i);
             let down_str = to_str(&self.delta_down, i);
             let hw_delay = to_str(&self.mean_hardware_delay, i);
-
-            // let dist_from_end = len.saturating_sub(1).saturating_sub(i);
-            // let hw_end = synchronized_hw_len.saturating_sub(dist_from_end * 10);
-            // let hw_start = hw_end.saturating_sub(10);
-
-            // let mut hw_sum = 0.0;
-            // let mut hw_count = 0;
-            // for j in hw_start..hw_end {
-            //     if let Some(&v) = self.hardware_delay.get(j) {
-            //         hw_sum += v;
-            //         hw_count += 1;
-            //     }
-            // }
-            //
-            // let hw_delays_str = if hw_count == 0 {
-            //     "--".to_string()
-            // } else {
-            //     format!("{:.3}", hw_sum / hw_count as f32)
-            // };
 
             items.push(format!(
                 "HB packet {:02}: Delay = {:<10} | speed = {:<10} | Δ Up = {:<8} | Δ Down = {:<8} | hw delay = {}",
@@ -285,16 +229,18 @@ impl App {
             LandingFocus::Kp => LandingFocus::Ki,
             LandingFocus::Ki => LandingFocus::SourceId,
             LandingFocus::SourceId => LandingFocus::Start,
-            LandingFocus::Start => LandingFocus::Kp,
+            LandingFocus::Start => LandingFocus::Save,
+            LandingFocus::Save => LandingFocus::Kp,
         }
     }
 
     pub fn prev_landing_focus(&mut self) {
         self.landing_focus = match self.landing_focus {
-            LandingFocus::Kp => LandingFocus::Start,
+            LandingFocus::Kp => LandingFocus::Save,
             LandingFocus::Ki => LandingFocus::Kp,
             LandingFocus::SourceId => LandingFocus::Ki,
             LandingFocus::Start => LandingFocus::SourceId,
+            LandingFocus::Save => LandingFocus::Start,
         };
     }
 
@@ -304,6 +250,7 @@ impl App {
             LandingFocus::Ki => &mut self.env_vars.ki,
             LandingFocus::SourceId => &mut self.env_vars.source_id,
             LandingFocus::Start => return,
+            LandingFocus::Save => return,
         };
         s.push(c);
     }
@@ -314,6 +261,7 @@ impl App {
             LandingFocus::Ki => &mut self.env_vars.ki,
             LandingFocus::SourceId => &mut self.env_vars.source_id,
             LandingFocus::Start => return,
+            LandingFocus::Save => return,
         };
         s.pop();
     }
@@ -323,6 +271,10 @@ impl App {
             DashFocus::Data => DashFocus::Logs,
             DashFocus::Logs => DashFocus::Data,
         };
+    }
+
+    pub fn save_data(&self) {
+        todo!("Should save all logs and things to a file, csv");
     }
 
     pub fn add_hw_delay(&mut self, log_str: String) {
