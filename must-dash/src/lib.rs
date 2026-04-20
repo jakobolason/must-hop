@@ -12,13 +12,14 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+type ChildProcess = Box<dyn portable_pty::Child + Send + Sync>;
 fn spawn_pty_reader(
     program: &str,
     args: &[&str],
     envs: &[(&str, &str)],
     tx: mpsc::Sender<AppEvent>,
     event_mapper: impl Fn(String, bool) -> AppEvent + Send + 'static,
-) -> Box<dyn portable_pty::Child + Send + Sync> {
+) -> ChildProcess {
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
@@ -78,8 +79,14 @@ fn spawn_pty_reader(
 
     child
 }
-type ChildProcess = Box<dyn portable_pty::Child + Send + Sync>;
-fn spawn_children(app: &App, tx: Sender<AppEvent>) -> (Option<ChildProcess>, Option<ChildProcess>) {
+fn spawn_children(
+    app: &App,
+    tx: Sender<AppEvent>,
+) -> (
+    Option<ChildProcess>,
+    Option<ChildProcess>,
+    Option<ChildProcess>,
+) {
     let node_child = spawn_pty_reader(
         "just",
         &["remote-run", "7"],
@@ -106,7 +113,12 @@ fn spawn_children(app: &App, tx: Sender<AppEvent>) -> (Option<ChildProcess>, Opt
         tx.clone(),
         |text, overwrite| AppEvent::GwLog { text, overwrite },
     );
-    (Some(node_child), Some(gw_child))
+
+    let delay_child = spawn_pty_reader("just", &["run-delay"], &[], tx.clone(), |delay_ms, _| {
+        AppEvent::HardwareLog { delay_ms }
+    });
+
+    (Some(node_child), Some(gw_child), Some(delay_child))
 }
 
 pub async fn run_app(
@@ -134,6 +146,7 @@ pub async fn run_app(
     // Hold our process handles in Options, they start as None
     let mut node_child: Option<ChildProcess> = None;
     let mut gw_child: Option<ChildProcess> = None;
+    let mut delay_child: Option<ChildProcess> = None;
 
     let quit_fn = |app: &mut App, terminal: &mut Terminal<_>| {
         app.shutting_down = true;
@@ -149,7 +162,12 @@ pub async fn run_app(
                     AppView::Landing => match key_code {
                         KeyCode::Esc => {
                             // Shut them down if they exist
-                            shutdown_processes(node_child.take(), gw_child.take()).await;
+                            shutdown_processes(vec![
+                                node_child.take(),
+                                gw_child.take(),
+                                delay_child.take(),
+                            ])
+                            .await;
                             quit_fn(&mut app, terminal);
                             match app.view {
                                 AppView::Landing => break,
@@ -161,7 +179,8 @@ pub async fn run_app(
                         KeyCode::Enter => {
                             if app.landing_focus == LandingFocus::Start {
                                 app.view = AppView::Dashboard;
-                                (node_child, gw_child) = spawn_children(&app, tx.clone());
+                                (node_child, gw_child, delay_child) =
+                                    spawn_children(&app, tx.clone());
                             }
                         }
                         KeyCode::Backspace => app.backspace(),
@@ -174,7 +193,12 @@ pub async fn run_app(
                             break;
                         }
                         KeyCode::Esc => {
-                            shutdown_processes(node_child.take(), gw_child.take()).await;
+                            shutdown_processes(vec![
+                                node_child.take(),
+                                gw_child.take(),
+                                delay_child.take(),
+                            ])
+                            .await;
                             app.view = AppView::Landing;
                         }
                         KeyCode::Tab => app.toggle_dash_focus(),
@@ -183,41 +207,31 @@ pub async fn run_app(
                 },
                 AppEvent::NodeLog { text, overwrite } => app.add_node_log(text, overwrite),
                 AppEvent::GwLog { text, overwrite } => app.add_gw_log(text, overwrite),
+                AppEvent::HardwareLog { delay_ms } => app.add_hw_delay(delay_ms),
                 AppEvent::Tick => {}
             }
         }
     }
 
     // Graceful Shutdown (Only attempt to kill if they were spawned)
-    shutdown_processes(node_child, gw_child).await;
+    shutdown_processes(vec![node_child, gw_child, delay_child]).await;
 
     Ok(())
 }
 
-async fn shutdown_processes(node_child: Option<ChildProcess>, gw_child: Option<ChildProcess>) {
-    if let Some(mut child) = node_child {
-        if let Some(pid) = child.process_id() {
-            let _ = signal::kill(Pid::from_raw(-(pid as i32)), Signal::SIGINT);
+async fn shutdown_processes(children: Vec<Option<ChildProcess>>) {
+    for child_opt in children {
+        if let Some(mut child) = child_opt {
+            if let Some(pid) = child.process_id() {
+                let _ = signal::kill(Pid::from_raw(-(pid as i32)), Signal::SIGINT);
+            }
+            let _ = tokio::time::timeout(
+                Duration::from_secs(1),
+                tokio::task::spawn_blocking(move || {
+                    let _ = child.wait();
+                }),
+            )
+            .await;
         }
-        let _ = tokio::time::timeout(
-            Duration::from_secs(1),
-            tokio::task::spawn_blocking(move || {
-                let _ = child.wait();
-            }),
-        )
-        .await;
-    }
-
-    if let Some(mut child) = gw_child {
-        if let Some(pid) = child.process_id() {
-            let _ = signal::kill(Pid::from_raw(-(pid as i32)), Signal::SIGINT);
-        }
-        let _ = tokio::time::timeout(
-            Duration::from_secs(1),
-            tokio::task::spawn_blocking(move || {
-                let _ = child.wait();
-            }),
-        )
-        .await;
     }
 }

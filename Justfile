@@ -76,13 +76,13 @@ run-rak:
 
 # --- Runs remotely on Pi
 
-# Runs the RAK3272s example ona  remote probe-rs server
+# Runs the RAK3272s example on a remote probe-rs server
 [group('probe-rs')]
 remote-run id:
     @echo "Flashing remotely to Pi..."
     cd examples/lora/rak3272s && \
     CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
-    --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN" \
+    --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN --probe 1366:0101" \
     SOURCEID={{ id }} cargo run --release --bin main
 
 # Attach to a remote probe-rs server
@@ -94,6 +94,13 @@ remote-attach:
         --host ws://"$HOST_URL":3000 \
         --token="$PROBE_TOKEN" \
         target/thumbv7em-none-eabi/release/main
+
+# Run python script on Pi
+[group('Pi deployments')]
+run-delay:
+  @echo "Running capture_deltas.py on pi"
+  scp ./analysis/scripts/capture_deltas.py {{ PI_HOST }}:{{ PI_TARGET_DIR }}/
+  ssh -tt {{ PI_USER }}@{{ PI_HOST }} "python {{ PI_TARGET_DIR }}/capture_deltas.py"
 
 # Build the SX1302 Gateway example (Host)
 [group('examples')]

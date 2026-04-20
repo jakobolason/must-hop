@@ -132,7 +132,7 @@ impl Controller {
         if my_stamp != hb.gps_time_us {
             let measured_delay: i64 = my_stamp as i64 - hb.gps_time_us as i64;
             info!(
-                "[SYNC]   delay: {}ms | err: {}ms | v_prev: {} | v_new: {}",
+                "[SYNC]   delay: {}ms | err: {}ms | v_prev: {} | v_new: {} |",
                 measured_delay as f32 / 1000.0,
                 err as f32 / 1000.0,
                 self.v_s,

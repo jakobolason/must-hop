@@ -1,11 +1,11 @@
 use crossterm::event::KeyCode;
-use regex::Regex;
-use std::{collections::VecDeque, env, sync::OnceLock};
+use std::{collections::VecDeque, env};
 
 pub enum AppEvent {
     Input(KeyCode),
     NodeLog { text: String, overwrite: bool },
     GwLog { text: String, overwrite: bool },
+    HardwareLog { delay_ms: String },
     Tick,
 }
 
@@ -67,7 +67,7 @@ impl RollingStat {
 
 impl Default for RollingStat {
     fn default() -> Self {
-        Self::new(10)
+        Self::new(50)
     }
 }
 
@@ -77,6 +77,15 @@ pub struct EnvVars {
     pub source_id: String,
 }
 
+pub struct ChartData {
+    pub delay: Vec<(f64, f64)>,
+    pub up: Vec<(f64, f64)>,
+    pub down: Vec<(f64, f64)>,
+    pub hw: Vec<(f64, f64)>,
+    pub x_bounds: [f64; 2],
+    pub y_bounds: [f64; 2],
+}
+
 pub struct DashStats {
     pub delay: RollingStat,
     pub err: RollingStat,
@@ -84,6 +93,7 @@ pub struct DashStats {
     pub new_speed: RollingStat,
     pub delta_up: RollingStat,
     pub delta_down: RollingStat,
+    pub hardware_delay: RollingStat,
 }
 
 impl DashStats {
@@ -95,6 +105,141 @@ impl DashStats {
             new_speed: RollingStat::default(),
             delta_up: RollingStat::default(),
             delta_down: RollingStat::default(),
+            hardware_delay: RollingStat::default(),
+        }
+    }
+    pub fn get_history_lines(&self, max_lines: usize) -> Vec<String> {
+        let mut items = Vec::new();
+        let len = self.delay.values.len();
+        let hw_len = self.hardware_delay.values.len();
+        let synchronized_hw_len = hw_len - (hw_len % 10);
+
+        let start = len.saturating_sub(max_lines);
+
+        for i in start..len {
+            let delay_str = self
+                .delay
+                .values
+                .get(i)
+                .map_or("--".to_string(), |&v| format!("{:.3}ms", v));
+            let speed = self
+                .new_speed
+                .values
+                .get(i)
+                .map_or("--".to_string(), |&v| format!("{:.0}", v));
+            let up_str = self
+                .delta_up
+                .values
+                .get(i)
+                .map_or("--".to_string(), |&v| format!("{:.3}", v));
+            let down_str = self
+                .delta_down
+                .values
+                .get(i)
+                .map_or("--".to_string(), |&v| format!("{:.3}", v));
+
+            let dist_from_end = len.saturating_sub(1).saturating_sub(i);
+            let hw_end = synchronized_hw_len.saturating_sub(dist_from_end * 10);
+            let hw_start = hw_end.saturating_sub(10);
+
+            let mut hw_sum = 0.0;
+            let mut hw_count = 0;
+            for j in hw_start..hw_end {
+                if let Some(&v) = self.hardware_delay.values.get(j) {
+                    hw_sum += v;
+                    hw_count += 1;
+                }
+            }
+
+            let hw_delays_str = if hw_count == 0 {
+                "--".to_string()
+            } else {
+                format!("{:.3}", hw_sum / hw_count as f32)
+            };
+
+            items.push(format!(
+                "HB packet {:02}: Delay = {:<10} | speed = {:<10} | Δ Up = {:<8} | Δ Down = {:<8} | hw delay = {}",
+                i + 1, delay_str, speed, up_str, down_str, hw_delays_str
+            ));
+        }
+        items
+    }
+
+    /// Processes min/max bounds and slices data specifically for the Chart size
+    pub fn get_chart_data(&self, max_x_points: usize) -> ChartData {
+        // Prevent 0 width division issues
+        let num_points = max_x_points.max(1);
+        let hw_ratio = 10.0;
+
+        let extract = |deque: &VecDeque<f32>| -> Vec<(f64, f64)> {
+            let start = deque.len().saturating_sub(num_points);
+            deque
+                .iter()
+                .skip(start)
+                .enumerate()
+                .map(|(i, &v)| (i as f64, v as f64))
+                .collect()
+        };
+
+        let delay = extract(&self.delay.values);
+        let up = extract(&self.delta_up.values);
+        let down = extract(&self.delta_down.values);
+
+        let max_hw_points = (num_points as f64 * hw_ratio) as usize;
+        let hw_len = self.hardware_delay.values.len();
+        let actual_hw_points = hw_len.min(max_hw_points);
+        let hw_start = hw_len.saturating_sub(max_hw_points);
+
+        let sw_len = self.delay.values.len();
+        let current_sw_max_x = (sw_len.min(num_points).saturating_sub(1)) as f64;
+
+        let hw: Vec<(f64, f64)> = self
+            .hardware_delay
+            .values
+            .iter()
+            .skip(hw_start)
+            .enumerate()
+            .map(|(i, &v)| {
+                let dist_from_end = (actual_hw_points.saturating_sub(1).saturating_sub(i)) as f64;
+                let x = current_sw_max_x - (dist_from_end / hw_ratio);
+                (x, v as f64)
+            })
+            .filter(|&(x, _)| x >= 0.0)
+            .collect();
+
+        // Calculate Y-axis bounds dynamically
+        let mut min_val = f64::INFINITY;
+        let mut max_val = f64::NEG_INFINITY;
+        for &(_, y) in delay
+            .iter()
+            .chain(up.iter())
+            .chain(down.iter())
+            .chain(hw.iter())
+        {
+            if y < min_val {
+                min_val = y;
+            }
+            if y > max_val {
+                max_val = y;
+            }
+        }
+
+        let y_bounds = if min_val.is_infinite() || max_val.is_infinite() {
+            [0.0, 10.0]
+        } else if (max_val - min_val).abs() < f64::EPSILON {
+            [min_val - 1.0, max_val + 1.0]
+        } else {
+            let padding = (max_val - min_val) * 0.1;
+            [min_val - padding, max_val + padding]
+        };
+
+        ChartData {
+            delay,
+            up,
+            down,
+            hw,
+            x_bounds: [0.0, (num_points.saturating_sub(1)) as f64],
+            y_bounds,
         }
     }
 }
@@ -118,23 +263,6 @@ pub struct App {
     pub dash_stats: DashStats,
 
     pub shutting_down: bool,
-}
-
-static DRIFT_REGEX: OnceLock<Regex> = OnceLock::new();
-fn get_regex() -> &'static Regex {
-    DRIFT_REGEX.get_or_init(|| {
-        Regex::new(r"Measured delay:\s*([-\d.]+)\s*ms\s*\|\s*err:\s*([-\d.]+)\s*ms\s*\|\s*prev speed:\s*([-\d.]+)\s*\|\s*new speed:\s*([-\d.]+)").unwrap()
-     // Regex::new(    r"Measured delay:\s*([-\d.]+)\s*ms\s*\|\s*err:\s*([-\d.]+)\s*ms\s*\|\s*prev speed:\s*([-\d]+)\s*\|\s*new speed:\s*([-\d]+)").unwrap()
-
-    })
-}
-
-static DELTA_REGEX: OnceLock<Regex> = OnceLock::new();
-fn get_delta_regex() -> &'static Regex {
-    DELTA_REGEX.get_or_init(|| {
-        // Matches: "Delta up: 5.287 | Delta down: 8.979"
-        Regex::new(r"Delta up:\s*([-\d.]+)\s*\|\s*Delta down:\s*([-\d.]+)").unwrap()
-    })
 }
 
 impl Default for App {
@@ -214,39 +342,13 @@ impl App {
         };
     }
 
+    pub fn add_hw_delay(&mut self, log_str: String) {
+        if let Some(delay_ms) = extract_value(&log_str) {
+            self.dash_stats.hardware_delay.push(delay_ms);
+        }
+    }
+
     pub fn add_node_log(&mut self, log: String, overwrite: bool) {
-        // 1. Optimize: Only run expensive regex if the log contains the keyword
-        // if log.contains("Measured drift:") {
-        //     let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
-        //     if let Ok(clean_log) = String::from_utf8(stripped_bytes)
-        //         && let Some(caps) = get_regex().captures(&clean_log)
-        //     {
-        //         if let Ok(d) = caps[1].parse::<f32>() {
-        //             self.dash_stats.delay.push(d);
-        //         }
-        //         if let Ok(e) = caps[2].parse::<f32>() {
-        //             self.dash_stats.err.push(e);
-        //         }
-        //         if let Ok(r) = caps[3].parse::<f32>() {
-        //             self.dash_stats.prev_speed.push(r);
-        //         }
-        //         if let Ok(sr) = caps[4].parse::<f32>() {
-        //             self.dash_stats.new_speed.push(sr);
-        //         }
-        //     }
-        // } else if log.contains("Delta up:") {
-        //     let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
-        //     if let Ok(clean_log) = String::from_utf8(stripped_bytes)
-        //         && let Some(caps) = get_delta_regex().captures(&clean_log)
-        //     {
-        //         if let Ok(up) = caps[1].parse::<f32>() {
-        //             self.dash_stats.delta_up.push(up);
-        //         }
-        //         if let Ok(down) = caps[2].parse::<f32>() {
-        //             self.dash_stats.delta_down.push(down);
-        //         }
-        //     }
-        // } else
         if log.contains("[SYNC]") && log.contains("|") {
             let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
             if let Ok(clean_log) = String::from_utf8(stripped_bytes) {
