@@ -140,10 +140,10 @@ fn draw_dash(f: &mut Frame, app: &App) {
 fn draw_dash_header(f: &mut Frame, app: &App, area: Rect) {
     let header_text = format!(
         "  Medians (last 10) | Error: {}ms | Err: {}ms | Prev Speed: {} | New speed: {}  [TAB: Focus | ESC: Back | Q: Quit] ",
-        format_opt(app.dash_stats.delay.median()),
-        format_opt(app.dash_stats.err.median()),
-        format_opt(app.dash_stats.prev_speed.median()),
-        format_opt(app.dash_stats.new_speed.median()),
+        format_opt(&app.dash_stats.delay),
+        format_opt(&app.dash_stats.err),
+        format_opt(&app.dash_stats.prev_speed),
+        format_opt(&app.dash_stats.new_speed),
     );
 
     let header = Paragraph::new(header_text)
@@ -303,7 +303,6 @@ fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect) {
     let delay_raw = app
         .dash_stats
         .hardware_delay
-        .values
         .iter()
         .map(|v| v.to_string())
         .collect::<Vec<_>>()
@@ -320,7 +319,6 @@ fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect) {
     let delay_scroll = app
         .dash_stats
         .hardware_delay
-        .values
         .len()
         .saturating_sub(log_chunks[2].height as usize - 2);
     f.render_widget(delay_panel.scroll((delay_scroll as u16, 0)), log_chunks[2]);
@@ -346,9 +344,11 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn format_opt(opt: Option<f32>) -> String {
-    match opt {
-        Some(val) => format!("{:.2}", val),
-        None => "--".to_string(),
+fn format_opt(lst: &[f32]) -> String {
+    if !lst.is_empty() {
+        let mean = lst.iter().sum::<f32>() / lst.len() as f32;
+        format!("{:.2}", mean)
+    } else {
+        "--".to_string()
     }
 }

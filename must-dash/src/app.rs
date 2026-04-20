@@ -29,47 +29,43 @@ pub enum DashFocus {
     Logs,
 }
 
-/// Helper struct to keep a rolling history of floats and compute medians
-pub struct RollingStat {
-    pub values: VecDeque<f32>,
-    capacity: usize,
-}
+// Helper struct to keep a rolling history of floats and compute medians
+// pub struct Vec<f32> {
+//     pub: VecDeque<f32>,
+//     capacity: usize,
+// }
+//
+// impl Vec<f32> {
+//     fn new(capacity: usize) -> Self {
+//         Self {
+//            : VecDeque::with_capacity(capacity),
+//         }
+//     }
+//
+//     fn push(&mut self, val: f32) {
+//         self.push_back(val);
+//     }
+//
+//     pub fn median(&self) -> Option<f32> {
+//         if self.is_empty() {
+//             return None;
+//         }
+//         let mut sorted: Vec<_> = self.iter().copied().collect();
+//         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+//         let mid = sorted.len() / 2;
+//         if sorted.len() % 2 == 0 {
+//             Some((sorted[mid - 1] + sorted[mid]) / 2.0)
+//         } else {
+//             Some(sorted[mid])
+//         }
+//     }
+// }
 
-impl RollingStat {
-    fn new(capacity: usize) -> Self {
-        Self {
-            values: VecDeque::with_capacity(capacity),
-            capacity,
-        }
-    }
-
-    fn push(&mut self, val: f32) {
-        if self.values.len() == self.capacity {
-            self.values.pop_front();
-        }
-        self.values.push_back(val);
-    }
-
-    pub fn median(&self) -> Option<f32> {
-        if self.values.is_empty() {
-            return None;
-        }
-        let mut sorted: Vec<_> = self.values.iter().copied().collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let mid = sorted.len() / 2;
-        if sorted.len() % 2 == 0 {
-            Some((sorted[mid - 1] + sorted[mid]) / 2.0)
-        } else {
-            Some(sorted[mid])
-        }
-    }
-}
-
-impl Default for RollingStat {
-    fn default() -> Self {
-        Self::new(200)
-    }
-}
+// impl Default for Vec<f32> {
+//     fn default() -> Self {
+//         Self::new(200)
+//     }
+// }
 
 pub struct EnvVars {
     pub kp: String,
@@ -87,42 +83,41 @@ pub struct ChartData {
 }
 
 pub struct DashStats {
-    pub delay: RollingStat,
-    pub err: RollingStat,
-    pub prev_speed: RollingStat,
-    pub new_speed: RollingStat,
-    pub delta_up: RollingStat,
-    pub delta_down: RollingStat,
-    pub hardware_delay: RollingStat,
-    pub mean_hardware_delay: RollingStat,
+    pub delay: Vec<f32>,
+    pub err: Vec<f32>,
+    pub prev_speed: Vec<f32>,
+    pub new_speed: Vec<f32>,
+    pub delta_up: Vec<f32>,
+    pub delta_down: Vec<f32>,
+    pub hardware_delay: Vec<f32>,
+    pub mean_hardware_delay: Vec<f32>,
     pub last_hw_idx: usize,
 }
 
 impl DashStats {
     pub fn new() -> Self {
         Self {
-            delay: RollingStat::default(),
-            err: RollingStat::default(),
-            prev_speed: RollingStat::default(),
-            new_speed: RollingStat::default(),
-            delta_up: RollingStat::default(),
-            delta_down: RollingStat::default(),
-            hardware_delay: RollingStat::default(),
-            mean_hardware_delay: RollingStat::default(),
+            delay: Vec::new(),
+            err: Vec::new(),
+            prev_speed: Vec::new(),
+            new_speed: Vec::new(),
+            delta_up: Vec::new(),
+            delta_down: Vec::new(),
+            hardware_delay: Vec::new(),
+            mean_hardware_delay: Vec::new(),
             last_hw_idx: 0,
         }
     }
     pub fn get_history_lines(&self, max_lines: usize) -> Vec<String> {
         let mut items = Vec::new();
-        let len = self.delay.values.len();
-        // let hw_len = self.hardware_delay.values.len();
+        let len = self.delay.len();
+        // let hw_len = self.hardware_delay.len();
         // let synchronized_hw_len = hw_len - (hw_len % 10);
 
         let start = len.saturating_sub(max_lines);
 
-        let to_str = |rs: &RollingStat, i: usize| {
-            rs.values
-                .get(i)
+        let to_str = |rs: &Vec<f32>, i: usize| {
+            rs.get(i)
                 .map_or("--".to_string(), |&v| format!("{:.3}ms", v))
         };
 
@@ -140,7 +135,7 @@ impl DashStats {
             // let mut hw_sum = 0.0;
             // let mut hw_count = 0;
             // for j in hw_start..hw_end {
-            //     if let Some(&v) = self.hardware_delay.values.get(j) {
+            //     if let Some(&v) = self.hardware_delay.get(j) {
             //         hw_sum += v;
             //         hw_count += 1;
             //     }
@@ -164,10 +159,10 @@ impl DashStats {
     pub fn get_chart_data(&self, max_x_points: usize) -> ChartData {
         // Prevent 0 width division issues
         let num_points = max_x_points.max(1);
-        // 10 hw values per 1 heartbeat value
+        // 10 hw per 1 heartbeat value
         let hw_ratio = 10.0;
 
-        let extract = |deque: &VecDeque<f32>| -> Vec<(f64, f64)> {
+        let extract = |deque: &Vec<f32>| -> Vec<(f64, f64)> {
             let start = deque.len().saturating_sub(num_points);
             deque
                 .iter()
@@ -177,16 +172,15 @@ impl DashStats {
                 .collect()
         };
 
-        let delay = extract(&self.delay.values);
-        let up = extract(&self.delta_up.values);
-        let down = extract(&self.delta_down.values);
+        let delay = extract(&self.delay);
+        let up = extract(&self.delta_up);
+        let down = extract(&self.delta_down);
 
         let max_hw_points = (num_points as f64 * hw_ratio) as usize;
-        let hw_len = self.hardware_delay.values.len();
+        let hw_len = self.hardware_delay.len();
         let hw_start = hw_len.saturating_sub(max_hw_points);
         let hw: Vec<(f64, f64)> = self
             .hardware_delay
-            .values
             .iter()
             .skip(hw_start)
             .enumerate()
@@ -347,7 +341,7 @@ impl App {
                     let parts: Vec<&str> = data_str.split('|').collect();
 
                     if parts.len() >= 4 {
-                        // 3. Extract values using quick string manipulation
+                        // 3. Extract using quick string manipulation
                         if let Some(delay_val) = extract_value(parts[0]) {
                             self.dash_stats.delay.push(delay_val);
                         }
@@ -366,7 +360,6 @@ impl App {
                 let measured_delays: Vec<f32> = self
                     .dash_stats
                     .hardware_delay
-                    .values
                     .iter()
                     .skip(self.dash_stats.last_hw_idx)
                     .copied()
@@ -374,7 +367,7 @@ impl App {
                 let sum: f32 = measured_delays.iter().sum();
                 let mean = sum / measured_delays.len() as f32;
                 self.dash_stats.mean_hardware_delay.push(mean);
-                self.dash_stats.last_hw_idx = self.dash_stats.hardware_delay.values.len() - 1;
+                self.dash_stats.last_hw_idx = self.dash_stats.hardware_delay.len() - 1;
             }
         } else if log.contains("[DELTAS]") && log.contains("|") {
             let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
