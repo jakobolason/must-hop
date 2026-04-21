@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use crate::ui::centered_rect;
+use crate::composables::formatting::centered_rect;
 
 pub fn draw_landing(f: &mut Frame, app: &App) {
     let area = centered_rect(40, 60, f.area());

@@ -1,7 +1,6 @@
-use crate::{
-    app::{App, DashFocus},
-    ui::format_opt,
-};
+use crate::app::{App, DashFocus};
+
+use crate::composables::formatting::format_opt;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},

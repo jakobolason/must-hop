@@ -1,5 +1,6 @@
 pub mod app;
 pub mod components;
+pub mod composables;
 pub mod pages;
 pub mod ui;
 
