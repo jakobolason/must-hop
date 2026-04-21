@@ -1,5 +1,6 @@
-// src/lib.rs
 pub mod app;
+pub mod components;
+pub mod pages;
 pub mod ui;
 
 use crate::mpsc::Sender;
