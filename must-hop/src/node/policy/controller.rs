@@ -88,7 +88,7 @@ impl Controller {
             let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
             let up_ms = *delta_up as f32 / 1000.0;
             let down_ms = delta_down as f32 / 1000.0;
-            if delta_down.abs() > 10_000 || delta_up.abs() > 10_000 {
+            if delta_down.abs() > 1_000 || delta_up.abs() > 1_000 {
                 // 2A. DELTAS REJECTED LOG
                 info!(
                     "[DELTAS] up: {}ms | down: {}ms | status: REJECTED",

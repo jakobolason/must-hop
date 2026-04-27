@@ -232,6 +232,7 @@ pub async fn run_app(
                         KeyCode::Down | KeyCode::Tab => app.next_landing_focus(),
                         KeyCode::Char('s') | KeyCode::Char('S') => {
                             app.save_data();
+                            app.reset_data();
                         }
                         KeyCode::Enter => {
                             if app.landing_focus == LandingFocus::Save {

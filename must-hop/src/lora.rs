@@ -78,10 +78,12 @@ where
     fn calc_toa(&self, bytes: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
-        let total_toa_us =
-            bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes);
 
-        total_toa_us
+        bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes)
+    }
+
+    fn avg_slice_delay(&self, payload_len: u8) -> u64 {
+        0
     }
 }
 
@@ -214,7 +216,7 @@ where
     }
 
     fn calc_tx_delay(&self, payload_len: usize) -> u64 {
-        self.calc_toa(payload_len as u8) as u64
+        self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len as u8)
     }
 }
 

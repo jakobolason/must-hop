@@ -1,5 +1,10 @@
 use crossterm::event::KeyCode;
-use std::env;
+use std::{
+    env,
+    fs::File,
+    io::Write,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 pub enum AppEvent {
     Input(KeyCode),
@@ -272,9 +277,66 @@ impl App {
     }
 
     pub fn save_data(&self) {
-        todo!("Should save all logs and things to a file, csv");
-    }
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
+        let prefix = "./analysis/data/".to_string();
+        let main_filename = format!("{prefix}main_stats_{:02}.csv", timestamp);
+        let hw_filename = format!("{prefix}hw_stats_{:02}.csv", timestamp);
+
+        // Save the averages and such
+        if let Ok(mut main_file) = File::create(&main_filename) {
+            // Write the CSV header
+            let _ = writeln!(
+                main_file,
+                "delay,err,prev_speed,new_speed,delta_up,delta_down,mean_hardware_delay"
+            );
+
+            let max_len = [
+                self.dash_stats.delay.len(),
+                self.dash_stats.err.len(),
+                self.dash_stats.prev_speed.len(),
+                self.dash_stats.new_speed.len(),
+                self.dash_stats.delta_up.len(),
+                self.dash_stats.delta_down.len(),
+                self.dash_stats.mean_hardware_delay.len(),
+            ]
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+
+            let get_val = |vec: &Vec<f32>, i: usize| -> String {
+                vec.get(i).map_or_else(String::new, |v| v.to_string())
+            };
+
+            for i in 0..max_len {
+                let _ = writeln!(
+                    main_file,
+                    "{},{},{},{},{},{},{}",
+                    get_val(&self.dash_stats.delay, i),
+                    get_val(&self.dash_stats.err, i),
+                    get_val(&self.dash_stats.prev_speed, i),
+                    get_val(&self.dash_stats.new_speed, i),
+                    get_val(&self.dash_stats.delta_up, i),
+                    get_val(&self.dash_stats.delta_down, i),
+                    get_val(&self.dash_stats.mean_hardware_delay, i),
+                );
+            }
+        }
+
+        // There are about 10 times as many hw timestamps, so save in seperate file
+        if let Ok(mut hw_file) = File::create(&hw_filename) {
+            // Write header
+            let _ = writeln!(hw_file, "hardware_delay");
+
+            // Write all individual hardware delay points
+            for hw in &self.dash_stats.hardware_delay {
+                let _ = writeln!(hw_file, "{}", hw);
+            }
+        }
+    }
     pub fn add_hw_delay(&mut self, log_str: String) {
         if let Some(delay_ms) = extract_value(&log_str) {
             self.dash_stats.hardware_delay.push(delay_ms);
