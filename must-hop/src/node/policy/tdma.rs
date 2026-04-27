@@ -12,7 +12,7 @@ use log::{debug, error, info};
 use embedded_hal::digital::OutputPin;
 
 use core::{fmt, marker::PhantomData, num::NonZeroU8};
-use postcard::{from_bytes, to_slice};
+use postcard::{from_bytes, ser_flavors::Size, serialize_with_flavor, to_slice};
 use serde::{Deserialize, Serialize};
 
 use crate::node::{
@@ -301,6 +301,11 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
 
+    // Using
+    // fn calc_excess_delay(&self) {
+    //
+    // }
+
     /// Use ToA calculation together with other delay variables to approximate what our local
     /// instant was, when the heartbeat packet with the timestamp was created.
     fn approximate_transmit_instant(&self, rx_pkt: &RxPacket) -> Instant {
@@ -401,24 +406,59 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         }
     }
 
+    fn calc_adjust_timestamp(&self, toa: u64) -> u64 {
+        let tx_stamp = match self.time_sync {
+            Some(stamps) => self.current_gps_time(stamps),
+            None => {
+                error!("There was no stamps in heartbeat updating??");
+                0
+            }
+        };
+        // TODO: Also use the clock drift calc here
+        let measured_spi_delay = 0;
+        tx_stamp + toa + measured_spi_delay
+    }
+
+    fn approximate_packet_size<const LEN: usize>(
+        &self,
+        my_tx_slot: u8,
+        t3_deltas: Vec<(u8, i32), 5>,
+        tx_queue: &Vec<MHPacket<SIZE>, LEN>,
+    ) -> usize {
+        let tx_timestamp = match self.time_sync {
+            Some(stamps) => self.current_gps_time(stamps),
+            None => {
+                error!("In update heartbeat before we've heart a heartbeat??");
+                0
+            }
+        };
+
+        let dummy_allocation = SlotAllocation {
+            my_slot: my_tx_slot,
+            known_slots: self.known_slots_mask.as_u32(),
+            gps_time_us: tx_timestamp,
+            t3_deltas: t3_deltas.clone(),
+        };
+
+        let exact_payload_size = serialize_with_flavor(&dummy_allocation, Size::default())
+            .expect("failed to size payload");
+        let exact_packet_size =
+            serialize_with_flavor(&tx_queue, Size::default()).expect("Failed to size tx queue");
+
+        exact_packet_size + exact_payload_size
+    }
+
     fn update_heartbeat(
         &self,
         mut hbt: MHPacket<SIZE>,
         my_tx_slot: u8,
         t3_deltas: Vec<(u8, i32), 5>,
+        adjusted_timestamp: u64,
     ) -> MHPacket<SIZE> {
-        let tx_timestamp = match self.time_sync {
-            Some(stamps) => self.current_gps_time(stamps),
-            None => {
-                error!("In update heartbeat before we've heard a heartbeat??");
-                0
-            }
-        };
-        info!("Set tx timestamp at ticks: {}", Instant::now().as_micros());
         let allocation = SlotAllocation {
             my_slot: my_tx_slot,
             known_slots: self.known_slots_mask.as_u32(),
-            gps_time_us: tx_timestamp,
+            gps_time_us: adjusted_timestamp,
             t3_deltas,
         };
         let mut buf = [0u8; SIZE];
@@ -501,7 +541,20 @@ where
                 {
                     // We update these deltas every time a heartbeat is sent
                     let extracted_deltas = core::mem::take(&mut self.t3_deltas);
-                    let upd_pkt = self.update_heartbeat(pkt, my_tx_slot, extracted_deltas);
+                    let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
+                        self.approximate_packet_size(
+                            my_tx_slot,
+                            // TOOD: Remove clone and just use the size
+                            extracted_deltas.clone(),
+                            tx_queue,
+                        ),
+                    ));
+                    let upd_pkt = self.update_heartbeat(
+                        pkt,
+                        my_tx_slot,
+                        extracted_deltas,
+                        adjusted_timestamp,
+                    );
                     if let Err(pkt) = tx_queue.push(upd_pkt) {
                         // If queue full(???), then try and send it next time
                         error!("Queue is full even though we just checked??");

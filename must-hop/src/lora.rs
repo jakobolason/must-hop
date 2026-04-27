@@ -74,6 +74,7 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
+    /// Returns the (preamble, packet) ToA
     fn calc_toa(&self, bytes: u8) -> (u32, u32) {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
@@ -232,7 +233,7 @@ where
     }
 
     fn calc_tx_delay(&self, payload_len: usize) -> Duration {
-        Duration::from_millis(60 * payload_len as u64)
+        Duration::from_micros(self.calc_toa(payload_len as u8).1 as u64)
     }
 }
 

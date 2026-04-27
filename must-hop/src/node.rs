@@ -90,5 +90,5 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
 
     /// For time sensitive packets and physical layers with predictable Tx times, this can be used
     /// to send a timestamp which might be closer to the actual timestamp.
-    fn calc_tx_delay(&self, payload_len: usize) -> Duration;
+    fn calc_tx_delay(&self, payload_len: usize) -> u64;
 }

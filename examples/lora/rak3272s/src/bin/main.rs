@@ -80,13 +80,13 @@ async fn main(spawner: Spawner) {
     let p = embassy_stm32::init(config);
 
     info!("config done...");
-    let tx_pin = Output::new(p.PC13, Level::Low, Speed::VeryHigh);
     let rx_pin = Output::new(p.PB8, Level::Low, Speed::VeryHigh);
+    let tx_pin = Output::new(p.PC13, Level::Low, Speed::VeryHigh);
 
     let spi = Spi::new_subghz(p.SUBGHZSPI, p.DMA1_CH1, p.DMA1_CH2);
     let spi = SubghzSpiDevice(spi);
     // TODO: Can it work wit low power?
-    let use_high_power_pa = true;
+    let use_high_power_pa = false;
     let config = sx126x::Config {
         chip: Stm32wl { use_high_power_pa },
         tcxo_ctrl: None,
