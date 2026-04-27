@@ -71,8 +71,8 @@ impl DashStats {
             last_hw_idx: 0,
         }
     }
-    pub fn get_history_lines(&self, max_lines: usize) -> Vec<String> {
-        let mut items = Vec::new();
+    pub fn get_history_lines(&self, max_lines: usize) -> Vec<Vec<String>> {
+        let mut rows = Vec::new();
         let len = self.delay.len();
         // let hw_len = self.hardware_delay.len();
         // let synchronized_hw_len = hw_len - (hw_len % 10);
@@ -85,18 +85,16 @@ impl DashStats {
         };
 
         for i in start..len {
+            let hb_nr = format!("{:02}", i);
             let delay_str = to_str(&self.delay, i);
             let speed = to_str(&self.new_speed, i);
             let up_str = to_str(&self.delta_up, i);
             let down_str = to_str(&self.delta_down, i);
             let hw_delay = to_str(&self.mean_hardware_delay, i);
 
-            items.push(format!(
-                "HB packet {:02}: Delay = {:<10} | speed = {:<10} | Δ Up = {:<8} | Δ Down = {:<8} | hw delay = {}",
-                i + 1, delay_str, speed, up_str, down_str, hw_delay
-            ));
+            rows.push(vec![hb_nr, delay_str, speed, up_str, down_str, hw_delay]);
         }
-        items
+        rows
     }
 
     /// Processes min/max bounds and slices data specifically for the Chart size

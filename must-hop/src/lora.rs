@@ -75,17 +75,13 @@ where
     DLY: DelayNs,
 {
     /// Returns the (preamble, packet) ToA
-    fn calc_toa(&self, bytes: u8) -> (u32, u32) {
+    fn calc_toa(&self, bytes: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
         let total_toa_us =
             bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes);
 
-        let t_sym_ms = bb_mod.symbols_to_ms(1) as f32;
-        // calculate the time of just the preamble
-        let preamble_toa_ms = t_sym_ms * (self._tp.pre_amp as f32 + 4.25);
-        let preamble_toa_us = (preamble_toa_ms * 1000.0) as u32;
-        (preamble_toa_us, total_toa_us)
+        total_toa_us
     }
 }
 
@@ -113,21 +109,7 @@ where
             }
         };
         trace!("used slice size is {}", used_slice.len());
-        // Simple listen to talk logic
-        // TODO: This crashes when in a loop
-        // loop {
-        // trace!("preparing for cad ...");
-        // self.lora.prepare_for_cad(&self.mdltn_params).await?;
-        // if self.lora.cad(&self.mdltn_params).await? {
-        //     warn!("cad successfull with activity detected");
-        //     // self.lora.sleep(false).await?;
-        //     Timer::after_millis(50).await;
-        //     // TODO: Get some random amount of time before continuing loop
-        // } else {
-        //     trace!("cad successfull with NO activity detected");
-        //     // break;
-        // }
-        // }
+
         let before_tx = Instant::now();
         self.lora
             .prepare_for_tx(&self.mdltn_params, &mut self.pkt_params, 20, used_slice)
@@ -148,7 +130,6 @@ where
             only_tx.as_millis(),
             only_tx
         );
-        // Takes around 1.9 seconds for full transmit function, and 1.6 for just transmitting
 
         // NOTE: This might create a delay between transmitting something and being able to receive
         // again
@@ -188,14 +169,14 @@ where
             }
         };
         trace!("Got packet!");
-        let estimated_toa = self.calc_toa(len);
+        // let estimated_toa = self.calc_toa(len);
 
         let rx_pkt = RxPacket {
-            preamble_instant: self.preamble_instant.take(),
+            // preamble_instant: self.preamble_instant.take(),
             // preamble_instant: None,
             rx_done_instant: rx_hardware_timestamp,
             payload_size: len,
-            estimated_toa,
+            // estimated_toa,
         };
 
         Ok((packets, rx_pkt))
@@ -232,8 +213,8 @@ where
         }
     }
 
-    fn calc_tx_delay(&self, payload_len: usize) -> Duration {
-        Duration::from_micros(self.calc_toa(payload_len as u8).1 as u64)
+    fn calc_tx_delay(&self, payload_len: usize) -> u64 {
+        self.calc_toa(payload_len as u8) as u64
     }
 }
 

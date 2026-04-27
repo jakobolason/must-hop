@@ -76,11 +76,10 @@ impl Controller {
         let now = Instant::now();
         let difference = now - sending_instant;
         info!(
-            "[TIMING] now: {}s | send: {}s | diff: {}ms | toa: {}ms",
+            "[TIMING] now: {}s | send: {}s | diff: {}ms | ",
             now.as_millis() as f32 / 1000.0,
             sending_instant.as_millis() as f32 / 1000.0,
             difference.as_micros() as f32 / 1000.0,
-            rx_pkt.estimated_toa.1 as f32 / 1000.0,
         );
 
         // Check if a t3 delta is availale for us
@@ -89,7 +88,7 @@ impl Controller {
             let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
             let up_ms = *delta_up as f32 / 1000.0;
             let down_ms = delta_down as f32 / 1000.0;
-            if delta_down.abs() > 300_000 || delta_up.abs() > 300_000 {
+            if delta_down.abs() > 10_000 || delta_up.abs() > 10_000 {
                 // 2A. DELTAS REJECTED LOG
                 info!(
                     "[DELTAS] up: {}ms | down: {}ms | status: REJECTED",

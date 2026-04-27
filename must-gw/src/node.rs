@@ -114,19 +114,15 @@ impl GWNode {
             ..self.pkt_params.clone().into()
         }))
     }
-    fn calc_toa(&self, rx_pkt: &RxPacketLoRa) -> (u32, u32) {
+    fn calc_toa(&self, payload_len: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(
-            rx_pkt.spreading.into(),
-            rx_pkt.bandwidth.into(),
-            rx_pkt.coderate.into(),
+            self.pkt_params.spreading.into(),
+            self.pkt_params.bandwidth.into(),
+            self.pkt_params.coderate.into(),
         );
-        let total_toa_us = bb_mod.time_on_air_us(None, true, rx_pkt.payload.len() as u8);
-        let t_sym_ms = bb_mod.symbols_to_ms(1) as f32;
-        // calculate the time of just the preamble
-        let preamble_toa_ms = t_sym_ms * (8_f32 + 4.25);
-        let preamble_toa_us = (preamble_toa_ms * 1000.0) as u32;
-        (preamble_toa_us, total_toa_us)
+        let total_toa_us = bb_mod.time_on_air_us(None, true, payload_len);
+        total_toa_us
     }
 }
 
@@ -212,10 +208,10 @@ impl MHNode<SIZE, LEN> for GWNode {
         Ok((
             rec_packets,
             must_hop::node::RxPacket {
-                preamble_instant: None,
+                // preamble_instant: None,
                 rx_done_instant: rx_heartbeat_timestamp,
                 payload_size: pkt.payload.len() as u8,
-                estimated_toa: self.calc_toa(pkt),
+                // estimated_toa: self.calc_toa(pkt),
             },
         ))
     }
@@ -246,7 +242,7 @@ impl MHNode<SIZE, LEN> for GWNode {
             Timer::after(Duration::from_millis(5)).await;
         }
     }
-    fn calc_tx_delay(&self, payload_len: usize) -> core::time::Duration {
-        core::time::Duration::from_millis(60 * payload_len as u64)
+    fn calc_tx_delay(&self, payload_len: usize) -> u64 {
+        self.calc_toa(payload_len as u8) as u64
     }
 }

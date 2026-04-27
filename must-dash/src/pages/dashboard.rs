@@ -1,6 +1,7 @@
 use crate::app::{App, DashFocus};
 
 use crate::composables::formatting::format_opt;
+use ratatui::widgets::{Row, Table};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -71,13 +72,34 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect) {
         });
 
     // Ask app.rs for exactly enough formatted rows to fill our vertical height
-    let entries_that_can_be_seen = left_area.height.saturating_sub(2) as usize;
+    let entries_that_can_be_seen = left_area.height.saturating_sub(3) as usize;
     let history_lines = app.dash_stats.get_history_lines(entries_that_can_be_seen);
 
-    let history_items: Vec<ListItem> = history_lines.into_iter().map(ListItem::new).collect();
+    let history_items = history_lines.into_iter().map(Row::new);
+    let header = Row::new(vec![
+        "Packet", "Delay", "Speed", "Δ Up", "Δ Down", "HW Delay",
+    ])
+    .style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )
+    .bottom_margin(0); // Set to 1 if you want an empty line between header and data
+    let widths = [
+        Constraint::Length(8),      // Fixed length for "Packet 01"
+        Constraint::Percentage(18), // Delay
+        Constraint::Percentage(18), // Speed
+        Constraint::Percentage(18), // Δ Up
+        Constraint::Percentage(18), // Δ Down
+        Constraint::Percentage(20), // HW Delay
+    ];
 
-    let history_list = List::new(history_items).block(data_block);
-    f.render_widget(history_list, left_area);
+    // let history_list = List::new(history_items).block(data_block);
+    let history_table = Table::new(history_items, widths)
+        .header(header)
+        .block(data_block)
+        .column_spacing(1);
+    f.render_widget(history_table, left_area);
 
     if right_area.height > 6 && right_area.width > 2 {
         draw_dash_charts(f, app, right_area);

@@ -288,8 +288,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
         // Wake up just a bit before the slot starts to ensure listening at correct time
         // FIXME: If everyone does this, then everyone just wakes up 5ms before
-        let guard_band = 5000;
-        Instant::now() + Duration::from_micros(node_offset.saturating_sub(guard_band))
+        // let guard_band = 5000;
+        Instant::now() + Duration::from_micros(node_offset /*.saturating_sub(guard_band) */)
     }
 
     pub fn current_slot(&self, current_time_us: u64) -> u8 {
@@ -309,37 +309,38 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     /// Use ToA calculation together with other delay variables to approximate what our local
     /// instant was, when the heartbeat packet with the timestamp was created.
     fn approximate_transmit_instant(&self, rx_pkt: &RxPacket) -> Instant {
-        let without_toa = match rx_pkt.preamble_instant {
-            Some(ins) => {
-                info!("preamble instant was Some!");
-                ins.checked_sub(Duration::from_micros(
-                    rx_pkt.estimated_toa.0 as u64
-                        + self
-                            .controller
-                            .calc_drift_duration(rx_pkt.estimated_toa.0 as u64),
-                ))
-                .unwrap_or(ins)
-            }
-            // If no preamble instant, we approximate it
-            None => {
-                info!("preamble instant was None!");
-                rx_pkt
-                    .rx_done_instant
-                    .checked_sub(Duration::from_micros(
-                        rx_pkt.estimated_toa.1 as u64
-                            + self
-                                .controller
-                                .calc_drift_duration(rx_pkt.estimated_toa.1 as u64),
-                    ))
-                    .unwrap_or(rx_pkt.rx_done_instant)
-            }
-        };
+        // let without_toa = match rx_pkt.preamble_instant {
+        //     Some(ins) => {
+        //         info!("preamble instant was Some!");
+        //         ins.checked_sub(Duration::from_micros(
+        //             rx_pkt.estimated_toa.0 as u64
+        //                 + self
+        //                     .controller
+        //                     .calc_drift_duration(rx_pkt.estimated_toa.0 as u64),
+        //         ))
+        //         .unwrap_or(ins)
+        //     }
+        //     // If no preamble instant, we approximate it
+        //     None => {
+        //         info!("preamble instant was None!");
+        //         rx_pkt
+        //             .rx_done_instant
+        //             .checked_sub(Duration::from_micros(
+        //                 rx_pkt.estimated_toa.1 as u64
+        //                     + self
+        //                         .controller
+        //                         .calc_drift_duration(rx_pkt.estimated_toa.1 as u64),
+        //             ))
+        //             .unwrap_or(rx_pkt.rx_done_instant)
+        //     }
+        // };
         // TODO: Byte slicing and SPI1 delay
         // let tau_gw = Duration::from_millis(2);
 
         // TODO: Own SPI2 delay approximate
 
-        without_toa //- tau_gw
+        // without_toa //- tau_gw
+        rx_pkt.rx_done_instant
     }
 
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
@@ -351,18 +352,14 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 let sending_instant = self.approximate_transmit_instant(&rx_pkt);
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
-                    // Calculate updated skew and timestamps
-                    let time_sync = self.controller.run_transferfunction(
+                    // Controller updates internal drift, and returns adjusted stamps
+                    self.time_sync = self.controller.run_transferfunction(
                         &alloc,
                         rx_pkt,
                         sending_instant,
                         self.time_sync,
                         self.my_tx_slot.unwrap_or(self.node_id),
                     );
-                    // self.v_s = skew_ratio;
-                    self.time_sync = time_sync;
-                    // self.prev_err = err;
-                    // self.prev_delay = delay;
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_sync {
