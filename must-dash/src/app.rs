@@ -91,13 +91,13 @@ impl DashStats {
 
         for i in start..len {
             let hb_nr = format!("{:02}", i);
-            let delay_str = to_str(&self.delay, i);
+            let err_str = to_str(&self.err, i);
             let speed = to_str(&self.new_speed, i);
             let up_str = to_str(&self.delta_up, i);
             let down_str = to_str(&self.delta_down, i);
             let hw_delay = to_str(&self.mean_hardware_delay, i);
 
-            rows.push(vec![hb_nr, delay_str, speed, up_str, down_str, hw_delay]);
+            rows.push(vec![hb_nr, err_str, speed, up_str, down_str, hw_delay]);
         }
         rows
     }

@@ -123,6 +123,17 @@ pub(crate) struct SlotAllocation {
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     pub(crate) t3_deltas: Vec<(u8, i32), 5>,
 }
+/// Onl used for tests
+impl SlotAllocation {
+    pub(super) fn new() -> Self {
+        Self {
+            my_slot: 1,
+            known_slots: 0,
+            gps_time_us: 0,
+            t3_deltas: Vec::new(),
+        }
+    }
+}
 
 #[cfg(feature = "debug")]
 pub trait DebugPin: OutputPin {}
@@ -449,7 +460,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let exact_packet_size =
             serialize_with_flavor(&tx_queue, Size::default()).expect("Failed to size tx queue");
 
-        exact_packet_size + exact_payload_size
+        let size = exact_packet_size + exact_payload_size + 7;
+        info!("SIZE EXPECTED: {}", size);
+        size
     }
 
     fn update_heartbeat(

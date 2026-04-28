@@ -33,13 +33,13 @@ impl Controller {
     pub(crate) fn run_transferfunction(
         &mut self,
         hb: &SlotAllocation,
-        rx_pkt: RxPacket,
+        _rx_pkt: RxPacket,
         sending_instant: Instant,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
     ) -> Option<(u64, Instant)> {
         let (v_s, time_sync, error, delay) =
-            self.update_skew_and_stamp(hb, rx_pkt, sending_instant, time_sync, node_id);
+            self.update_skew_and_stamp(hb, sending_instant, time_sync, node_id);
         self.v_s = v_s;
         self.prev_delay = delay;
         self.prev_err = error;
@@ -50,7 +50,6 @@ impl Controller {
     fn update_skew_and_stamp(
         &self,
         hb: &SlotAllocation,
-        _rx_pkt: RxPacket,
         sending_instant: Instant,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
@@ -139,5 +138,119 @@ impl Controller {
         }
 
         (new_speed, time_sync, err, avg_delay)
+    }
+}
+
+#[cfg(test)]
+mod controller_tests {
+    use super::*;
+    use crate::node::policy::tdma::SlotAllocation;
+    use embassy_time::{Duration, Instant};
+    use heapless::Vec;
+
+    fn make_controller(v_s: i64, kp: i64, ki: i64) -> Controller {
+        Controller::new(v_s, kp, ki)
+    }
+
+    fn make_alloc(time: u64) -> SlotAllocation {
+        let mut alloc = SlotAllocation::new();
+        alloc.gps_time_us = time;
+        alloc
+    }
+
+    fn make_rx_pkt(rx_done_instant: Instant) -> RxPacket {
+        RxPacket {
+            rx_done_instant,
+            payload_size: 0,
+        }
+    }
+
+    // Make sure the impl hasn't fucked royally up
+    #[test]
+    fn drift_duration_zero_skew_always_zero() {
+        let c = make_controller(0, 0, 0);
+        assert_eq!(c.calc_drift_duration(0), 0);
+        assert_eq!(c.calc_drift_duration(1_000_000), 0);
+        assert_eq!(c.calc_drift_duration(u64::MAX / 2), 0);
+    }
+
+    #[test]
+    fn drift_duration_known_ppb_exact_result() {
+        // v_s = 1_000 ppb → 1 µs of drift per 1_000_000 µs elapsed
+        let c = make_controller(1_000, 0, 0);
+        // 1_000_000 µs * 1_000 / 1_000_000_000 = 1 µs
+        assert_eq!(c.calc_drift_duration(1_000_000), 1);
+        // 1_000_000_000 µs * 1_000 / 1_000_000_000 = 1_000 µs
+        assert_eq!(c.calc_drift_duration(1_000_000_000), 1_000);
+    }
+
+    #[test]
+    fn drift_duration_scales_linearly_with_duration() {
+        let c = make_controller(500_000, 0, 0);
+        let d1 = c.calc_drift_duration(1_000_000);
+        let d2 = c.calc_drift_duration(2_000_000);
+        // Doubling the duration should double the drift
+        assert_eq!(d2, d1 * 2);
+    }
+
+    // TODO: Useless
+    #[test]
+    fn transfer_fn_no_prior_sync_initialises_epoch_from_hb() {
+        let mut c = make_controller(0, 0, 0);
+        let now = Instant::now();
+        let alloc = make_alloc(123_456_789);
+        let rx = make_rx_pkt(now);
+
+        let result = c.run_transferfunction(&alloc, rx, now, None, 1);
+
+        // Should return the GPS time from the heartbeat as the initial epoch
+        let (gps_us, _instant) = result.expect("Expected an initial time_sync to be returned");
+        assert_eq!(
+            gps_us, 123_456_789,
+            "GPS time should match heartbeat's announcement"
+        );
+    }
+
+    // Just to check that v_s is not changed, big fuck up in logic if this fails
+    #[test]
+    fn transfer_fn_no_prior_sync_preserves_v_s() {
+        // v_s should not change on the very first packet — there's no error to correct yet
+        let initial_v_s = 42_000_i64;
+        let mut c = make_controller(initial_v_s, 0, 0);
+        let now = Instant::now();
+        let alloc = make_alloc(0);
+        let rx = make_rx_pkt(now);
+
+        c.run_transferfunction(&alloc, rx, now, None, 1);
+
+        assert_eq!(
+            c.v_s, initial_v_s,
+            "v_s must not change on epoch initialisation"
+        );
+    }
+
+    #[test]
+    fn transfer_fn_zero_gains_preserves_v_s_when_synced() {
+        // With kp=0, ki=0, any error should leave v_s unchanged
+        let initial_v_s = 5_000_i64;
+        let mut c = make_controller(initial_v_s, 0, 0);
+
+        let base_instant = Instant::now();
+        let elapsed = Duration::from_millis(500);
+        let send_instant = base_instant + elapsed;
+        let gps_base: u64 = 1_000_000;
+
+        // Simulate a heartbeat that arrives exactly 500ms after our epoch — no drift
+        let hb_gps_time = gps_base + elapsed.as_micros();
+        let alloc = make_alloc(hb_gps_time);
+        let rx = make_rx_pkt(send_instant);
+        let prior_sync = Some((gps_base, base_instant));
+
+        c.run_transferfunction(&alloc, rx, send_instant, prior_sync, 1);
+
+        assert_eq!(
+            c.v_s, initial_v_s,
+            "v_s must not change when there is no error and gains are zero"
+        );
     }
 }

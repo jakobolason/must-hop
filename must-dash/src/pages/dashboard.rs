@@ -77,7 +77,7 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect) {
 
     let history_items = history_lines.into_iter().map(Row::new);
     let header = Row::new(vec![
-        "Packet", "Delay", "Speed", "Δ Up", "Δ Down", "HW Delay",
+        "Packet", "Error", "Speed", "Δ Up", "Δ Down", "HW Delay",
     ])
     .style(
         Style::default()
@@ -87,8 +87,8 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect) {
     .bottom_margin(0); // Set to 1 if you want an empty line between header and data
     let widths = [
         Constraint::Length(8),      // Fixed length for "Packet 01"
-        Constraint::Percentage(18), // Delay
-        Constraint::Percentage(18), // Speed
+        Constraint::Percentage(15), // Delay
+        Constraint::Percentage(21), // Speed
         Constraint::Percentage(18), // Δ Up
         Constraint::Percentage(18), // Δ Down
         Constraint::Percentage(20), // HW Delay
