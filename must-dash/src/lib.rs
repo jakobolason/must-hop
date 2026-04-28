@@ -1,12 +1,15 @@
 pub mod app;
 pub mod components;
 pub mod composables;
+pub mod navigator;
 pub mod pages;
 pub mod ui;
 
 use crate::mpsc::Sender;
-use app::{App, AppEvent, AppView, LandingFocus};
+use crate::navigator::Navigator;
+use app::{App, AppEvent};
 use crossterm::event::{self, Event as CEvent, KeyCode};
+use navigator::{LandingFocus, NavigatorView};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -195,25 +198,26 @@ pub async fn run_app(
     });
 
     let mut app = App::new();
+    let mut navigator = Navigator::new();
 
     // Hold our process handles in Options, they start as None
     let mut node_child: Option<ChildProcess> = None;
     let mut gw_child: Option<ChildProcess> = None;
     let mut delay_child: Option<ChildProcess> = None;
 
-    let quit_fn = |app: &mut App, terminal: &mut Terminal<_>| {
-        app.shutting_down = true;
+    let quit_fn = |app: &mut App, ngtr: &mut Navigator, terminal: &mut Terminal<_>| {
+        ngtr.shutting_down = true;
         app.reset_data();
-        let _ = terminal.draw(|f| ui::draw(f, app));
+        let _ = terminal.draw(|f| ui::draw(f, app, ngtr));
     };
 
     loop {
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &app, &navigator))?;
 
         if let Some(event) = rx.recv().await {
             match event {
-                AppEvent::Input(key_code) => match app.view {
-                    AppView::Landing => match key_code {
+                AppEvent::Input(key_code) => match navigator.view {
+                    NavigatorView::Landing => match key_code {
                         KeyCode::Esc => {
                             // Shut them down if they exist
                             shutdown_processes(vec![
@@ -222,36 +226,36 @@ pub async fn run_app(
                                 delay_child.take(),
                             ])
                             .await;
-                            quit_fn(&mut app, terminal);
-                            match app.view {
-                                AppView::Landing => break,
-                                AppView::Dashboard => app.view = AppView::Landing,
+                            quit_fn(&mut app, &mut navigator, terminal);
+                            match navigator.view {
+                                NavigatorView::Landing => break,
+                                NavigatorView::Dashboard => navigator.view = NavigatorView::Landing,
                             }
                         }
-                        KeyCode::Up | KeyCode::BackTab => app.prev_landing_focus(),
-                        KeyCode::Down | KeyCode::Tab => app.next_landing_focus(),
+                        KeyCode::Up | KeyCode::BackTab => navigator.prev_landing_focus(),
+                        KeyCode::Down | KeyCode::Tab => navigator.next_landing_focus(),
                         KeyCode::Char('s') | KeyCode::Char('S') => {
                             app.save_data();
                             app.reset_data();
                         }
                         KeyCode::Enter => {
-                            if app.landing_focus == LandingFocus::Save {
+                            if navigator.landing_focus == LandingFocus::Save {
                                 app.save_data();
                             } else {
                                 // Resets logs and data for new run
                                 app.reset_data();
-                                app.view = AppView::Dashboard;
+                                navigator.view = NavigatorView::Dashboard;
                                 (node_child, gw_child, delay_child) =
                                     spawn_children(&app, tx.clone());
                             }
                         }
-                        KeyCode::Backspace => app.backspace(),
-                        KeyCode::Char(c) => app.type_char(c),
+                        KeyCode::Backspace => app.backspace(navigator.landing_focus),
+                        KeyCode::Char(c) => app.type_char(c, navigator.landing_focus),
                         _ => {}
                     },
-                    AppView::Dashboard => match key_code {
+                    NavigatorView::Dashboard => match key_code {
                         KeyCode::Char('q') => {
-                            quit_fn(&mut app, terminal);
+                            quit_fn(&mut app, &mut navigator, terminal);
                             break;
                         }
                         KeyCode::Esc => {
@@ -261,9 +265,9 @@ pub async fn run_app(
                                 delay_child.take(),
                             ])
                             .await;
-                            app.view = AppView::Landing;
+                            navigator.view = NavigatorView::Landing;
                         }
-                        KeyCode::Tab => app.toggle_dash_focus(),
+                        KeyCode::Tab => navigator.toggle_dash_focus(),
                         _ => {}
                     },
                 },

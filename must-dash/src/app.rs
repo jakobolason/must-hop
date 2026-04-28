@@ -6,33 +6,14 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::navigator::LandingFocus;
+
 pub enum AppEvent {
     Input(KeyCode),
     NodeLog { text: String, overwrite: bool },
     GwLog { text: String, overwrite: bool },
     HardwareLog { delay_ms: String },
     Tick,
-}
-
-#[derive(PartialEq)]
-pub enum AppView {
-    Landing,
-    Dashboard,
-}
-
-#[derive(PartialEq, Clone, Copy)]
-pub enum LandingFocus {
-    Kp,
-    Ki,
-    SourceId,
-    Start,
-    Save,
-}
-
-#[derive(PartialEq)]
-pub enum DashFocus {
-    Data,
-    Logs,
 }
 
 pub struct EnvVars {
@@ -59,6 +40,8 @@ pub struct DashStats {
     pub delta_down: Vec<f32>,
     pub hardware_delay: Vec<f32>,
     pub mean_hardware_delay: Vec<f32>,
+    pub gw_slice: Vec<u64>,
+    pub node_slice: Vec<u64>,
     pub last_hw_idx: usize,
 }
 
@@ -73,6 +56,8 @@ impl DashStats {
             delta_down: Vec::new(),
             hardware_delay: Vec::new(),
             mean_hardware_delay: Vec::new(),
+            gw_slice: Vec::new(),
+            node_slice: Vec::new(),
             last_hw_idx: 0,
         }
     }
@@ -181,18 +166,12 @@ impl Default for DashStats {
 }
 
 pub struct App {
-    pub view: AppView,
-    pub landing_focus: LandingFocus,
-    pub dash_focus: DashFocus,
-
     pub env_vars: EnvVars,
 
     pub node_logs: Vec<String>,
     pub gw_logs: Vec<String>,
 
     pub dash_stats: DashStats,
-
-    pub shutting_down: bool,
 }
 
 impl Default for App {
@@ -208,16 +187,12 @@ impl App {
         let source_id = env::var("SOURCEID").unwrap_or("7".to_string());
 
         Self {
-            landing_focus: LandingFocus::Kp,
-            dash_focus: DashFocus::Logs,
-            view: AppView::Landing,
             env_vars: EnvVars { kp, ki, source_id },
 
             node_logs: Vec::new(),
             gw_logs: Vec::new(),
 
             dash_stats: DashStats::new(),
-            shutting_down: false,
         }
     }
 
@@ -227,28 +202,8 @@ impl App {
         self.dash_stats = DashStats::new();
     }
 
-    pub fn next_landing_focus(&mut self) {
-        self.landing_focus = match self.landing_focus {
-            LandingFocus::Kp => LandingFocus::Ki,
-            LandingFocus::Ki => LandingFocus::SourceId,
-            LandingFocus::SourceId => LandingFocus::Start,
-            LandingFocus::Start => LandingFocus::Save,
-            LandingFocus::Save => LandingFocus::Kp,
-        }
-    }
-
-    pub fn prev_landing_focus(&mut self) {
-        self.landing_focus = match self.landing_focus {
-            LandingFocus::Kp => LandingFocus::Save,
-            LandingFocus::Ki => LandingFocus::Kp,
-            LandingFocus::SourceId => LandingFocus::Ki,
-            LandingFocus::Start => LandingFocus::SourceId,
-            LandingFocus::Save => LandingFocus::Start,
-        };
-    }
-
-    pub fn type_char(&mut self, c: char) {
-        let s = match self.landing_focus {
+    pub fn type_char(&mut self, c: char, landing_focus: LandingFocus) {
+        let s = match landing_focus {
             LandingFocus::Kp => &mut self.env_vars.kp,
             LandingFocus::Ki => &mut self.env_vars.ki,
             LandingFocus::SourceId => &mut self.env_vars.source_id,
@@ -258,8 +213,8 @@ impl App {
         s.push(c);
     }
 
-    pub fn backspace(&mut self) {
-        let s = match self.landing_focus {
+    pub fn backspace(&mut self, landing_focus: LandingFocus) {
+        let s = match landing_focus {
             LandingFocus::Kp => &mut self.env_vars.kp,
             LandingFocus::Ki => &mut self.env_vars.ki,
             LandingFocus::SourceId => &mut self.env_vars.source_id,
@@ -267,13 +222,6 @@ impl App {
             LandingFocus::Save => return,
         };
         s.pop();
-    }
-
-    pub fn toggle_dash_focus(&mut self) {
-        self.dash_focus = match self.dash_focus {
-            DashFocus::Data => DashFocus::Logs,
-            DashFocus::Logs => DashFocus::Data,
-        };
     }
 
     pub fn save_data(&self) {
@@ -408,6 +356,21 @@ impl App {
                     }
                 }
             }
+        } else if log.contains("[TAU_SLICE]") && log.contains("|") {
+            let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
+            if let Ok(clean_log) = String::from_utf8(stripped_bytes)
+                && let Some(data_str) = clean_log.split("TAU_SLICE").nth(1)
+            {
+                let parts: Vec<&str> = data_str.split('|').collect();
+                if parts.len() >= 2
+                    && let Some(slice_val) = parts[1]
+                        .trim() // Remove surrounding spaces
+                        .parse::<u64>() // Convert to float
+                        .ok()
+                {
+                    self.dash_stats.node_slice.push(slice_val);
+                }
+            }
         }
 
         if overwrite {
@@ -426,19 +389,37 @@ impl App {
     }
 
     pub fn add_gw_log(&mut self, log: String, overwrite: bool) {
-        // if overwrite {
-        //     if let Some(last) = self.gw_logs.back_mut() {
-        //         *last = log;
-        //     } else {
-        //         self.gw_logs.push_back(log);
-        //     }
-        // } else {
-        self.gw_logs.push(log);
-        // }
+        let stripped = strip_ansi_escapes::strip(log.as_bytes());
+        let clean = String::from_utf8_lossy(&stripped);
+        let visible = clean.trim();
 
-        // if self.gw_logs.len() > 500 {
-        //     self.gw_logs.pop_front();
-        // }
+        // Drop pure cursor-movement lines with no visible content
+        if visible.is_empty() && overwrite {
+            return;
+        }
+
+        if log.contains("[TAU_SLICE]") && log.contains("|") {
+            let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
+            if let Ok(clean_log) = String::from_utf8(stripped_bytes)
+                && let Some(data_str) = clean_log.split("TAU_SLICE").nth(1)
+            {
+                let parts: Vec<&str> = data_str.split('|').collect();
+                if parts.len() >= 2
+                    && let Some(slice_val) = parts[1].trim().parse::<u64>().ok()
+                {
+                    self.dash_stats.gw_slice.push(slice_val);
+                }
+            }
+        }
+        if overwrite {
+            if let Some(last) = self.node_logs.last_mut() {
+                *last = log;
+            } else {
+                self.node_logs.push(log);
+            }
+        } else {
+            self.node_logs.push(log);
+        }
     }
 }
 

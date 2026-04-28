@@ -432,6 +432,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             }
         };
         // TODO: Also use the clock drift calc here
+        info!("[TAU_SLICE] | {} |", Instant::now().as_micros());
         let measured_spi_delay = 0;
         tx_stamp + toa + measured_spi_delay
     }

@@ -1,4 +1,7 @@
-use crate::app::{App, AppView};
+use crate::{
+    app::App,
+    navigator::{Navigator, NavigatorView},
+};
 use ratatui::{
     Frame,
     layout::Alignment,
@@ -9,13 +12,13 @@ use ratatui::{
 use crate::composables::formatting::centered_rect;
 use crate::pages::{dashboard::draw_dash, landing::draw_landing};
 
-pub fn draw(f: &mut Frame, app: &App) {
-    match app.view {
-        AppView::Landing => draw_landing(f, app),
-        AppView::Dashboard => draw_dash(f, app),
+pub fn draw(f: &mut Frame, app: &App, navigator: &Navigator) {
+    match navigator.view {
+        NavigatorView::Landing => draw_landing(f, app, navigator.landing_focus),
+        NavigatorView::Dashboard => draw_dash(f, app, &navigator.dash_focus),
     }
 
-    if app.shutting_down {
+    if navigator.shutting_down {
         let area = centered_rect(60, 20, f.area());
         f.render_widget(Clear, area); // Clears the background logs behind the popup
         let popup = Paragraph::new("\nShutting down background processes gracefully...\n\nDisconnecting SSH and Debug Probe.")

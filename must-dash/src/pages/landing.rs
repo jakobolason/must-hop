@@ -1,4 +1,4 @@
-use crate::app::{App, LandingFocus};
+use crate::{app::App, navigator::LandingFocus};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Margin},
@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::composables::formatting::centered_rect;
 
-pub fn draw_landing(f: &mut Frame, app: &App) {
+pub fn draw_landing(f: &mut Frame, app: &App, landing_focus: LandingFocus) {
     let area = centered_rect(40, 60, f.area());
     f.render_widget(Clear, area);
 
@@ -38,7 +38,7 @@ pub fn draw_landing(f: &mut Frame, app: &App) {
         .add_modifier(Modifier::BOLD);
     let inactive_style = Style::default().fg(Color::DarkGray);
     let chosen_style = |cmp: LandingFocus| {
-        if app.landing_focus == cmp {
+        if landing_focus == cmp {
             active_style
         } else {
             inactive_style
@@ -72,7 +72,7 @@ pub fn draw_landing(f: &mut Frame, app: &App) {
         .style(chosen_style(LandingFocus::SourceId));
     f.render_widget(src_p, chunks[2]);
 
-    let start_text = if app.landing_focus == LandingFocus::Start {
+    let start_text = if landing_focus == LandingFocus::Start {
         " [ START PROGRAM ] "
     } else {
         "   START PROGRAM   "

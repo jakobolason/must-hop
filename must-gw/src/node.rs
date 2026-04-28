@@ -89,6 +89,7 @@ pub struct GWNode {
     /// Kind of a hack to do it like this, perhaps MHNODE will be altered?
     fetched_packets: VecDeque<RxPacket>,
     pkt_params: PacketParams,
+    toa_instant: Option<Instant>,
 }
 
 impl GWNode {
@@ -97,6 +98,7 @@ impl GWNode {
             radio: concentrator,
             fetched_packets: VecDeque::new(),
             pkt_params: PacketParams::default(),
+            toa_instant: None,
         }
     }
     fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<TxPacket, Error> {
@@ -121,8 +123,7 @@ impl GWNode {
             self.pkt_params.bandwidth.into(),
             self.pkt_params.coderate.into(),
         );
-        let total_toa_us = bb_mod.time_on_air_us(None, true, payload_len);
-        total_toa_us
+        bb_mod.time_on_air_us(None, true, payload_len)
     }
 }
 
@@ -143,6 +144,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         self.radio.transmit(tx_pkt)?;
         let after = Instant::now();
         let only_tx = after - before;
+        trace!("[TAU_SLICE] | {} |", after.as_micros());
 
         trace!(
             "[TX DURATION] millis: {},\t ticks: {}",
