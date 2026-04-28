@@ -1,6 +1,3 @@
-#[cfg(not(feature = "debug"))]
-use core::marker::PhantomData;
-
 use crate::node::{MHNode, PacketType, RxPacket};
 
 #[cfg(not(feature = "in_std"))]
@@ -131,6 +128,10 @@ pub(crate) struct SlotAllocation {
 pub trait DebugPin: OutputPin {}
 #[cfg(feature = "debug")]
 impl<T: embedded_hal::digital::OutputPin> DebugPin for T {}
+#[cfg(not(feature = "debug"))]
+pub trait DebugPin {}
+#[cfg(not(feature = "debug"))]
+impl<T> DebugPin for T {}
 
 pub struct Builder;
 pub struct Runner;
@@ -154,6 +155,8 @@ pub struct TdmaMac<State, P, const SIZE: usize> {
     controller: Controller,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
+    #[cfg(not(feature = "debug"))]
+    _marker: PhantomData<P>,
 }
 
 impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
@@ -181,6 +184,8 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
 
             #[cfg(feature = "debug")]
             debug_pin: None,
+            #[cfg(not(feature = "debug"))]
+            _marker: PhantomData,
         }
     }
 
@@ -246,6 +251,8 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             controller,
             #[cfg(feature = "debug")]
             debug_pin,
+            #[cfg(not(feature = "debug"))]
+            _marker: PhantomData,
         }
     }
 }

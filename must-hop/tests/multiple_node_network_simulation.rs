@@ -1,6 +1,7 @@
+use embassy_time::Instant;
 use heapless::Vec;
 use must_hop::node::{
-    MHNode, MHPacket,
+    MHNode, MHPacket, RxPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
     policy::{GatewayPolicy, NodePolicy, RandomAccessMac},
@@ -79,7 +80,7 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
         &mut self,
         _conn: Self::Connection,
         _receiving_buffer: &(),
-    ) -> Result<heapless::Vec<MHPacket<SIZE>, LEN>, Self::Error> {
+    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, RxPacket), Self::Error> {
         let mut env = self.env.lock().unwrap();
         let mut rec_vec: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
 
@@ -93,7 +94,13 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
                 rec_vec.push(my_inbox.remove(0)).unwrap();
             }
         }
-        Ok(rec_vec)
+        Ok((
+            rec_vec,
+            RxPacket {
+                rx_done_instant: Instant::now(),
+                payload_size: 0,
+            },
+        ))
     }
 
     async fn listen(
@@ -102,6 +109,10 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
         _with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, Self::Error> {
         Ok(())
+    }
+
+    fn calc_tx_delay(&self, _payload_len: usize) -> u64 {
+        0
     }
 }
 
@@ -161,6 +172,7 @@ async fn test_mesh_topology() {
 
     // Node B now receives these
     let res1 = router_b.tick(&mut ()).await.unwrap();
+    assert_eq!(res1.len(), 0);
     let res1 = router_b.tick(&mut ()).await.unwrap();
     // These packages were not meant for us, so we should not receive anything here
     assert_eq!(res1.len(), 0);
@@ -231,6 +243,7 @@ async fn test_node_b_to_node_c() {
     router_b.queue_payload(msg1, node_c).unwrap();
     assert_eq!(router_b.get_pending_count(), 1);
     let resb = router_b.tick(&mut ()).await.unwrap();
+    assert_eq!(resb.len(), 0);
 
     // both node A and C are in range of B, so they both receive the packet
     let res2 = router_a.tick(&mut ()).await.unwrap();
@@ -310,6 +323,7 @@ async fn testing_multiple_nodes_can_hear_a() {
     router_a.queue_payload(msg1, node_c).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
     let resa = router_a.tick(&mut ()).await.unwrap();
+    assert_eq!(resa.len(), 0);
 
     // both nodes B and C are in range of A, so they both receive the packet
     let res2 = router_b.tick(&mut ()).await.unwrap();
@@ -425,6 +439,7 @@ async fn testing_gw_communication() {
     router_a.queue_payload(msg1, gw).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
     let resa = router_a.tick(&mut ()).await.unwrap();
+    assert_eq!(resa.len(), 0);
 
     // both nodes B and C are in range of A, so they both receive the packet
     let res2 = router_b.tick(&mut ()).await.unwrap();
@@ -535,6 +550,7 @@ async fn testing_complex_gw_communication() {
     router_a.queue_payload(msg1, gw).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
     let resa = router_a.tick(&mut ()).await.unwrap();
+    assert_eq!(resa.len(), 0);
 
     // both nodes B and C are in range of A, so they both receive the packet
     let res2 = router_b.tick(&mut ()).await.unwrap();

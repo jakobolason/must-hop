@@ -82,7 +82,7 @@ where
         bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes)
     }
 
-    fn avg_slice_delay(&self, payload_len: u8) -> u64 {
+    fn avg_slice_delay(&self, _payload_len: u8) -> u64 {
         0
     }
 }

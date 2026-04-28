@@ -1,6 +1,3 @@
-#[cfg(not(feature = "debug"))]
-use core::marker::PhantomData;
-
 use crate::node::RxPacket;
 use crate::node::policy::tdma::SlotAllocation;
 
@@ -53,7 +50,7 @@ impl Controller {
     fn update_skew_and_stamp(
         &self,
         hb: &SlotAllocation,
-        rx_pkt: RxPacket,
+        _rx_pkt: RxPacket,
         sending_instant: Instant,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
