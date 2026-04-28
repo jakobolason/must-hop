@@ -85,6 +85,7 @@ where
     fn set_gw_hops(&mut self, gw_hops: u8);
 }
 
+/// A RA MAC policy which sends when it has a packet to send, and listens otherwise
 pub struct RandomAccessMac<const SIZE: usize> {
     hbt_pkt: Option<MHPacket<SIZE>>,
 }

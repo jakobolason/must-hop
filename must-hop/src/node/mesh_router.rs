@@ -45,7 +45,7 @@ impl<E: fmt::Debug + core::error::Error> core::error::Error for MeshRouterError<
 //     }
 // }
 
-/// Mesh Stack(MS) handles the user defined radio which implements MHNode, and a Network Manager,
+/// Mesh Router(MR) handles the user defined radio which implements MHNode, and a Network Manager,
 /// managing the logic necessary to send and receive packets, but the user does not have to think
 /// about how packets are received and sent on, if they are not for them.
 /// Handles the flow of packets

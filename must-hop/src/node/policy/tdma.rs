@@ -147,6 +147,8 @@ impl<T> DebugPin for T {}
 pub struct Builder;
 pub struct Runner;
 
+/// A TDMA MAC policy, which synchronizes nodes across the network to only listen when known slots
+/// could be transmitting, saving power.
 pub struct TdmaMac<State, P, const SIZE: usize> {
     _state: PhantomData<State>,
     slot_duration: Duration,

@@ -237,16 +237,16 @@ mod controller_tests {
 
         let base_instant = Instant::now();
         let elapsed = Duration::from_millis(500);
-        let send_instant = base_instant + elapsed;
+        let rx_instant = base_instant + elapsed;
         let gps_base: u64 = 1_000_000;
 
         // Simulate a heartbeat that arrives exactly 500ms after our epoch — no drift
         let hb_gps_time = gps_base + elapsed.as_micros();
         let alloc = make_alloc(hb_gps_time);
-        let rx = make_rx_pkt(send_instant);
+        let rx = make_rx_pkt(rx_instant);
         let prior_sync = Some((gps_base, base_instant));
 
-        c.run_transferfunction(&alloc, rx, send_instant, prior_sync, 1);
+        c.run_transferfunction(&alloc, rx, rx_instant, prior_sync, 1);
 
         assert_eq!(
             c.v_s, initial_v_s,
