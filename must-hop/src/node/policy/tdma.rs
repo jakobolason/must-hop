@@ -399,10 +399,10 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     }
                 }
                 self.known_slots_mask.claim(alloc.my_slot);
-                info!(
-                    "Other node claimed slot at {}. {:?}",
-                    alloc.my_slot, self.known_slots_mask
-                );
+                // info!(
+                //     "Other node claimed slot at {}. {:?}",
+                //     alloc.my_slot, self.known_slots_mask
+                // );
 
                 // Only allocate a new slot if we don't have one
                 if self.my_tx_slot.is_none() {
@@ -432,7 +432,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             }
         };
         // TODO: Also use the clock drift calc here
-        info!("[TAU_SLICE] | {} |", Instant::now().as_micros());
+        info!("[TAU_SLICE]|{}|", Instant::now().as_micros());
         let measured_spi_delay = 0;
         tx_stamp + toa + measured_spi_delay
     }
@@ -443,19 +443,19 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         t3_deltas: Vec<(u8, i32), 5>,
         tx_queue: &Vec<MHPacket<SIZE>, LEN>,
     ) -> usize {
-        let tx_timestamp = match self.time_sync {
-            Some(stamps) => self.current_gps_time(stamps),
-            None => {
-                error!("In update heartbeat before we've heart a heartbeat??");
-                0
-            }
-        };
+        // let tx_timestamp = match self.time_sync {
+        //     Some(stamps) => self.current_gps_time(stamps),
+        //     None => {
+        //         error!("In update heartbeat before we've heart a heartbeat??");
+        //         0
+        //     }
+        // };
 
         let dummy_allocation = SlotAllocation {
             my_slot: my_tx_slot,
-            known_slots: self.known_slots_mask.as_u32(),
-            gps_time_us: tx_timestamp,
-            t3_deltas: t3_deltas.clone(),
+            known_slots: 0,
+            gps_time_us: 1_u64,
+            t3_deltas,
         };
 
         let exact_payload_size = serialize_with_flavor(&dummy_allocation, Size::default())
@@ -463,8 +463,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let exact_packet_size =
             serialize_with_flavor(&tx_queue, Size::default()).expect("Failed to size tx queue");
 
-        let size = exact_packet_size + exact_payload_size + 7;
-        info!("SIZE EXPECTED: {}", size);
+        let size = exact_packet_size + exact_payload_size;
+        info!("[SIZE EXPECTED]|{}|", size);
         size
     }
 
@@ -542,7 +542,7 @@ where
         // get current slot
         let slot = self.current_slot(self.current_gps_time(timestamps));
 
-        debug!("current slot: {}", slot);
+        // debug!("current slot: {}", slot);
         #[cfg(feature = "debug")]
         if let Some(pin) = self.debug_pin.as_mut() {
             let _ = pin.set_high();
@@ -551,7 +551,7 @@ where
         if let Some(my_tx_slot) = self.my_tx_slot
             && slot == my_tx_slot
         {
-            debug!(" !!!  MY SLOT !!! ");
+            // debug!(" !!!  MY SLOT !!! ");
             // NOTE: Introduce a 50ms delay here, to ensure nodes are listening in your slot
             Timer::after(Duration::from_millis(100)).await;
             if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
@@ -585,7 +585,7 @@ where
                 tx_queue.clear();
             }
         } else {
-            debug!(" -- NOT MY SLOT ---   ");
+            // debug!(" -- NOT MY SLOT ---   ");
             let conn = node
                 .listen(rx_buffer, Some(core::time::Duration::from_millis(500)))
                 .await;

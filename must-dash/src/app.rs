@@ -41,8 +41,14 @@ pub struct DashStats {
     pub hardware_delay: Vec<f32>,
     pub mean_hardware_delay: Vec<f32>,
     pub gw_slice: Vec<u64>,
+    pub last_gw_slice: u64,
     pub node_slice: Vec<u64>,
+    pub last_node_slice: u64,
     pub last_hw_idx: usize,
+    pub gw_slice_size: Vec<usize>,
+    pub last_gw_slice_size: usize,
+    pub node_slice_size: Vec<usize>,
+    pub last_node_slice_size: usize,
 }
 
 impl DashStats {
@@ -57,8 +63,14 @@ impl DashStats {
             hardware_delay: Vec::new(),
             mean_hardware_delay: Vec::new(),
             gw_slice: Vec::new(),
+            last_gw_slice: 0,
             node_slice: Vec::new(),
+            last_node_slice: 0,
             last_hw_idx: 0,
+            gw_slice_size: Vec::new(),
+            last_gw_slice_size: 0,
+            node_slice_size: Vec::new(),
+            last_node_slice_size: 0,
         }
     }
     pub fn get_history_lines(&self, max_lines: usize) -> Vec<Vec<String>> {
@@ -81,8 +93,18 @@ impl DashStats {
             let up_str = to_str(&self.delta_up, i);
             let down_str = to_str(&self.delta_down, i);
             let hw_delay = to_str(&self.mean_hardware_delay, i);
+            let gw_delay = self
+                .gw_slice
+                .get(i)
+                .map_or("--".to_string(), |&v| format!("{:.3}ms", v));
+            let node_delay = self
+                .node_slice
+                .get(i)
+                .map_or("--".to_string(), |&v| format!("{:.3}ms", v));
 
-            rows.push(vec![hb_nr, err_str, speed, up_str, down_str, hw_delay]);
+            rows.push(vec![
+                hb_nr, err_str, speed, up_str, down_str, hw_delay, gw_delay, node_delay,
+            ]);
         }
         rows
     }
@@ -258,11 +280,14 @@ impl App {
             let get_val = |vec: &Vec<f32>, i: usize| -> String {
                 vec.get(i).map_or_else(String::new, |v| v.to_string())
             };
+            let get_u64_val = |vec: &Vec<u64>, i: usize| -> String {
+                vec.get(i).map_or_else(String::new, |v| v.to_string())
+            };
 
             for i in 0..max_len {
                 let _ = writeln!(
                     main_file,
-                    "{},{},{},{},{},{},{}",
+                    "{},{},{},{},{},{},{},{},{}",
                     get_val(&self.dash_stats.delay, i),
                     get_val(&self.dash_stats.err, i),
                     get_val(&self.dash_stats.prev_speed, i),
@@ -270,6 +295,8 @@ impl App {
                     get_val(&self.dash_stats.delta_up, i),
                     get_val(&self.dash_stats.delta_down, i),
                     get_val(&self.dash_stats.mean_hardware_delay, i),
+                    get_u64_val(&self.dash_stats.gw_slice, i),
+                    get_u64_val(&self.dash_stats.node_slice, i),
                 );
             }
         }
@@ -301,28 +328,23 @@ impl App {
             return;
         }
 
-        if log.contains("[SYNC]") && log.contains("|") {
-            let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
-            if let Ok(clean_log) = String::from_utf8(stripped_bytes) {
-                // 1. Get everything after "[SYNC]   "
-                if let Some(data_str) = clean_log.split("[SYNC]").nth(1) {
-                    // 2. Split into [" delay: 1.115ms ", " err: -1.115ms ", " v_prev: 17794275 ", " v_new: 17752705"]
-                    let parts: Vec<&str> = data_str.split('|').collect();
-
-                    if parts.len() >= 4 {
-                        // 3. Extract using quick string manipulation
-                        if let Some(delay_val) = extract_value(parts[0]) {
-                            self.dash_stats.delay.push(delay_val);
-                        }
-                        if let Some(err_val) = extract_value(parts[1]) {
-                            self.dash_stats.err.push(err_val);
-                        }
-                        if let Some(prev_val) = extract_value(parts[2]) {
-                            self.dash_stats.prev_speed.push(prev_val);
-                        }
-                        if let Some(new_val) = extract_value(parts[3]) {
-                            self.dash_stats.new_speed.push(new_val);
-                        }
+        if log.contains("|") {
+            let parts: Vec<&str> = clean.split("|").collect();
+            let identifier = parts[0];
+            if identifier.contains("[SYNC]") {
+                if parts.len() >= 4 {
+                    // 3. Extract using quick string manipulation
+                    if let Some(delay_val) = extract_value(parts[1]) {
+                        self.dash_stats.delay.push(delay_val);
+                    }
+                    if let Some(err_val) = extract_value(parts[2]) {
+                        self.dash_stats.err.push(err_val);
+                    }
+                    if let Some(prev_val) = extract_value(parts[3]) {
+                        self.dash_stats.prev_speed.push(prev_val);
+                    }
+                    if let Some(new_val) = extract_value(parts[4]) {
+                        self.dash_stats.new_speed.push(new_val);
                     }
                 }
                 // at sync we calc mean of hw delays
@@ -337,39 +359,33 @@ impl App {
                 let mean = sum / measured_delays.len() as f32;
                 self.dash_stats.mean_hardware_delay.push(mean);
                 self.dash_stats.last_hw_idx = self.dash_stats.hardware_delay.len() - 1;
-            }
-        } else if log.contains("[DELTAS]") && log.contains("|") {
-            let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
-            if let Ok(clean_log) = String::from_utf8(stripped_bytes) {
-                //  Get everything after "[DELTAS]   "
-                if let Some(data_str) = clean_log.split("[DELTAS]").nth(1) {
-                    // split into ["up: {}ms", "down: {}ms", ".."]
-                    let parts: Vec<&str> = data_str.split('|').collect();
-
-                    if parts.len() >= 2 {
-                        if let Some(delay_val) = extract_value(parts[0]) {
-                            self.dash_stats.delta_up.push(delay_val);
-                        }
-                        if let Some(err_val) = extract_value(parts[1]) {
-                            self.dash_stats.delta_down.push(err_val);
-                        }
-                    }
+            } else if identifier.contains("[DELTAS]") && parts.len() >= 2 {
+                if let Some(delay_val) = extract_value(parts[1]) {
+                    self.dash_stats.delta_up.push(delay_val);
                 }
-            }
-        } else if log.contains("[TAU_SLICE]") && log.contains("|") {
-            let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
-            if let Ok(clean_log) = String::from_utf8(stripped_bytes)
-                && let Some(data_str) = clean_log.split("TAU_SLICE").nth(1)
+                if let Some(err_val) = extract_value(parts[2]) {
+                    self.dash_stats.delta_down.push(err_val);
+                }
+            } else if identifier.contains("[TAU_SLICE_POST]") && parts.len() >= 3 {
+                if let Ok(slice_val) = parts[1].trim().parse::<u64>() {
+                    self.dash_stats
+                        .node_slice
+                        .push(slice_val - self.dash_stats.last_gw_slice);
+                }
+                if let Ok(slice_size) = parts[2].trim().parse::<usize>() {
+                    let diff = slice_size - self.dash_stats.last_gw_slice_size;
+                    self.dash_stats.node_slice_size.push(diff);
+                }
+            } else if identifier.contains("[SIZE EXPECTED]")
+                && parts.len() >= 2
+                && let Ok(val) = parts[1].trim().parse::<usize>()
             {
-                let parts: Vec<&str> = data_str.split('|').collect();
-                if parts.len() >= 2
-                    && let Some(slice_val) = parts[1]
-                        .trim() // Remove surrounding spaces
-                        .parse::<u64>() // Convert to float
-                        .ok()
-                {
-                    self.dash_stats.node_slice.push(slice_val);
-                }
+                self.dash_stats.last_node_slice_size = val
+            } else if identifier.contains("[TAU_SLICE]")
+                && parts.len() >= 2
+                && let Ok(val) = parts[1].trim().parse::<u64>()
+            {
+                self.dash_stats.last_node_slice = val
             }
         }
 
@@ -382,10 +398,6 @@ impl App {
         } else {
             self.node_logs.push(log);
         }
-
-        // if self.node_logs.len() > 500 {
-        //     self.node_logs.pop_front();
-        // }
     }
 
     pub fn add_gw_log(&mut self, log: String, overwrite: bool) {
@@ -398,27 +410,29 @@ impl App {
             return;
         }
 
-        if log.contains("[TAU_SLICE]") && log.contains("|") {
-            let stripped_bytes = strip_ansi_escapes::strip(log.as_bytes());
-            if let Ok(clean_log) = String::from_utf8(stripped_bytes)
-                && let Some(data_str) = clean_log.split("TAU_SLICE").nth(1)
-            {
-                let parts: Vec<&str> = data_str.split('|').collect();
-                if parts.len() >= 2
-                    && let Some(slice_val) = parts[1].trim().parse::<u64>().ok()
-                {
-                    self.dash_stats.gw_slice.push(slice_val);
+        if log.contains("[TAU_SLICE_POST]") && log.contains("|") {
+            let parts: Vec<&str> = clean.split('|').collect();
+            if parts.len() == 3 {
+                if let Ok(slice_val) = parts[1].trim().parse::<u64>() {
+                    self.dash_stats
+                        .gw_slice
+                        .push(slice_val - self.dash_stats.last_gw_slice);
+                }
+                if let Ok(slice_size) = parts[2].trim().parse::<usize>() {
+                    let diff = slice_size - self.dash_stats.last_gw_slice_size;
+                    self.dash_stats.gw_slice_size.push(diff);
                 }
             }
         }
+        // self.gw_logs.push(log);
         if overwrite {
             if let Some(last) = self.node_logs.last_mut() {
                 *last = log;
             } else {
-                self.node_logs.push(log);
+                self.gw_logs.push(log);
             }
         } else {
-            self.node_logs.push(log);
+            self.gw_logs.push(log);
         }
     }
 }

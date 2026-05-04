@@ -86,16 +86,13 @@ impl Controller {
             let down_ms = delta_down as f32 / 1000.0;
             if delta_down.abs() > 1_000 || delta_up.abs() > 1_000 {
                 // 2A. DELTAS REJECTED LOG
-                info!(
-                    "[DELTAS] up: {}ms | down: {}ms | status: REJECTED",
-                    up_ms, down_ms
-                );
+                info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
                 0
             } else {
                 let nw_delay = (delta_down + *delta_up as i64) / 2;
                 // 2B. DELTAS ACCEPTED LOG
                 info!(
-                    "[DELTAS] up: {}ms | down: {}ms | nw_delay: {}ms",
+                    "[DELTAS]|{}|{}|{}|",
                     up_ms,
                     down_ms,
                     nw_delay as f32 / 1000.0
@@ -127,7 +124,7 @@ impl Controller {
         if my_stamp != hb.gps_time_us {
             let measured_delay: i64 = my_stamp as i64 - hb.gps_time_us as i64;
             info!(
-                "[SYNC]   delay: {}ms | err: {}ms | v_prev: {} | v_new: {} |",
+                "[SYNC]|{}|{}|{}|{}|",
                 measured_delay as f32 / 1000.0,
                 err as f32 / 1000.0,
                 self.v_s,
@@ -146,7 +143,6 @@ mod controller_tests {
     use super::*;
     use crate::node::policy::tdma::SlotAllocation;
     use embassy_time::{Duration, Instant};
-    use heapless::Vec;
 
     fn make_controller(v_s: i64, kp: i64, ki: i64) -> Controller {
         Controller::new(v_s, kp, ki)

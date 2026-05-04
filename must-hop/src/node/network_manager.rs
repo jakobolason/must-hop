@@ -236,7 +236,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             return Ok(None);
         }
         if pkt.packet_type == PacketType::HeartBeat {
-            trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
+            // trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
             // TODO: What about GW failure/node failure, altering this?
             if pkt.hop_count >= self.gw_hops
                 || self.recent_seen.contains((pkt.source_id, pkt.packet_id))

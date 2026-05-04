@@ -100,7 +100,7 @@ where
         self.tx_queue
             .push(pkt)
             .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
-        trace!("Pusing to queue, len: {}", self.tx_queue.len());
+        // trace!("Pusing to queue, len: {}", self.tx_queue.len());
         Ok(())
     }
 
@@ -141,7 +141,7 @@ where
                 self.mac_policy.set_gw_hops(self.manager.get_gw_hops());
                 continue;
             }
-            trace!("Pusing to tx queue:  {}", self.tx_queue.len());
+            // trace!("Pusing to tx queue:  {}", self.tx_queue.len());
             // If buffer is full, break adding packets to it.
             if self.tx_queue.push(pkt).is_err() {
                 error!("Tx queue is full, dropping packets ...");

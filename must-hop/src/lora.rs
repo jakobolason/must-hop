@@ -97,12 +97,9 @@ where
     type Connection = Result<(u8, PacketStatus), RadioError>;
     type ReceiveBuffer = [u8; TRANSMISSION_BUFFER];
 
+    /// Slices up packets into bytes and transmits, does not call `lora.sleep`
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {
-        let now = Instant::now();
-
-        // TODO: Can this be made opt-in? Such that individual transmission is possible?
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
-        trace!("BUFFER SIZE IS: {}", SIZE);
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
             Err(e) => {
@@ -110,29 +107,17 @@ where
                 return Err(RadioError::OpError(1));
             }
         };
-        trace!("used slice size is {}", used_slice.len());
 
-        let before_tx = Instant::now();
         self.lora
             .prepare_for_tx(&self.mdltn_params, &mut self.pkt_params, 20, used_slice)
             .await?;
         let now_sending = Instant::now();
         self.lora.tx().await?;
-        trace!("Transmit successfull! micros: {}", now_sending.as_micros());
-        let after = Instant::now();
-        let tx_dur = after - now;
-        let only_tx = after - before_tx;
         trace!(
-            "[TX DURATION] millis: {},\t ticks: {}",
-            tx_dur.as_millis(),
-            tx_dur
+            "[TAU_SLICE_POST] |{}|{}|",
+            now_sending.as_micros(),
+            used_slice.len()
         );
-        trace!(
-            "[ONLY TX DURATION] millis: {},\t ticks: {}",
-            only_tx.as_millis(),
-            only_tx
-        );
-
         // NOTE: This might create a delay between transmitting something and being able to receive
         // again
         // lora.sleep(false).await?;
@@ -140,7 +125,6 @@ where
         Ok(())
     }
 
-    // Should transition to Rx if in Tx
     async fn receive(
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,

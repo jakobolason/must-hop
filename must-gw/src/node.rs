@@ -89,7 +89,6 @@ pub struct GWNode {
     /// Kind of a hack to do it like this, perhaps MHNODE will be altered?
     fetched_packets: VecDeque<RxPacket>,
     pkt_params: PacketParams,
-    toa_instant: Option<Instant>,
 }
 
 impl GWNode {
@@ -98,10 +97,9 @@ impl GWNode {
             radio: concentrator,
             fetched_packets: VecDeque::new(),
             pkt_params: PacketParams::default(),
-            toa_instant: None,
         }
     }
-    fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<TxPacket, Error> {
+    fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<(TxPacket, usize), Error> {
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
@@ -111,10 +109,13 @@ impl GWNode {
             }
         };
         log::info!("BUFFER SIZE IS: {}", used_slice.len());
-        Ok(TxPacket::LoRa(TxPacketLoRa {
-            payload: used_slice.to_vec(),
-            ..self.pkt_params.clone().into()
-        }))
+        Ok((
+            TxPacket::LoRa(TxPacketLoRa {
+                payload: used_slice.to_vec(),
+                ..self.pkt_params.clone().into()
+            }),
+            used_slice.len(),
+        ))
     }
     fn calc_toa(&self, payload_len: u8) -> u32 {
         // Using the formula to calculate time-on-air
@@ -133,24 +134,25 @@ impl MHNode<SIZE, LEN> for GWNode {
     type ReceiveBuffer = Option<RxPacket>;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
-        packets
-            .iter()
-            .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
+        // packets
+        //     .iter()
+        //     .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
         let before = Instant::now();
-        let tx_pkt = self.to_tx_packet(packets)?;
+        let (tx_pkt, payload_size) = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
             embassy_time::Timer::after(Duration::from_millis(5)).await;
         }
         self.radio.transmit(tx_pkt)?;
+        // Because the SX1302 is independent of the process running this program, this returns
+        // before its done transmitting, and just returns after it's done sending the bytes to the radio
         let after = Instant::now();
         let only_tx = after - before;
-        trace!("[TAU_SLICE] | {} |", after.as_micros());
-
         trace!(
-            "[TX DURATION] millis: {},\t ticks: {}",
-            only_tx.as_millis(),
-            after.as_micros()
+            "[TAU_SLICE_POST] | {} | {} |",
+            after.as_micros(),
+            payload_size
         );
+
         Ok(())
     }
 
@@ -172,24 +174,24 @@ impl MHNode<SIZE, LEN> for GWNode {
             RxPacket::FSK(_) => return Err(loragw::Error::Generic),
         };
         let raw_bytes = &pkt.payload;
-        log::info!(
-            "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
-            pkt.spreading,
-            pkt.bandwidth,
-            pkt.freq,
-            pkt.rssi,
-            pkt.snr
-        );
+        // log::info!(
+        //     "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
+        //     pkt.spreading,
+        //     pkt.bandwidth,
+        //     pkt.freq,
+        //     pkt.rssi,
+        //     pkt.snr
+        // );
 
         let packets = postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes)
             .map_err(|_| {
                 error!("Could not convert to bytes!");
                 loragw::Error::Generic
             })?;
-        log::info!(
-            "SUCCESS !!!! Received amount of packets: {:?}",
-            packets.len()
-        );
+        // log::info!(
+        //     "SUCCESS !!!! Received amount of packets: {:?}",
+        //     packets.len()
+        // );
         let now_host = Instant::now();
         let rx_heartbeat_timestamp = if let Ok(now_radio) = self.radio.get_instcnt() {
             // Calculate our local ticks when this was captured
