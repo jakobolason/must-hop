@@ -3,6 +3,7 @@ use std::{
     env,
     fs::File,
     io::Write,
+    str::FromStr,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -313,7 +314,13 @@ impl App {
         }
     }
     pub fn add_hw_delay(&mut self, log_str: String) {
-        if let Some(delay_ms) = extract_value(&log_str) {
+        let parsed = log_str
+            .split(':')
+            .nth(1)
+            .map(|s| s.trim().trim_end_matches("ms").trim())
+            .and_then(|s| s.parse::<f32>().ok());
+
+        if let Some(delay_ms) = parsed {
             self.dash_stats.hardware_delay.push(delay_ms);
         }
     }
@@ -331,19 +338,22 @@ impl App {
         if log.contains("|") {
             let parts: Vec<&str> = clean.split("|").collect();
             let identifier = parts[0];
+            log::info!("identifier: {identifier}");
+            log::info!("parts: {:?}", parts);
             if identifier.contains("[SYNC]") {
+                log::warn!("IN SYNC!");
                 if parts.len() >= 4 {
                     // 3. Extract using quick string manipulation
-                    if let Some(delay_val) = extract_value(parts[1]) {
+                    if let Ok(delay_val) = extract_value(parts[1]) {
                         self.dash_stats.delay.push(delay_val);
                     }
-                    if let Some(err_val) = extract_value(parts[2]) {
+                    if let Ok(err_val) = extract_value(parts[2]) {
                         self.dash_stats.err.push(err_val);
                     }
-                    if let Some(prev_val) = extract_value(parts[3]) {
+                    if let Ok(prev_val) = extract_value(parts[3]) {
                         self.dash_stats.prev_speed.push(prev_val);
                     }
-                    if let Some(new_val) = extract_value(parts[4]) {
+                    if let Ok(new_val) = extract_value(parts[4]) {
                         self.dash_stats.new_speed.push(new_val);
                     }
                 }
@@ -360,32 +370,36 @@ impl App {
                 self.dash_stats.mean_hardware_delay.push(mean);
                 self.dash_stats.last_hw_idx = self.dash_stats.hardware_delay.len() - 1;
             } else if identifier.contains("[DELTAS]") && parts.len() >= 2 {
-                if let Some(delay_val) = extract_value(parts[1]) {
+                log::warn!("IN DELTAS!");
+                if let Ok(delay_val) = extract_value(parts[1]) {
                     self.dash_stats.delta_up.push(delay_val);
                 }
-                if let Some(err_val) = extract_value(parts[2]) {
+                if let Ok(err_val) = extract_value(parts[2]) {
                     self.dash_stats.delta_down.push(err_val);
-                }
-            } else if identifier.contains("[TAU_SLICE_POST]") && parts.len() >= 3 {
-                if let Ok(slice_val) = parts[1].trim().parse::<u64>() {
-                    self.dash_stats
-                        .node_slice
-                        .push(slice_val - self.dash_stats.last_gw_slice);
-                }
-                if let Ok(slice_size) = parts[2].trim().parse::<usize>() {
-                    let diff = slice_size - self.dash_stats.last_gw_slice_size;
-                    self.dash_stats.node_slice_size.push(diff);
                 }
             } else if identifier.contains("[SIZE EXPECTED]")
                 && parts.len() >= 2
-                && let Ok(val) = parts[1].trim().parse::<usize>()
+                && let Ok(val) = extract_value::<usize>(parts[1])
             {
+                log::warn!("IN EXPECTED!");
                 self.dash_stats.last_node_slice_size = val
             } else if identifier.contains("[TAU_SLICE]")
                 && parts.len() >= 2
-                && let Ok(val) = parts[1].trim().parse::<u64>()
+                && let Ok(val) = extract_value::<u64>(parts[1])
             {
+                log::warn!("IN SLICE!");
                 self.dash_stats.last_node_slice = val
+            } else if identifier.contains("[TAU_SLICE_POST]") && parts.len() >= 3 {
+                log::warn!("IN POST!");
+                if let Ok(slice_val) = extract_value::<u64>(parts[1]) {
+                    self.dash_stats
+                        .node_slice
+                        .push(slice_val - self.dash_stats.last_node_slice);
+                }
+                if let Ok(slice_size) = parts[2].trim().parse::<usize>() {
+                    let diff = slice_size - self.dash_stats.last_node_slice_size;
+                    self.dash_stats.node_slice_size.push(diff);
+                }
             }
         }
 
@@ -410,10 +424,18 @@ impl App {
             return;
         }
 
-        if log.contains("[TAU_SLICE_POST]") && log.contains("|") {
-            let parts: Vec<&str> = clean.split('|').collect();
-            if parts.len() == 3 {
-                if let Ok(slice_val) = parts[1].trim().parse::<u64>() {
+        if log.contains("|") {
+            let parts: Vec<&str> = clean.split("|").collect();
+            let identifier = parts[0];
+            if identifier.contains("[TAU_SLICE]")
+                && parts.len() >= 2
+                && let Ok(val) = extract_value::<u64>(parts[1])
+            {
+                log::warn!("IN SLICE!");
+                self.dash_stats.last_gw_slice = val
+            } else if identifier.contains("[TAU_SLICE_POST]") && parts.len() >= 3 {
+                log::warn!("IN POST!");
+                if let Ok(slice_val) = extract_value::<u64>(parts[1]) {
                     self.dash_stats
                         .gw_slice
                         .push(slice_val - self.dash_stats.last_gw_slice);
@@ -424,7 +446,7 @@ impl App {
                 }
             }
         }
-        // self.gw_logs.push(log);
+
         if overwrite {
             if let Some(last) = self.node_logs.last_mut() {
                 *last = log;
@@ -437,12 +459,9 @@ impl App {
     }
 }
 
-fn extract_value(part: &str) -> Option<f32> {
-    part.split(':') // Split into " delay" and " 1.115ms "
-        .nth(1)? // Get the value side
-        .trim() // Remove surrounding spaces
-        .trim_end_matches("ms") // Remove 'ms' if it exists
-        .trim() // Clean up any remaining space
-        .parse::<f32>() // Convert to float
-        .ok()
+fn extract_value<T>(part: &str) -> Result<T, T::Err>
+where
+    T: FromStr,
+{
+    part.trim().parse::<T>()
 }

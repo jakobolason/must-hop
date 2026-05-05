@@ -99,7 +99,7 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) 
         Constraint::Percentage(21), // Speed
         Constraint::Percentage(10), // Δ Up
         Constraint::Percentage(10), // Δ Down
-        Constraint::Percentage(5),  // HW Delay
+        Constraint::Percentage(10), // HW Delay
         Constraint::Percentage(8),
         Constraint::Percentage(8),
     ];
