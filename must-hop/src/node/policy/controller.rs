@@ -37,9 +37,10 @@ impl Controller {
         sending_instant: Instant,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
+        tau_hb: u64,
     ) -> Option<(u64, Instant)> {
         let (v_s, time_sync, error, delay) =
-            self.update_skew_and_stamp(hb, sending_instant, time_sync, node_id);
+            self.update_skew_and_stamp(hb, sending_instant, time_sync, node_id, tau_hb);
         self.v_s = v_s;
         self.prev_delay = delay;
         self.prev_err = error;
@@ -53,6 +54,7 @@ impl Controller {
         sending_instant: Instant,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
+        tau_hb: u64,
     ) -> (i64, Option<(u64, Instant)>, i64, i64) {
         let (old_gps, last_stamp) = match time_sync {
             Some(stamps) => stamps,
@@ -67,16 +69,6 @@ impl Controller {
         let my_diff = (sending_instant - last_stamp).as_micros();
         let predicted_elapsed = my_diff + self.calc_drift_duration(my_diff);
         let my_stamp = predicted_elapsed + old_gps;
-        // instant was just when we received the preamble. But perhaps the difference between that
-        // instant and now is the same as ToA
-        // let now = Instant::now();
-        // let difference = now - sending_instant;
-        // info!(
-        //     "[TIMING] now: {}s | send: {}s | diff: {}ms | ",
-        //     now.as_millis() as f32 / 1000.0,
-        //     sending_instant.as_millis() as f32 / 1000.0,
-        //     difference.as_micros() as f32 / 1000.0,
-        // );
 
         // Check if a t3 delta is availale for us
         let delay = if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == node_id) {
@@ -113,7 +105,16 @@ impl Controller {
         // Now update drift
         let gw_diff = current_true_time - old_gps as i64;
 
-        let err = gw_diff - predicted_elapsed as i64;
+        let phase_err = gw_diff - predicted_elapsed as i64;
+        let freq_err = {
+            if predicted_elapsed > 2 * tau_hb {
+                0
+            } else {
+                tau_hb as i64 - predicted_elapsed as i64
+            }
+        };
+
+        let err = freq_err + phase_err;
 
         let delta_err = err - self.prev_err;
         let delta_u = (self.kp * delta_err) + (self.ki * err);

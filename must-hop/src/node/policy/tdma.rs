@@ -112,6 +112,7 @@ impl SlotMask {
     }
 }
 
+type VecT3 = Vec<(u8, u32), 10>;
 /// Used in Heartbeats to convey information about which slots are used, and the time
 /// synchronization values needed
 #[derive(Serialize, Deserialize)]
@@ -121,7 +122,7 @@ pub(crate) struct SlotAllocation {
     known_slots: u32,
     pub(crate) gps_time_us: u64,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    pub(crate) t3_deltas: Vec<(u8, i32), 5>,
+    pub(crate) t3_deltas: VecT3,
 }
 /// Onl used for tests
 impl SlotAllocation {
@@ -154,6 +155,7 @@ pub struct TdmaMac<State, P, const SIZE: usize> {
     slot_duration: Duration,
     slots_per_frame: u8,
     my_tx_slot: Option<u8>,
+    tau_hb: u64,
     /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,
     /// A mask to know what other node's one know
@@ -164,7 +166,7 @@ pub struct TdmaMac<State, P, const SIZE: usize> {
     node_id: u8,
     gw_hops: u8,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    t3_deltas: Vec<(u8, i32), 5>,
+    t3_deltas: VecT3,
     controller: Controller,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
@@ -177,6 +179,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         // FIXME: Remove from user, should be set by GW
         slot_duration: Duration,
         // FIXME: Remove from user, should be set by GW
+        tau_hb: u64,
         slots_per_frame: core::num::NonZeroU8,
         time_sync: Option<(u64, Instant)>,
         known_skew_ratio: Option<i64>,
@@ -185,6 +188,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         Self {
             _state: PhantomData,
             slot_duration,
+            tau_hb,
             slots_per_frame: slots_per_frame.into(),
             my_tx_slot: None,
             node_id: 0,
@@ -225,6 +229,10 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    pub fn set_tau_hb(self, tau_hb: u64) -> Self {
+        Self { tau_hb, ..self }
+    }
+
     #[cfg(feature = "debug")]
     pub fn set_debug_pin(self, pin: P) -> Self {
         Self {
@@ -237,6 +245,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         let TdmaMac {
             slot_duration,
             slots_per_frame,
+            tau_hb,
             my_tx_slot,
             time_sync,
             known_slots_mask,
@@ -254,6 +263,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             _state: PhantomData,
             slot_duration,
             slots_per_frame,
+            tau_hb,
             my_tx_slot,
             time_sync,
             known_slots_mask,
@@ -274,6 +284,7 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
     fn default() -> Self {
         TdmaMac::new(
             Duration::from_secs(1),
+            10_000_000,
             NonZeroU8::new(10).unwrap(),
             None,
             None,
@@ -379,6 +390,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                         sending_instant,
                         self.time_sync,
                         self.my_tx_slot.unwrap_or(self.node_id),
+                        self.tau_hb,
                     );
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
@@ -440,7 +452,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     fn approximate_packet_size<const LEN: usize>(
         &self,
         my_tx_slot: u8,
-        t3_deltas: Vec<(u8, i32), 5>,
+        t3_deltas: VecT3,
         tx_queue: &Vec<MHPacket<SIZE>, LEN>,
     ) -> usize {
         let dummy_allocation = SlotAllocation {
@@ -480,7 +492,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         &self,
         mut hbt: MHPacket<SIZE>,
         my_tx_slot: u8,
-        t3_deltas: Vec<(u8, i32), 5>,
+        t3_deltas: VecT3,
         adjusted_timestamp: u64,
     ) -> MHPacket<SIZE> {
         let allocation = SlotAllocation {

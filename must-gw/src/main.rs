@@ -37,40 +37,13 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
             log::error!("Error enabling gps: {:?}", e)
         }
     }
-
-    // loop {
-    //     if let Err(e) = conc.process_gps_frames() {
-    //         log::error!("Error processing GPS frames: {:?}", e);
-    //         sleep(Duration::from_millis(500)).await;
-    //         continue;
-    //     }
-    //     match conc.get_gps() {
-    //         Ok((coords, duration)) => {
-    //             log::info!(
-    //                 "GPS Fix -> Lat: {:.6}, Lon: {:.6}, Alt: {}m",
-    //                 coords.lat, coords.lon, coords.alt
-    //             );
-    //             log::info!("dur: {:?}", duration.as_millis());
-    //         }
-    //         Err(_) => {
-    //             // Ignore the error! It just means the GPS is still searching for satellites
-    //             // or we haven't read enough valid frames yet.
-    //         }
-    //     }
-    //     sleep(Duration::from_millis(500)).await;
-    // }
-
     log::info!("now try receive!");
     let node = node::GWNode::new(conc);
 
-    // let mut rec_buf: Vec<RxPacket> = Vec::new(); // Make sure RxPacket is imported
-    // log::info!("listening again ...");
-    // node.listen(&mut rec_buf, false).await?;
-    // let pkt = node.receive((), &rec_buf).await?;
-    // log::info!("got pkts: {:?} ", pkt);
     let gw_source_id = 1;
     let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
     let sync_pin = gpio.get(21).expect("Failed to get GPIO 21").into_output();
+    let tau_hb = 10;
 
     let mac = TdmaMac::default()
         .set_debug_pin(sync_pin)
@@ -83,6 +56,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
                 .as_micros() as u64,
             embassy_time::Instant::now(),
         ))
+        .set_tau_hb(tau_hb * 1_000_000)
         .build();
 
     // let mac = RandomAccessMac::new();
@@ -91,7 +65,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         node,
         NetworkManager::new(gw_source_id, 10, 3),
         mac,
-        GatewayPolicy::new(10),
+        GatewayPolicy::new(tau_hb),
     );
     log::info!("Now start loop..");
     loop {
@@ -114,54 +88,46 @@ async fn main() {
     env_logger::Builder::from_default_env()
         .format(move |buf, record| {
             let elapsed = start_time.elapsed();
-
             // let file = record.file().unwrap_or("unknown");
             let line = record.line().unwrap_or(0);
 
-            // 1. Pick the color for the log level
             let level_color = match record.level() {
-                log::Level::Error => "\x1b[31m", // Red
-                log::Level::Warn => "\x1b[33m",  // Yellow
-                log::Level::Info => "\x1b[32m",  // Green
-                log::Level::Debug => "\x1b[34m", // Blue
-                log::Level::Trace => "\x1b[90m", // Gray (Bright Black)
+                log::Level::Error => "\x1b[31m",
+                log::Level::Warn => "\x1b[33m",
+                log::Level::Info => "\x1b[32m",
+                log::Level::Debug => "\x1b[34m",
+                log::Level::Trace => "\x1b[90m",
             };
 
-            // 2. Define the gray color for the file path, and the reset code
             let gray = "\x1b[90m";
-            let reset = "\x1b[0m"; // Turns formatting back to normal
+            let reset = "\x1b[0m";
 
-            // 3. Paint the string!
             writeln!(
                 buf,
                 "{}.{:06} [{}{:>5}{}] {} {}({}:{} ){}",
                 elapsed.as_secs(),
                 elapsed.subsec_micros(),
-                level_color, // Start level color
+                level_color,
                 record.level(),
-                reset,         // Reset after level
-                record.args(), // The actual message
-                gray,          // Start gray for the file info
+                reset,
+                record.args(),
+                gray,
                 record.target(),
                 // file,
                 line,
-                reset // Reset at the very end
+                reset
             )
         })
         .init();
 
     log::info!("Spawning concentrator task...");
 
-    // 3. Spawn the task using tokio::spawn
     let task_handle = tokio::spawn(async move {
-        // Run the task and catch any errors it throws
         if let Err(e) = run_concentrator_task().await {
             log::error!("Concentrator task shut down with error: {:?}", e);
         }
     });
 
-    // 4. Await the handle. If you don't await something in main,
-    // the program will immediately exit and kill your spawned tasks!
     match task_handle.await {
         Ok(_) => log::info!("Task finished cleanly."),
         Err(e) => log::error!("Task panicked or was cancelled: {:?}", e),
