@@ -108,7 +108,7 @@ impl GWNode {
                 return Err(Error::Data);
             }
         };
-        log::info!("BUFFER SIZE IS: {}", used_slice.len());
+        // log::info!("BUFFER SIZE IS: {}", used_slice.len());
         Ok((
             TxPacket::LoRa(TxPacketLoRa {
                 payload: used_slice.to_vec(),
@@ -146,7 +146,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         // Because the SX1302 is independent of the process running this program, this returns
         // before its done transmitting, and just returns after it's done sending the bytes to the radio
         let after = Instant::now();
-        let only_tx = after - before;
+        // let only_tx = after - before;
         trace!(
             "[TAU_SLICE_POST] | {} | {} |",
             after.as_micros(),

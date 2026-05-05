@@ -443,29 +443,37 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         t3_deltas: Vec<(u8, i32), 5>,
         tx_queue: &Vec<MHPacket<SIZE>, LEN>,
     ) -> usize {
-        // let tx_timestamp = match self.time_sync {
-        //     Some(stamps) => self.current_gps_time(stamps),
-        //     None => {
-        //         error!("In update heartbeat before we've heart a heartbeat??");
-        //         0
-        //     }
-        // };
-
         let dummy_allocation = SlotAllocation {
             my_slot: my_tx_slot,
-            known_slots: 0,
-            gps_time_us: 1_u64,
+            known_slots: self.known_slots_mask.as_u32(),
+            gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
             t3_deltas,
         };
+        let alloc_size = serialize_with_flavor(&dummy_allocation, Size::default()).unwrap();
 
-        let exact_payload_size = serialize_with_flavor(&dummy_allocation, Size::default())
-            .expect("failed to size payload");
-        let exact_packet_size =
-            serialize_with_flavor(&tx_queue, Size::default()).expect("Failed to size tx queue");
+        let mut dummy_pkt: MHPacket<SIZE> = MHPacket {
+            destination_id: GATEWAY_ID,
+            packet_type: PacketType::HeartBeat,
+            packet_id: 0,
+            source_id: self.node_id,
+            payload: Vec::new(),
+            hop_count: 0,
+            hop_to_gw: self.gw_hops,
+        };
 
-        let size = exact_packet_size + exact_payload_size;
-        info!("[SIZE EXPECTED]|{}|", size);
-        size
+        for _ in 0..alloc_size {
+            let _ = dummy_pkt.payload.push(0);
+        }
+        let hbt_size =
+            serialize_with_flavor(&dummy_pkt, Size::default()).expect("failed to size hbt");
+
+        let queue_size =
+            serialize_with_flavor(tx_queue, Size::default()).expect("Failed to size tx queue");
+
+        let total_size = queue_size + hbt_size;
+
+        info!("[SIZE EXPECTED]|{}|", total_size);
+        total_size
     }
 
     fn update_heartbeat(

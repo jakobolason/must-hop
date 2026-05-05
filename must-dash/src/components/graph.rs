@@ -22,7 +22,7 @@ pub fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect) {
             .marker(symbols::Marker::Dot)
             .graph_type(GraphType::Scatter)
             .style(Style::default().fg(Color::Cyan))
-            .data(&chart_data.delay),
+            .data(&chart_data.err),
         Dataset::default()
             .name("Δ Up")
             .marker(symbols::Marker::Dot)
