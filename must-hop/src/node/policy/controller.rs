@@ -69,14 +69,14 @@ impl Controller {
         let my_stamp = predicted_elapsed + old_gps;
         // instant was just when we received the preamble. But perhaps the difference between that
         // instant and now is the same as ToA
-        let now = Instant::now();
-        let difference = now - sending_instant;
-        info!(
-            "[TIMING] now: {}s | send: {}s | diff: {}ms | ",
-            now.as_millis() as f32 / 1000.0,
-            sending_instant.as_millis() as f32 / 1000.0,
-            difference.as_micros() as f32 / 1000.0,
-        );
+        // let now = Instant::now();
+        // let difference = now - sending_instant;
+        // info!(
+        //     "[TIMING] now: {}s | send: {}s | diff: {}ms | ",
+        //     now.as_millis() as f32 / 1000.0,
+        //     sending_instant.as_millis() as f32 / 1000.0,
+        //     difference.as_micros() as f32 / 1000.0,
+        // );
 
         // Check if a t3 delta is availale for us
         let delay = if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == node_id) {
