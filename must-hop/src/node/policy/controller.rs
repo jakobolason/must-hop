@@ -33,14 +33,13 @@ impl Controller {
     pub(crate) fn run_transferfunction(
         &mut self,
         hb: &SlotAllocation,
-        _rx_pkt: RxPacket,
-        sending_instant: Instant,
+        rx_pkt: RxPacket,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
         tau_hb: u64,
     ) -> Option<(u64, Instant)> {
         let (v_s, time_sync, error, delay) =
-            self.update_skew_and_stamp(hb, sending_instant, time_sync, node_id, tau_hb);
+            self.update_skew_and_stamp(hb, rx_pkt.rx_done_instant, time_sync, node_id, tau_hb);
         self.v_s = v_s;
         self.prev_delay = delay;
         self.prev_err = error;

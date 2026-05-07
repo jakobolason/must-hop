@@ -159,13 +159,18 @@ pub(crate) struct SlotManager {
     leader_id: Option<u8>,
 }
 
+const ERR_THRESHOLD: u32 = 10_000; // 10ms
 pub(crate) struct TimeManager<const SIZE: usize> {
     /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,
     hbt_pkt: Option<MHPacket<SIZE>>,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     t3_deltas: VecT3,
+    /// Handles error correction
     controller: Controller,
+    /// The same type as from t3_deltas
+    err_threshold: u32,
+    /// Sync counter, negative when out of sync, positive 
 }
 
 pub struct Builder;
@@ -214,6 +219,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
                 hbt_pkt: None,
                 t3_deltas: Vec::new(),
                 controller,
+                err_threshold: ERR_THRESHOLD,
             },
             counter: 0,
 
@@ -354,57 +360,11 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
 
-    // Using
-    // fn calc_excess_delay(&self) {
-    //
-    // }
-
-    /// Use ToA calculation together with other delay variables to approximate what our local
-    /// instant was, when the heartbeat packet with the timestamp was created.
-    fn approximate_transmit_instant(&self, rx_pkt: &RxPacket) -> Instant {
-        // let without_toa = match rx_pkt.preamble_instant {
-        //     Some(ins) => {
-        //         info!("preamble instant was Some!");
-        //         ins.checked_sub(Duration::from_micros(
-        //             rx_pkt.estimated_toa.0 as u64
-        //                 + self
-        //                     .controller
-        //                     .calc_drift_duration(rx_pkt.estimated_toa.0 as u64),
-        //         ))
-        //         .unwrap_or(ins)
-        //     }
-        //     // If no preamble instant, we approximate it
-        //     None => {
-        //         info!("preamble instant was None!");
-        //         rx_pkt
-        //             .rx_done_instant
-        //             .checked_sub(Duration::from_micros(
-        //                 rx_pkt.estimated_toa.1 as u64
-        //                     + self
-        //                         .controller
-        //                         .calc_drift_duration(rx_pkt.estimated_toa.1 as u64),
-        //             ))
-        //             .unwrap_or(rx_pkt.rx_done_instant)
-        //     }
-        // };
-        // TODO: Byte slicing and SPI1 delay
-        // let tau_gw = Duration::from_millis(2);
-
-        // TODO: Own SPI2 delay approximate
-
-        // without_toa //- tau_gw
-        rx_pkt.rx_done_instant
-    }
-
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
         for pkt in pkts {
             if pkt.packet_type == PacketType::HeartBeat
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
             {
-                // This is meant to approximate the local ticks when the hb packet was sent
-                // let sending_instant = self.approximate_transmit_instant(&rx_pkt);
-                let sending_instant = rx_pkt.rx_done_instant;
-
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
                 let (src, val) = if self.slot_manager.node_id != GATEWAY_ID
                     && pkt.hop_to_gw < self.slot_manager.gw_hops
@@ -414,7 +374,6 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                         self.time_manager.controller.run_transferfunction(
                             &alloc,
                             rx_pkt,
-                            sending_instant,
                             self.time_manager.time_sync,
                             self.slot_manager
                                 .my_tx_slot
@@ -433,16 +392,26 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     };
                     (leader_id, self.time_manager.controller.prev_err as i32)
                 } else {
+                    let out_of_sync = if let Some((_, prev_err)) = alloc
+                        .t3_deltas
+                        .iter()
+                        .find(|t| t.0 == self.slot_manager.node_id)
+                    {
+                        prev_err.unsigned_abs() > self.time_manager.err_threshold
+                    } else {
+                        false
+                    };
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_manager.time_sync {
                         // Cast to i64 to not panic at my_time < alloc
-                        (self.gps_time_at(stamps, sending_instant) as i64
+                        (self.gps_time_at(stamps, rx_pkt.rx_done_instant) as i64
                             - alloc.gps_time_us as i64) as i32
                     } else {
                         0
                     };
                     (pkt.source_id, t3)
                 };
+                // Leader calculates t3s, and follower returns calculated error
                 match self.time_manager.t3_deltas.iter().position(|t| t.0 == src) {
                     Some(idx) => self.time_manager.t3_deltas[idx] = (src, val),
                     None => {
