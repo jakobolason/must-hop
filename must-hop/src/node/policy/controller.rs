@@ -13,7 +13,7 @@ pub(crate) struct Controller {
     pub v_s: i64,
     ki: i64,
     kp: i64,
-    prev_err: i64,
+    pub prev_err: i64,
     prev_delay: i64,
 }
 impl Controller {
@@ -77,12 +77,10 @@ impl Controller {
             let up_ms = *delta_up as f32 / 1000.0;
             let down_ms = delta_down as f32 / 1000.0;
             if delta_down.abs() > 1_000 || delta_up.abs() > 1_000 {
-                // 2A. DELTAS REJECTED LOG
                 info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
                 0
             } else {
                 let nw_delay = (delta_down + *delta_up as i64) / 2;
-                // 2B. DELTAS ACCEPTED LOG
                 info!(
                     "[DELTAS]|{}|{}|{}|",
                     up_ms,
@@ -107,7 +105,8 @@ impl Controller {
 
         let phase_err = gw_diff - predicted_elapsed as i64;
         let freq_err = {
-            if predicted_elapsed > 2 * tau_hb {
+            if predicted_elapsed > ((tau_hb * 7) / 6) {
+                // > 1.16*tau_hb
                 0
             } else {
                 tau_hb as i64 - predicted_elapsed as i64

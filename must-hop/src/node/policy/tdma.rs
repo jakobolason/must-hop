@@ -112,9 +112,8 @@ impl SlotMask {
     }
 }
 
-type VecT3 = Vec<(u8, u32), 10>;
-/// Used in Heartbeats to convey information about which slots are used, and the time
-/// synchronization values needed
+type VecT3 = Vec<(u8, i32), 5>;
+
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SlotAllocation {
     my_slot: u8,
@@ -125,6 +124,7 @@ pub(crate) struct SlotAllocation {
     pub(crate) t3_deltas: VecT3,
 }
 /// Onl used for tests
+#[allow(dead_code)]
 impl SlotAllocation {
     pub(super) fn new() -> Self {
         Self {
@@ -145,6 +145,29 @@ pub trait DebugPin {}
 #[cfg(not(feature = "debug"))]
 impl<T> DebugPin for T {}
 
+pub(crate) struct SlotManager {
+    slot_duration: Duration,
+    slots_per_frame: u8,
+    my_tx_slot: Option<u8>,
+    tau_hb: u64,
+    /// A mask to know what other node's one know
+    known_slots_mask: SlotMask,
+    /// Used for the slot allocation. You should convert the MAC address into a u32 with the
+    /// biggest chance of two nodes not having the same u32 representation
+    node_id: u8,
+    gw_hops: u8,
+    leader_id: Option<u8>,
+}
+
+pub(crate) struct TimeManager<const SIZE: usize> {
+    /// a tuple of timestamp in micros, and instant when that timestamp was set
+    time_sync: Option<(u64, Instant)>,
+    hbt_pkt: Option<MHPacket<SIZE>>,
+    /// A list of (node_id, T3 - T2 delta in ms) for PTP
+    t3_deltas: VecT3,
+    controller: Controller,
+}
+
 pub struct Builder;
 pub struct Runner;
 
@@ -152,22 +175,11 @@ pub struct Runner;
 /// could be transmitting, saving power.
 pub struct TdmaMac<State, P, const SIZE: usize> {
     _state: PhantomData<State>,
-    slot_duration: Duration,
-    slots_per_frame: u8,
-    my_tx_slot: Option<u8>,
-    tau_hb: u64,
-    /// a tuple of timestamp in micros, and instant when that timestamp was set
-    time_sync: Option<(u64, Instant)>,
-    /// A mask to know what other node's one know
-    known_slots_mask: SlotMask,
-    hbt_pkt: Option<MHPacket<SIZE>>,
-    /// Used for the slot allocation. You should convert the MAC address into a u32 with the
-    /// biggest chance of two nodes not having the same u32 representation
-    node_id: u8,
-    gw_hops: u8,
-    /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    t3_deltas: VecT3,
-    controller: Controller,
+    slot_manager: SlotManager,
+    time_manager: TimeManager<SIZE>,
+
+    // FIXME: Remove later
+    counter: u8,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
     #[cfg(not(feature = "debug"))]
@@ -187,17 +199,23 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         let controller = Controller::new(known_skew_ratio.unwrap_or(0_i64), 0, 0);
         Self {
             _state: PhantomData,
-            slot_duration,
-            tau_hb,
-            slots_per_frame: slots_per_frame.into(),
-            my_tx_slot: None,
-            node_id: 0,
-            time_sync,
-            known_slots_mask: SlotMask::default(),
-            hbt_pkt: None,
-            gw_hops: 255,
-            t3_deltas: Vec::new(),
-            controller,
+            slot_manager: SlotManager {
+                slot_duration,
+                tau_hb,
+                slots_per_frame: slots_per_frame.into(),
+                my_tx_slot: None,
+                known_slots_mask: SlotMask::default(),
+                node_id: 0,
+                gw_hops: 255,
+                leader_id: None,
+            },
+            time_manager: TimeManager {
+                time_sync,
+                hbt_pkt: None,
+                t3_deltas: Vec::new(),
+                controller,
+            },
+            counter: 0,
 
             #[cfg(feature = "debug")]
             debug_pin: None,
@@ -208,29 +226,53 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
 
     pub fn set_controller(self, v_s: i64, kp: i64, ki: i64) -> Self {
         let controller = Controller::new(v_s, kp, ki);
-        Self { controller, ..self }
+        Self {
+            time_manager: TimeManager {
+                controller,
+                ..self.time_manager
+            },
+            ..self
+        }
     }
 
     pub fn set_time_sync(self, time_sync: (u64, Instant)) -> Self {
         Self {
-            time_sync: Some(time_sync),
+            time_manager: TimeManager {
+                time_sync: Some(time_sync),
+                ..self.time_manager
+            },
             ..self
         }
     }
 
     pub fn set_node_id(self, node_id: u8) -> Self {
-        Self { node_id, ..self }
+        Self {
+            slot_manager: SlotManager {
+                node_id,
+                ..self.slot_manager
+            },
+            ..self
+        }
     }
 
     pub fn set_tx_slot(self, tx_slot: u8) -> Self {
         Self {
-            my_tx_slot: Some(tx_slot),
+            slot_manager: SlotManager {
+                my_tx_slot: Some(tx_slot),
+                ..self.slot_manager
+            },
             ..self
         }
     }
 
     pub fn set_tau_hb(self, tau_hb: u64) -> Self {
-        Self { tau_hb, ..self }
+        Self {
+            slot_manager: SlotManager {
+                tau_hb,
+                ..self.slot_manager
+            },
+            ..self
+        }
     }
 
     #[cfg(feature = "debug")]
@@ -242,38 +284,13 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn build(self) -> TdmaMac<Runner, P, SIZE> {
-        let TdmaMac {
-            slot_duration,
-            slots_per_frame,
-            tau_hb,
-            my_tx_slot,
-            time_sync,
-            known_slots_mask,
-            hbt_pkt,
-            node_id,
-            gw_hops,
-            t3_deltas,
-            controller,
-            #[cfg(feature = "debug")]
-            debug_pin,
-            ..
-        } = self;
-
         TdmaMac::<Runner, P, SIZE> {
             _state: PhantomData,
-            slot_duration,
-            slots_per_frame,
-            tau_hb,
-            my_tx_slot,
-            time_sync,
-            known_slots_mask,
-            hbt_pkt,
-            node_id,
-            gw_hops,
-            t3_deltas,
-            controller,
+            slot_manager: self.slot_manager,
+            time_manager: self.time_manager,
+            counter: self.counter,
             #[cfg(feature = "debug")]
-            debug_pin,
+            debug_pin: self.debug_pin,
             #[cfg(not(feature = "debug"))]
             _marker: PhantomData,
         }
@@ -299,7 +316,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
     fn gps_time_at(&self, (base_gps_us, sync_instant): (u64, Instant), at_instant: Instant) -> u64 {
         let elapsed_us = (at_instant - sync_instant).as_micros();
-        let gw_elapsed_us = elapsed_us + self.controller.calc_drift_duration(elapsed_us);
+        let gw_elapsed_us =
+            elapsed_us + self.time_manager.controller.calc_drift_duration(elapsed_us);
         // let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
         //     / self.skew_local_diff as u128) as u64;
         base_gps_us + gw_elapsed_us
@@ -307,15 +325,18 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
     fn calc_nextslot_time(&self, timestamps: (u64, Instant)) -> Instant {
         let current_gps_time = self.current_gps_time(timestamps);
-        let slot_dur = self.slot_duration.as_micros();
+        let slot_dur = self.slot_manager.slot_duration.as_micros();
 
         let elapsed_in_current_slot = current_gps_time % slot_dur;
 
         let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
         // let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
         //     / self.skew_gw_diff as u128) as u64;
-        let node_offset =
-            next_slot_start_offset - self.controller.calc_drift_duration(next_slot_start_offset);
+        let node_offset = next_slot_start_offset
+            - self
+                .time_manager
+                .controller
+                .calc_drift_duration(next_slot_start_offset);
 
         // Wake up just a bit before the slot starts to ensure listening at correct time
         // FIXME: If everyone does this, then everyone just wakes up 5ms before
@@ -324,11 +345,12 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     }
 
     pub fn current_slot(&self, current_time_us: u64) -> u8 {
-        let frame_duration_us = (self.slot_duration.as_micros()) * (self.slots_per_frame as u64);
+        let frame_duration_us = (self.slot_manager.slot_duration.as_micros())
+            * (self.slot_manager.slots_per_frame as u64);
         let time_in_frame = current_time_us % frame_duration_us;
 
         // Add half of slot duration to achieve 'round to nearest' int division
-        let slot_dur = self.slot_duration.as_micros();
+        let slot_dur = self.slot_manager.slot_duration.as_micros();
         ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
 
@@ -380,52 +402,71 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
             {
                 // This is meant to approximate the local ticks when the hb packet was sent
-                let sending_instant = self.approximate_transmit_instant(&rx_pkt);
+                // let sending_instant = self.approximate_transmit_instant(&rx_pkt);
+                let sending_instant = rx_pkt.rx_done_instant;
+
                 // Resync node to heartbeat's announced slot, if hb came closer to gw than me
-                if self.node_id != GATEWAY_ID && pkt.hop_to_gw < self.gw_hops {
+                let (src, val) = if self.slot_manager.node_id != GATEWAY_ID
+                    && pkt.hop_to_gw < self.slot_manager.gw_hops
+                {
                     // Controller updates internal drift, and returns adjusted stamps
-                    self.time_sync = self.controller.run_transferfunction(
-                        &alloc,
-                        rx_pkt,
-                        sending_instant,
-                        self.time_sync,
-                        self.my_tx_slot.unwrap_or(self.node_id),
-                        self.tau_hb,
-                    );
+                    self.time_manager.time_sync =
+                        self.time_manager.controller.run_transferfunction(
+                            &alloc,
+                            rx_pkt,
+                            sending_instant,
+                            self.time_manager.time_sync,
+                            self.slot_manager
+                                .my_tx_slot
+                                .unwrap_or(self.slot_manager.node_id),
+                            self.slot_manager.tau_hb,
+                        );
+                    // TODO:
+                    // denote this as a leader node. This should only be set once (with a timeout
+                    // perhaps) such that 2 equal leader nodes don't make this follower node unstable
+                    let leader_id = match self.slot_manager.leader_id {
+                        Some(lid) => lid,
+                        None => {
+                            self.slot_manager.leader_id = Some(pkt.source_id);
+                            pkt.source_id
+                        }
+                    };
+                    (leader_id, self.time_manager.controller.prev_err as i32)
                 } else {
                     // if we are GW, then we want to update out t3 deltas on this node
-                    let t3 = if let Some(stamps) = self.time_sync {
+                    let t3 = if let Some(stamps) = self.time_manager.time_sync {
                         // Cast to i64 to not panic at my_time < alloc
                         (self.gps_time_at(stamps, sending_instant) as i64
                             - alloc.gps_time_us as i64) as i32
                     } else {
                         0
                     };
-                    match self.t3_deltas.iter().position(|t| t.0 == pkt.source_id) {
-                        Some(idx) => self.t3_deltas[idx] = (pkt.source_id, t3),
-                        None => {
-                            if self.t3_deltas.push((pkt.source_id, t3)).is_err() {
-                                error!("T3 deltas is full!")
-                            }
+                    (pkt.source_id, t3)
+                };
+                match self.time_manager.t3_deltas.iter().position(|t| t.0 == src) {
+                    Some(idx) => self.time_manager.t3_deltas[idx] = (src, val),
+                    None => {
+                        if self.time_manager.t3_deltas.push((src, val)).is_err() {
+                            error!("T3 deltas is full!")
                         }
                     }
                 }
-                self.known_slots_mask.claim(alloc.my_slot);
+                self.slot_manager.known_slots_mask.claim(alloc.my_slot);
                 // info!(
                 //     "Other node claimed slot at {}. {:?}",
-                //     alloc.my_slot, self.known_slots_mask
+                //     alloc.my_slot, self.slot_manager.known_slots_mask
                 // );
 
                 // Only allocate a new slot if we don't have one
-                if self.my_tx_slot.is_none() {
-                    match self.known_slots_mask.slot_assignment_strat(
-                        self.slots_per_frame,
+                if self.slot_manager.my_tx_slot.is_none() {
+                    match self.slot_manager.known_slots_mask.slot_assignment_strat(
+                        self.slot_manager.slots_per_frame,
                         alloc.known_slots,
-                        self.node_id,
+                        self.slot_manager.node_id,
                     ) {
                         Some(free_slot) => {
-                            self.my_tx_slot = Some(free_slot);
-                            self.known_slots_mask.claim(free_slot);
+                            self.slot_manager.my_tx_slot = Some(free_slot);
+                            self.slot_manager.known_slots_mask.claim(free_slot);
                         }
                         None => error!("Network is full!"),
                     }
@@ -436,7 +477,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     }
 
     fn calc_adjust_timestamp(&self, toa: u64) -> u64 {
-        let tx_stamp = match self.time_sync {
+        let tx_stamp = match self.time_manager.time_sync {
             Some(stamps) => self.current_gps_time(stamps),
             None => {
                 error!("There was no stamps in heartbeat updating??");
@@ -457,7 +498,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     ) -> usize {
         let dummy_allocation = SlotAllocation {
             my_slot: my_tx_slot,
-            known_slots: self.known_slots_mask.as_u32(),
+            known_slots: self.slot_manager.known_slots_mask.as_u32(),
             gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
             t3_deltas,
         };
@@ -467,10 +508,10 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             destination_id: GATEWAY_ID,
             packet_type: PacketType::HeartBeat,
             packet_id: 0,
-            source_id: self.node_id,
+            source_id: self.slot_manager.node_id,
             payload: Vec::new(),
             hop_count: 0,
-            hop_to_gw: self.gw_hops,
+            hop_to_gw: self.slot_manager.gw_hops,
         };
 
         for _ in 0..alloc_size {
@@ -482,7 +523,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let queue_size =
             serialize_with_flavor(tx_queue, Size::default()).expect("Failed to size tx queue");
 
-        let total_size = queue_size + hbt_size;
+        // FIXME: Remember setting this
+        let measured_constant_offset = 7;
+        let total_size = queue_size + hbt_size + measured_constant_offset;
 
         info!("[SIZE EXPECTED]|{}|", total_size);
         total_size
@@ -497,7 +540,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     ) -> MHPacket<SIZE> {
         let allocation = SlotAllocation {
             my_slot: my_tx_slot,
-            known_slots: self.known_slots_mask.as_u32(),
+            known_slots: self.slot_manager.known_slots_mask.as_u32(),
             gps_time_us: adjusted_timestamp,
             t3_deltas,
         };
@@ -517,12 +560,12 @@ where
     P: DebugPin,
 {
     fn set_gw_hops(&mut self, gw_hops: u8) {
-        self.gw_hops = gw_hops
+        self.slot_manager.gw_hops = gw_hops
     }
     /// This only sends if you have been given a slot. GW should choose it's own slot, such that it
     /// can start this.
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
-        self.hbt_pkt = Some(hbt)
+        self.time_manager.hbt_pkt = Some(hbt)
     }
 
     async fn run_mac(
@@ -536,7 +579,7 @@ where
         // Don't transmit anything until you have a slot, which you only have once you've heard a
         // heartbeat.
         // TODO: Go back into this, if not heard a heartbeat in some time
-        let Some(timestamps) = self.time_sync else {
+        let Some(timestamps) = self.time_manager.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             let conn = node
                 .listen(rx_buffer, Some(core::time::Duration::from_secs(10)))
@@ -568,19 +611,64 @@ where
             let _ = pin.set_high();
         }
 
-        if let Some(my_tx_slot) = self.my_tx_slot
+        if let Some(my_tx_slot) = self.slot_manager.my_tx_slot
             && slot == my_tx_slot
         {
             // debug!(" !!!  MY SLOT !!! ");
-            // NOTE: Introduce a 50ms delay here, to ensure nodes are listening in your slot
+            // NOTE: Introduce a 100ms delay here, to ensure nodes are listening in your slot
             Timer::after(Duration::from_millis(100)).await;
-            if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
+            self.counter = self.counter.wrapping_add(1);
+
+            // Let's say self.counter represents the TOTAL number of bytes we want to send.
+            // We split this into full packets (SIZE bytes) and one fractional packet.
+            let target_total_bytes = self.counter as usize;
+            let full_packets_count = target_total_bytes / SIZE;
+            let remainder_bytes = target_total_bytes % SIZE;
+
+            // 2. Add the completely full packets to the queue
+            for n in 0..full_packets_count {
+                let mut full_payload: Vec<u8, SIZE> = Vec::new();
+                for _ in 0..SIZE {
+                    let _ = full_payload.push(0xAA); // Dummy byte pattern
+                }
+
+                let _ = tx_queue.push(MHPacket {
+                    destination_id: 7,
+                    packet_type: PacketType::Data,
+                    packet_id: (n + 128) as u16,
+                    source_id: self.slot_manager.node_id,
+                    payload: full_payload,
+                    hop_count: 0,
+                    hop_to_gw: self.slot_manager.gw_hops,
+                });
+            }
+
+            // 3. Add the granular/fractional packet for the remaining bytes
+            if remainder_bytes > 0 {
+                let mut granular_payload: Vec<u8, SIZE> = Vec::new();
+                for _ in 0..remainder_bytes {
+                    let _ = granular_payload.push(0xBB); // Different dummy pattern
+                }
+
+                let _ = tx_queue.push(MHPacket {
+                    destination_id: 7,
+                    packet_type: PacketType::Data,
+                    // Give it a distinct packet ID so you know it's the fractional one
+                    packet_id: (full_packets_count + 128) as u16,
+                    source_id: self.slot_manager.node_id,
+                    payload: granular_payload,
+                    hop_count: 0,
+                    hop_to_gw: self.slot_manager.gw_hops,
+                });
+            }
+
+            if !tx_queue.is_empty() || self.time_manager.hbt_pkt.is_some() {
                 // If should send hbt, update it's timestamp
                 if !tx_queue.is_full()
-                    && let Some(pkt) = self.hbt_pkt.take()
+                    && let Some(pkt) = self.time_manager.hbt_pkt.take()
                 {
                     // We update these deltas every time a heartbeat is sent
-                    let extracted_deltas = core::mem::take(&mut self.t3_deltas);
+                    let extracted_deltas = core::mem::take(&mut self.time_manager.t3_deltas);
                     let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
                         self.approximate_packet_size(
                             my_tx_slot,
@@ -598,11 +686,12 @@ where
                     if let Err(pkt) = tx_queue.push(upd_pkt) {
                         // If queue full(???), then try and send it next time
                         error!("Queue is full even though we just checked??");
-                        self.hbt_pkt = Some(pkt)
+                        self.time_manager.hbt_pkt = Some(pkt)
                     }
                 }
-                node.transmit(tx_queue).await?;
+                let tx_result = node.transmit(tx_queue).await;
                 tx_queue.clear();
+                tx_result?;
             }
         } else {
             // debug!(" -- NOT MY SLOT ---   ");
