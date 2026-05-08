@@ -56,7 +56,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
                 .as_micros() as u64,
             embassy_time::Instant::now(),
         ))
-        .set_tau_hb(tau_hb * 1_000_000)
+        .set_tau_hb(tau_hb)
         .build();
 
     // let mac = RandomAccessMac::new();

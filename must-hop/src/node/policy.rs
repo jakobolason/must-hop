@@ -36,11 +36,11 @@ impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for NodePolic
 #[cfg(feature = "in_std")]
 pub struct GatewayPolicy {
     pub last_heartbeat: Option<Instant>,
-    pub timeout: u64,
+    pub timeout: u8,
 }
 #[cfg(feature = "in_std")]
 impl GatewayPolicy {
-    pub fn new(timeout: u64) -> Self {
+    pub fn new(timeout: u8) -> Self {
         Self {
             last_heartbeat: None,
             timeout,
@@ -57,7 +57,7 @@ impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for GatewayPo
         let now = Instant::now();
         let should_send = match self.last_heartbeat {
             None => true,
-            Some(last) => now.duration_since(last) >= Duration::from_secs(self.timeout),
+            Some(last) => now.duration_since(last) >= Duration::from_secs(self.timeout as u64),
         };
         if should_send {
             self.last_heartbeat = Some(now);

@@ -36,10 +36,10 @@ impl Controller {
         rx_pkt: RxPacket,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
-        tau_hb: u64,
+        tau_hb_us: u64,
     ) -> Option<(u64, Instant)> {
         let (v_s, time_sync, error, delay) =
-            self.update_skew_and_stamp(hb, rx_pkt.rx_done_instant, time_sync, node_id, tau_hb);
+            self.update_skew_and_stamp(hb, rx_pkt.rx_done_instant, time_sync, node_id, tau_hb_us);
         self.v_s = v_s;
         self.prev_delay = delay;
         self.prev_err = error;
@@ -53,7 +53,7 @@ impl Controller {
         sending_instant: Instant,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
-        tau_hb: u64,
+        tau_hb_us: u64,
     ) -> (i64, Option<(u64, Instant)>, i64, i64) {
         let (old_gps, last_stamp) = match time_sync {
             Some(stamps) => stamps,
@@ -104,11 +104,11 @@ impl Controller {
 
         let phase_err = gw_diff - predicted_elapsed as i64;
         let freq_err = {
-            if predicted_elapsed > ((tau_hb * 7) / 6) {
-                // > 1.16*tau_hb
+            if predicted_elapsed > ((tau_hb_us * 7) / 6) {
+                // > 1.16*tau_hb_us
                 0
             } else {
-                tau_hb as i64 - predicted_elapsed as i64
+                tau_hb_us as i64 - predicted_elapsed as i64
             }
         };
 

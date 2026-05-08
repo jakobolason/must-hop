@@ -23,7 +23,7 @@ use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
 pub struct SlotMask {
-    mask: u32,
+    mask: u8,
 }
 impl Default for SlotMask {
     fn default() -> Self {
@@ -84,7 +84,7 @@ impl SlotMask {
         (self.mask & (1 << slot)) != 0
     }
 
-    pub fn as_u32(&self) -> u32 {
+    pub fn as_u32(&self) -> u8 {
         self.mask
     }
 
@@ -92,7 +92,7 @@ impl SlotMask {
     pub fn slot_assignment_strat(
         &self,
         max_slots: u8,
-        another_mask: u32,
+        another_mask: u8,
         node_id: u8,
     ) -> Option<u8> {
         let combined_mask = SlotMask {
@@ -114,11 +114,14 @@ impl SlotMask {
 
 type VecT3 = Vec<(u8, i32), 5>;
 
+// TODO: Add tau_hb to packet
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SlotAllocation {
     my_slot: u8,
-    /// Bit mask for known slots, meaning only 32 nodes can be known at a time
-    known_slots: u32,
+    /// Bit mask for known slots, meaning only 8 nodes can be known at a time
+    known_slots: u8,
+    // The tau_hb duration in secs, should be converted back to a Duration on followers
+    tau_hb: u8,
     pub(crate) gps_time_us: u64,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     pub(crate) t3_deltas: VecT3,
@@ -130,6 +133,7 @@ impl SlotAllocation {
         Self {
             my_slot: 1,
             known_slots: 0,
+            tau_hb: 10,
             gps_time_us: 0,
             t3_deltas: Vec::new(),
         }
@@ -149,7 +153,7 @@ pub(crate) struct SlotManager {
     slot_duration: Duration,
     slots_per_frame: u8,
     my_tx_slot: Option<u8>,
-    tau_hb: u64,
+    tau_hb: TauHbMode,
     /// A mask to know what other node's one know
     known_slots_mask: SlotMask,
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
@@ -159,7 +163,38 @@ pub(crate) struct SlotManager {
     leader_id: Option<u8>,
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
+enum TauHbMode {
+    High,
+    Low,
+}
+impl TauHbMode {
+    pub const fn as_secs(&self) -> u8 {
+        match self {
+            // FIXME: These should not be set here, make it global or a variable
+            Self::High => 30,
+            Self::Low => 10,
+        }
+    }
+
+    pub const fn as_micros(&self) -> u64 {
+        self.as_secs() as u64 * 1_000_000
+    }
+
+    pub fn from_secs(secs: u8) -> Self {
+        match secs {
+            10 => Self::Low,
+            _ => Self::High,
+        }
+    }
+}
+
 const ERR_THRESHOLD: u32 = 10_000; // 10ms
+// It only takes 3 nodes, or 3 hb's with node out of sync, to go into a lower state of tau_hb
+const NON_SYNC_THRESHOLD: i8 = -3;
+// If received 10 synced messages, then go up into high tau mode
+const IN_SYNC_THRESHOLD: i8 = 10;
 pub(crate) struct TimeManager<const SIZE: usize> {
     /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,
@@ -170,7 +205,10 @@ pub(crate) struct TimeManager<const SIZE: usize> {
     controller: Controller,
     /// The same type as from t3_deltas
     err_threshold: u32,
-    /// Sync counter, negative when out of sync, positive 
+    /// Sync counter, if a node is out of sync, it adds one to this.
+    sync_counter: i8,
+    /// If a single node is out of sync, we set this to go into low tau
+    out_of_sync: bool,
 }
 
 pub struct Builder;
@@ -196,7 +234,6 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         // FIXME: Remove from user, should be set by GW
         slot_duration: Duration,
         // FIXME: Remove from user, should be set by GW
-        tau_hb: u64,
         slots_per_frame: core::num::NonZeroU8,
         time_sync: Option<(u64, Instant)>,
         known_skew_ratio: Option<i64>,
@@ -206,7 +243,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             _state: PhantomData,
             slot_manager: SlotManager {
                 slot_duration,
-                tau_hb,
+                tau_hb: TauHbMode::Low,
                 slots_per_frame: slots_per_frame.into(),
                 my_tx_slot: None,
                 known_slots_mask: SlotMask::default(),
@@ -220,6 +257,8 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
                 t3_deltas: Vec::new(),
                 controller,
                 err_threshold: ERR_THRESHOLD,
+                sync_counter: 0,
+                out_of_sync: true,
             },
             counter: 0,
 
@@ -271,7 +310,8 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
-    pub fn set_tau_hb(self, tau_hb: u64) -> Self {
+    pub fn set_tau_hb(self, tau_hb: u8) -> Self {
+        let tau_hb = TauHbMode::from_secs(tau_hb);
         Self {
             slot_manager: SlotManager {
                 tau_hb,
@@ -307,7 +347,6 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
     fn default() -> Self {
         TdmaMac::new(
             Duration::from_secs(1),
-            10_000_000,
             NonZeroU8::new(10).unwrap(),
             None,
             None,
@@ -378,7 +417,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                             self.slot_manager
                                 .my_tx_slot
                                 .unwrap_or(self.slot_manager.node_id),
-                            self.slot_manager.tau_hb,
+                            // convert from sec -> microsecs
+                            self.slot_manager.tau_hb.as_micros(),
                         );
                     // TODO:
                     // denote this as a leader node. This should only be set once (with a timeout
@@ -392,15 +432,16 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     };
                     (leader_id, self.time_manager.controller.prev_err as i32)
                 } else {
-                    let out_of_sync = if let Some((_, prev_err)) = alloc
+                    // If a follower's error is above threshold, increase out of sync counter
+                    if let Some((_, prev_err)) = alloc
                         .t3_deltas
                         .iter()
                         .find(|t| t.0 == self.slot_manager.node_id)
+                        && prev_err.unsigned_abs() > self.time_manager.err_threshold
                     {
-                        prev_err.unsigned_abs() > self.time_manager.err_threshold
-                    } else {
-                        false
-                    };
+                        self.time_manager.out_of_sync = true;
+                    }
+
                     // if we are GW, then we want to update out t3 deltas on this node
                     let t3 = if let Some(stamps) = self.time_manager.time_sync {
                         // Cast to i64 to not panic at my_time < alloc
@@ -453,7 +494,6 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 0
             }
         };
-        // TODO: Also use the clock drift calc here
         info!("[TAU_SLICE]|{}|", Instant::now().as_micros());
         let measured_spi_delay = 0;
         tx_stamp + toa + measured_spi_delay
@@ -468,6 +508,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let dummy_allocation = SlotAllocation {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.as_u32(),
+            tau_hb: self.slot_manager.tau_hb.as_secs(),
             gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
             t3_deltas,
         };
@@ -500,6 +541,37 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         total_size
     }
 
+    fn update_tau_hb(&mut self) {
+        match self.slot_manager.tau_hb {
+            TauHbMode::High => {
+                // We check if we are out of sync
+                if self.time_manager.out_of_sync {
+                    self.slot_manager.tau_hb = TauHbMode::Low;
+                    self.time_manager.sync_counter = 0;
+                    info!("Drift detected so changed to low");
+                }
+            }
+            TauHbMode::Low => {
+                // If in low, we check if enough nodes are synced
+                if self.time_manager.out_of_sync {
+                    self.time_manager.sync_counter = 0;
+                    // Reset it, so this is tested again in the next run
+                    // NOTE: Only reset here, not in sync_epoch
+                    self.time_manager.out_of_sync = false;
+                } else {
+                    self.time_manager.sync_counter =
+                        self.time_manager.sync_counter.saturating_add(1);
+                    if self.time_manager.sync_counter >= IN_SYNC_THRESHOLD {
+                        self.slot_manager.tau_hb = TauHbMode::High;
+                        // Reset sync counter for next time an out of sync happens
+                        self.time_manager.sync_counter = 0;
+                        info!("Is in sync, so switched to high tau");
+                    }
+                }
+            }
+        }
+    }
+
     fn update_heartbeat(
         &self,
         mut hbt: MHPacket<SIZE>,
@@ -510,6 +582,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let allocation = SlotAllocation {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.as_u32(),
+            tau_hb: self.slot_manager.tau_hb.as_secs(),
             gps_time_us: adjusted_timestamp,
             t3_deltas,
         };
@@ -528,6 +601,7 @@ where
     Node: MHNode<SIZE, LEN>,
     P: DebugPin,
 {
+    /// Used to know whether this node is a follower or a leader
     fn set_gw_hops(&mut self, gw_hops: u8) {
         self.slot_manager.gw_hops = gw_hops
     }
@@ -586,50 +660,6 @@ where
             // debug!(" !!!  MY SLOT !!! ");
             // NOTE: Introduce a 100ms delay here, to ensure nodes are listening in your slot
             Timer::after(Duration::from_millis(100)).await;
-            self.counter = self.counter.wrapping_add(1);
-
-            // Let's say self.counter represents the TOTAL number of bytes we want to send.
-            // We split this into full packets (SIZE bytes) and one fractional packet.
-            let target_total_bytes = self.counter as usize;
-            let full_packets_count = target_total_bytes / SIZE;
-            let remainder_bytes = target_total_bytes % SIZE;
-
-            // 2. Add the completely full packets to the queue
-            for n in 0..full_packets_count {
-                let mut full_payload: Vec<u8, SIZE> = Vec::new();
-                for _ in 0..SIZE {
-                    let _ = full_payload.push(0xAA); // Dummy byte pattern
-                }
-
-                let _ = tx_queue.push(MHPacket {
-                    destination_id: 7,
-                    packet_type: PacketType::Data,
-                    packet_id: (n + 128) as u16,
-                    source_id: self.slot_manager.node_id,
-                    payload: full_payload,
-                    hop_count: 0,
-                    hop_to_gw: self.slot_manager.gw_hops,
-                });
-            }
-
-            // 3. Add the granular/fractional packet for the remaining bytes
-            if remainder_bytes > 0 {
-                let mut granular_payload: Vec<u8, SIZE> = Vec::new();
-                for _ in 0..remainder_bytes {
-                    let _ = granular_payload.push(0xBB); // Different dummy pattern
-                }
-
-                let _ = tx_queue.push(MHPacket {
-                    destination_id: 7,
-                    packet_type: PacketType::Data,
-                    // Give it a distinct packet ID so you know it's the fractional one
-                    packet_id: (full_packets_count + 128) as u16,
-                    source_id: self.slot_manager.node_id,
-                    payload: granular_payload,
-                    hop_count: 0,
-                    hop_to_gw: self.slot_manager.gw_hops,
-                });
-            }
 
             if !tx_queue.is_empty() || self.time_manager.hbt_pkt.is_some() {
                 // If should send hbt, update it's timestamp
@@ -637,7 +667,7 @@ where
                     && let Some(pkt) = self.time_manager.hbt_pkt.take()
                 {
                     // We update these deltas every time a heartbeat is sent
-                    let extracted_deltas = core::mem::take(&mut self.time_manager.t3_deltas);
+                    let extracted_deltas: VecT3 = core::mem::take(&mut self.time_manager.t3_deltas);
                     let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
                         self.approximate_packet_size(
                             my_tx_slot,
@@ -646,6 +676,9 @@ where
                             tx_queue,
                         ),
                     ));
+                    // NOTE: Update this before making new heartbeat, such that SlotAllocation
+                    // holds possible new tau_hb
+                    self.update_tau_hb();
                     let upd_pkt = self.update_heartbeat(
                         pkt,
                         my_tx_slot,
@@ -660,6 +693,7 @@ where
                 }
                 let tx_result = node.transmit(tx_queue).await;
                 tx_queue.clear();
+                // Do this, such that a node error does not return before clearing tx_queue
                 tx_result?;
             }
         } else {
