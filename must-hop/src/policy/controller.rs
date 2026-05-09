@@ -140,7 +140,7 @@ impl Controller {
 #[cfg(test)]
 mod controller_tests {
     use super::*;
-    use crate::node::policy::tdma::SlotAllocation;
+    use crate::policy::tdma::SlotAllocation;
     use embassy_time::{Duration, Instant};
 
     fn make_controller(v_s: i64, kp: i64, ki: i64) -> Controller {
