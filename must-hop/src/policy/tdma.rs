@@ -1,4 +1,4 @@
-use crate::node::{MHNode, PacketType, RxPacket};
+use crate::{MHNode, PacketType, RxPacket};
 
 #[cfg(not(feature = "in_std"))]
 use defmt::{debug, error, info};
@@ -12,7 +12,7 @@ use core::{fmt, marker::PhantomData, num::NonZeroU8};
 use postcard::{from_bytes, ser_flavors::Size, serialize_with_flavor, to_slice};
 use serde::{Deserialize, Serialize};
 
-use crate::node::{
+use crate::{
     MHPacket,
     policy::{GATEWAY_ID, MacPolicy},
 };

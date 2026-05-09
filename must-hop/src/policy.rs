@@ -1,9 +1,6 @@
 use crate::node::MHNode;
 
-use super::{
-    MHPacket,
-    network_manager::{NetworkManager, NetworkManagerError},
-};
+use super::MHPacket;
 
 use embassy_time::{Duration, Instant};
 use heapless::Vec;

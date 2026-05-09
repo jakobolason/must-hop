@@ -6,7 +6,7 @@ use lora_modulation::BaseBandModulationParams;
 use loragw::{
     Concentrator, Error, Running, RxPacket, RxPacketLoRa, TxPacket, TxPacketLoRa, TxStatus,
 };
-use must_hop::node::{MHNode, MHPacket};
+use must_hop::{MHNode, MHPacket};
 use postcard::to_slice;
 
 const SIZE: usize = 128;
@@ -161,7 +161,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         &mut self,
         _conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, must_hop::node::RxPacket), Self::Error> {
+    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, must_hop::RxPacket), Self::Error> {
         // This is a hack, but we only want one entry
         let Some(pkt) = rec_buf else {
             return Err(loragw::Error::Generic);
@@ -211,7 +211,7 @@ impl MHNode<SIZE, LEN> for GWNode {
 
         Ok((
             rec_packets,
-            must_hop::node::RxPacket {
+            must_hop::RxPacket {
                 // preamble_instant: None,
                 rx_done_instant: rx_heartbeat_timestamp,
                 payload_size: pkt.payload.len() as u8,

@@ -1,5 +1,5 @@
-use crate::node::RxPacket;
-use crate::node::policy::tdma::SlotAllocation;
+use crate::RxPacket;
+use crate::policy::tdma::SlotAllocation;
 
 #[cfg(not(feature = "in_std"))]
 use defmt::info;

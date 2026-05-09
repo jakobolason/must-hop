@@ -7,7 +7,7 @@ use embassy_sync::channel::{self};
 use heapless::Vec;
 use serde::Serialize;
 
-use crate::node::{
+use crate::{
     MHNode,
     mesh_router::{MeshRouter, MeshRouterError},
     network_manager::NetworkManager,

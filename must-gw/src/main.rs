@@ -2,7 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::error;
 use must_gw::{create_concentrator, node};
-use must_hop::node::{
+use must_hop::{
     mesh_router::MeshRouter,
     network_manager::NetworkManager,
     policy::{GatewayPolicy, RandomAccessMac, TdmaMac},
