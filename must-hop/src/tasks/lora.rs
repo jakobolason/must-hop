@@ -33,7 +33,7 @@ pub async fn lora_task<Node, T, M, const SIZE: usize, const LEN: usize>(
     M: embassy_sync::blocking_mutex::raw::RawMutex,
 {
     let nm = NetworkManager::<SIZE, LEN>::new(source_id, timeout, max_retries);
-    let mut router = MeshRouter::new(node, nm, mac, NodePolicy);
+    let mut router = MeshRouter::new(node, nm, mac);
     info!("Waiting for packet or sensor data to send");
     loop {
         let mut receiving_buffer = [00u8; TRANSMISSION_BUFFER];

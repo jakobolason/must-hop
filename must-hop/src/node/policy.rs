@@ -15,20 +15,14 @@ pub mod tdma;
 
 pub use tdma::{Builder, Runner, TdmaMac};
 
-pub trait RoutingPolicy<const SIZE: usize, const LEN: usize> {
-    fn check_heartbeat(
-        &mut self,
-        manager: &mut NetworkManager<SIZE, LEN>,
-    ) -> Result<Option<MHPacket<SIZE>>, NetworkManagerError>;
+pub trait NodeRole {
+    fn check_heartbeat(&self) -> bool;
 }
 
 pub struct NodePolicy;
-impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for NodePolicy {
-    fn check_heartbeat(
-        &mut self,
-        _manager: &mut NetworkManager<SIZE, LEN>,
-    ) -> Result<Option<MHPacket<SIZE>>, NetworkManagerError> {
-        Ok(None)
+impl NodeRole for NodePolicy {
+    fn check_heartbeat(&self) -> bool {
+        false
     }
 }
 
@@ -49,22 +43,12 @@ impl GatewayPolicy {
 }
 
 #[cfg(feature = "in_std")]
-impl<const SIZE: usize, const LEN: usize> RoutingPolicy<SIZE, LEN> for GatewayPolicy {
-    fn check_heartbeat(
-        &mut self,
-        manager: &mut NetworkManager<SIZE, LEN>,
-    ) -> Result<Option<MHPacket<SIZE>>, NetworkManagerError> {
+impl NodeRole for GatewayPolicy {
+    fn check_heartbeat(&self) -> bool {
         let now = Instant::now();
-        let should_send = match self.last_heartbeat {
+        match self.last_heartbeat {
             None => true,
             Some(last) => now.duration_since(last) >= Duration::from_secs(self.timeout as u64),
-        };
-        if should_send {
-            self.last_heartbeat = Some(now);
-            let pkt = manager.add_heartbeat()?;
-            Ok(Some(pkt))
-        } else {
-            Ok(None)
         }
     }
 }
@@ -80,33 +64,43 @@ where
         rx_buffer: &mut Node::ReceiveBuffer,
     ) -> impl Future<Output = Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error>>;
 
+    fn shoud_tx_heartbeat(&self) -> bool;
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>);
 
     fn set_gw_hops(&mut self, gw_hops: u8);
 }
 
 /// A RA MAC policy which sends when it has a packet to send, and listens otherwise
-pub struct RandomAccessMac<const SIZE: usize> {
+pub struct RandomAccessMac<const SIZE: usize, NR: NodeRole> {
     hbt_pkt: Option<MHPacket<SIZE>>,
+    node_role: NR,
 }
 
-impl<const SIZE: usize> RandomAccessMac<SIZE> {
-    pub fn new() -> Self {
-        Self { hbt_pkt: None }
+impl<const SIZE: usize, NR: NodeRole> RandomAccessMac<SIZE, NR> {
+    pub fn new(node_role: NR) -> Self {
+        Self {
+            hbt_pkt: None,
+            node_role,
+        }
     }
 }
 
-impl<const SIZE: usize> Default for RandomAccessMac<SIZE> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// impl<const SIZE: usize, NR: NodeRole> Default for RandomAccessMac<SIZE, NR> {
+//     fn default() -> Self {
+//         Self::new(NodePolicy)
+//     }
+// }
 
-impl<Node, const SIZE: usize, const LEN: usize> MacPolicy<Node, SIZE, LEN> for RandomAccessMac<SIZE>
+impl<Node, const SIZE: usize, const LEN: usize, NR: NodeRole> MacPolicy<Node, SIZE, LEN>
+    for RandomAccessMac<SIZE, NR>
 where
     Node: MHNode<SIZE, LEN>,
 {
     fn set_gw_hops(&mut self, _gw_hops: u8) {}
+
+    fn shoud_tx_heartbeat(&self) -> bool {
+        self.node_role.check_heartbeat()
+    }
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
         self.hbt_pkt = Some(hbt);
     }

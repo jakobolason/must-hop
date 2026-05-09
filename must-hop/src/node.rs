@@ -11,6 +11,10 @@ pub mod mesh_router;
 pub mod network_manager;
 pub mod policy;
 
+// TODO: Move these into lib.rs, move all files in node/ into appropriate places
+// MEans that mesh_router and network_manager goes into this dir, and tdma goes into policy/ instead
+// of node/policy/
+
 /// Either this packet
 /// Is Data, and should get an ACK return
 /// A Data stream, meaning it wants to send multiple packets(u8 amount). In this case, Node B will

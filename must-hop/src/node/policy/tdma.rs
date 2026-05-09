@@ -191,10 +191,8 @@ impl TauHbMode {
 }
 
 const ERR_THRESHOLD: u32 = 10_000; // 10ms
-// It only takes 3 nodes, or 3 hb's with node out of sync, to go into a lower state of tau_hb
-const NON_SYNC_THRESHOLD: i8 = -3;
 // If received 10 synced messages, then go up into high tau mode
-const IN_SYNC_THRESHOLD: i8 = 10;
+const IN_SYNC_THRESHOLD: u8 = 10;
 pub(crate) struct TimeManager<const SIZE: usize> {
     /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,
@@ -206,7 +204,7 @@ pub(crate) struct TimeManager<const SIZE: usize> {
     /// The same type as from t3_deltas
     err_threshold: u32,
     /// Sync counter, if a node is out of sync, it adds one to this.
-    sync_counter: i8,
+    sync_counter: u8,
     /// If a single node is out of sync, we set this to go into low tau
     out_of_sync: bool,
 }
@@ -430,6 +428,13 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                             pkt.source_id
                         }
                     };
+                    // If this is leader, then we check if the tau_hb matches theirs
+                    if leader_id == pkt.source_id
+                        && alloc.tau_hb != self.slot_manager.tau_hb.as_secs()
+                    {
+                        self.slot_manager.tau_hb = TauHbMode::from_secs(alloc.tau_hb);
+                        info!("Swicthed Tau mode to {:?}", self.slot_manager.tau_hb);
+                    }
                     (leader_id, self.time_manager.controller.prev_err as i32)
                 } else {
                     // If a follower's error is above threshold, increase out of sync counter
@@ -548,6 +553,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 if self.time_manager.out_of_sync {
                     self.slot_manager.tau_hb = TauHbMode::Low;
                     self.time_manager.sync_counter = 0;
+                    self.time_manager.out_of_sync = false;
+
                     info!("Drift detected so changed to low");
                 }
             }
@@ -605,6 +612,11 @@ where
     fn set_gw_hops(&mut self, gw_hops: u8) {
         self.slot_manager.gw_hops = gw_hops
     }
+
+    fn shoud_tx_heartbeat(&self) -> bool {
+        false
+    }
+
     /// This only sends if you have been given a slot. GW should choose it's own slot, such that it
     /// can start this.
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
@@ -648,7 +660,7 @@ where
         // get current slot
         let slot = self.current_slot(self.current_gps_time(timestamps));
 
-        // debug!("current slot: {}", slot);
+        debug!("current slot: {}", slot);
         #[cfg(feature = "debug")]
         if let Some(pin) = self.debug_pin.as_mut() {
             let _ = pin.set_high();

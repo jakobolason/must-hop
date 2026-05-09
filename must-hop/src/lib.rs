@@ -15,6 +15,5 @@ pub use crate::node::mesh_router::MeshRouter;
 pub use crate::node::{
     MHNode, MHPacket,
     network_manager::NetworkManager,
-    policy::{RandomAccessMac, RoutingPolicy, tdma::TdmaMac},
+    policy::{RandomAccessMac, tdma::TdmaMac},
 };
-

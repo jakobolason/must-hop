@@ -59,14 +59,9 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         .set_tau_hb(tau_hb)
         .build();
 
-    // let mac = RandomAccessMac::new();
+    // let mac = RandomAccessMac::new(GatewayPolicy::new(tau_hb));
     log::info!("Now making mesh router ...");
-    let mut router = MeshRouter::new(
-        node,
-        NetworkManager::new(gw_source_id, 10, 3),
-        mac,
-        GatewayPolicy::new(tau_hb),
-    );
+    let mut router = MeshRouter::new(node, NetworkManager::new(gw_source_id, 10, 3), mac);
     log::info!("Now start loop..");
     loop {
         let mut rec_buf = None;

@@ -4,10 +4,7 @@ use defmt::{error, trace};
 #[cfg(feature = "in_std")]
 use log::{error, trace};
 
-use crate::node::{
-    PacketType,
-    policy::{MacPolicy, RoutingPolicy},
-};
+use crate::node::{PacketType, policy::MacPolicy};
 
 use super::{
     MHNode, MHPacket,
@@ -49,38 +46,28 @@ impl<E: fmt::Debug + core::error::Error> core::error::Error for MeshRouterError<
 /// managing the logic necessary to send and receive packets, but the user does not have to think
 /// about how packets are received and sent on, if they are not for them.
 /// Handles the flow of packets
-pub struct MeshRouter<Node, Mac, Routing, const SIZE: usize, const LEN: usize>
+pub struct MeshRouter<Node, Mac, const SIZE: usize, const LEN: usize>
 where
     Node: MHNode<SIZE, LEN>,
-    Routing: RoutingPolicy<SIZE, LEN>,
     Mac: MacPolicy<Node, SIZE, LEN>,
 {
     node: Node,
     manager: NetworkManager<SIZE, LEN>,
-    routing_policy: Routing,
     mac_policy: Mac,
     tx_queue: Vec<MHPacket<SIZE>, LEN>,
 }
 
-impl<Node, Mac, Routing, const SIZE: usize, const LEN: usize>
-    MeshRouter<Node, Mac, Routing, SIZE, LEN>
+impl<Node, Mac, const SIZE: usize, const LEN: usize> MeshRouter<Node, Mac, SIZE, LEN>
 where
     Node: MHNode<SIZE, LEN>,
-    Routing: RoutingPolicy<SIZE, LEN>,
     Mac: MacPolicy<Node, SIZE, LEN>,
 {
     /// Takes ownership of a node and network manager, because this handles those
-    pub fn new(
-        node: Node,
-        manager: NetworkManager<SIZE, LEN>,
-        mac_policy: Mac,
-        routing_policy: Routing,
-    ) -> Self {
+    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>, mac_policy: Mac) -> Self {
         Self {
             node,
             manager,
             mac_policy,
-            routing_policy,
             tx_queue: Vec::new(),
         }
     }
@@ -109,11 +96,9 @@ where
         rx_buf: &mut Node::ReceiveBuffer,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
         // Heartbeats, only for GW
-        if let Some(heartbeat_pkt) = self.routing_policy.check_heartbeat(&mut self.manager)? {
+        if self.mac_policy.shoud_tx_heartbeat() {
             // trace!("SENDING OUT HEARTBEAT!!");
-            // TODO: Make this into a flag for the mac policy, meaning it will send the correct
-            // slot together with a heartbeat
-            self.mac_policy.tx_heartbeat(heartbeat_pkt);
+            self.mac_policy.tx_heartbeat(self.manager.add_heartbeat()?);
         }
 
         let retransmission = self.manager.get_pending_transmissions()?;
