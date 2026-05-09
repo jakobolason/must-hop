@@ -311,95 +311,100 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     }
 
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
-        for pkt in pkts {
-            if pkt.packet_type == PacketType::HeartBeat
-                && let Ok(alloc) = from_bytes::<SlotAllocation>(&pkt.payload)
+        // Look for a heartbeat and get allocation from byte slices
+        let result = pkts
+            .iter()
+            .filter(|pkt| pkt.packet_type == PacketType::HeartBeat)
+            .find_map(|pkt| {
+                from_bytes::<SlotAllocation>(&pkt.payload)
+                    .ok()
+                    .map(|alloc| (pkt, alloc))
+            });
+
+        // Check for there not being a heartbeat
+        let (pkt, alloc) = match result {
+            Some(tple) => tple,
+            None => return,
+        };
+        // Resync node to heartbeat's announced slot, if hb came closer to gw than me
+        let (src, val) = if self.slot_manager.node_id != GATEWAY_ID
+            && pkt.hop_to_gw < self.slot_manager.gw_hops
+        {
+            // Controller updates internal drift, and returns adjusted stamps
+            self.time_manager.time_sync = self.time_manager.controller.run_transferfunction(
+                &alloc,
+                rx_pkt,
+                self.time_manager.time_sync,
+                self.slot_manager
+                    .my_tx_slot
+                    .unwrap_or(self.slot_manager.node_id),
+                // convert from sec -> microsecs
+                self.slot_manager.tau_hb.as_micros(),
+            );
+            // TODO:
+            // denote this as a leader node. This should only be set once (with a timeout
+            // perhaps) such that 2 equal leader nodes don't make this follower node unstable
+            let leader_id = match self.slot_manager.leader_id {
+                Some(lid) => lid,
+                None => {
+                    self.slot_manager.leader_id = Some(pkt.source_id);
+                    pkt.source_id
+                }
+            };
+            // If this is leader, then we check if the tau_hb matches theirs
+            if leader_id == pkt.source_id && alloc.tau_hb != self.slot_manager.tau_hb.as_secs() {
+                self.slot_manager.tau_hb = TauHbMode::from_secs(alloc.tau_hb);
+                info!("Swicthed Tau mode to {:?}", self.slot_manager.tau_hb);
+            }
+            (leader_id, self.time_manager.controller.prev_err as i32)
+        } else {
+            // If a follower's error is above threshold, increase out of sync counter
+            if let Some((_, prev_err)) = alloc
+                .t3_deltas
+                .iter()
+                .find(|t| t.0 == self.slot_manager.node_id)
+                && prev_err.unsigned_abs() > self.time_manager.err_threshold
             {
-                // Resync node to heartbeat's announced slot, if hb came closer to gw than me
-                let (src, val) = if self.slot_manager.node_id != GATEWAY_ID
-                    && pkt.hop_to_gw < self.slot_manager.gw_hops
-                {
-                    // Controller updates internal drift, and returns adjusted stamps
-                    self.time_manager.time_sync =
-                        self.time_manager.controller.run_transferfunction(
-                            &alloc,
-                            rx_pkt,
-                            self.time_manager.time_sync,
-                            self.slot_manager
-                                .my_tx_slot
-                                .unwrap_or(self.slot_manager.node_id),
-                            // convert from sec -> microsecs
-                            self.slot_manager.tau_hb.as_micros(),
-                        );
-                    // TODO:
-                    // denote this as a leader node. This should only be set once (with a timeout
-                    // perhaps) such that 2 equal leader nodes don't make this follower node unstable
-                    let leader_id = match self.slot_manager.leader_id {
-                        Some(lid) => lid,
-                        None => {
-                            self.slot_manager.leader_id = Some(pkt.source_id);
-                            pkt.source_id
-                        }
-                    };
-                    // If this is leader, then we check if the tau_hb matches theirs
-                    if leader_id == pkt.source_id
-                        && alloc.tau_hb != self.slot_manager.tau_hb.as_secs()
-                    {
-                        self.slot_manager.tau_hb = TauHbMode::from_secs(alloc.tau_hb);
-                        info!("Swicthed Tau mode to {:?}", self.slot_manager.tau_hb);
-                    }
-                    (leader_id, self.time_manager.controller.prev_err as i32)
-                } else {
-                    // If a follower's error is above threshold, increase out of sync counter
-                    if let Some((_, prev_err)) = alloc
-                        .t3_deltas
-                        .iter()
-                        .find(|t| t.0 == self.slot_manager.node_id)
-                        && prev_err.unsigned_abs() > self.time_manager.err_threshold
-                    {
-                        self.time_manager.out_of_sync = true;
-                    }
+                self.time_manager.out_of_sync = true;
+            }
 
-                    // if we are GW, then we want to update out t3 deltas on this node
-                    let t3 = if let Some(stamps) = self.time_manager.time_sync {
-                        // Cast to i64 to not panic at my_time < alloc
-                        (self.gps_time_at(stamps, rx_pkt.rx_done_instant) as i64
-                            - alloc.gps_time_us as i64) as i32
-                    } else {
-                        0
-                    };
-                    (pkt.source_id, t3)
-                };
-                // Leader calculates t3s, and follower returns calculated error
-                match self.time_manager.t3_deltas.iter().position(|t| t.0 == src) {
-                    Some(idx) => self.time_manager.t3_deltas[idx] = (src, val),
-                    None => {
-                        if self.time_manager.t3_deltas.push((src, val)).is_err() {
-                            error!("T3 deltas is full!")
-                        }
-                    }
+            // if we are GW, then we want to update out t3 deltas on this node
+            let t3 = if let Some(stamps) = self.time_manager.time_sync {
+                // Cast to i64 to not panic at my_time < alloc
+                (self.gps_time_at(stamps, rx_pkt.rx_done_instant) as i64 - alloc.gps_time_us as i64)
+                    as i32
+            } else {
+                0
+            };
+            (pkt.source_id, t3)
+        };
+        // Leader calculates t3s, and follower returns calculated error
+        match self.time_manager.t3_deltas.iter().position(|t| t.0 == src) {
+            Some(idx) => self.time_manager.t3_deltas[idx] = (src, val),
+            None => {
+                if self.time_manager.t3_deltas.push((src, val)).is_err() {
+                    error!("T3 deltas is full!")
                 }
-                self.slot_manager.known_slots_mask.claim(alloc.my_slot);
-                // info!(
-                //     "Other node claimed slot at {}. {:?}",
-                //     alloc.my_slot, self.slot_manager.known_slots_mask
-                // );
+            }
+        }
+        self.slot_manager.known_slots_mask.claim(alloc.my_slot);
+        // info!(
+        //     "Other node claimed slot at {}. {:?}",
+        //     alloc.my_slot, self.slot_manager.known_slots_mask
+        // );
 
-                // Only allocate a new slot if we don't have one
-                if self.slot_manager.my_tx_slot.is_none() {
-                    match self.slot_manager.known_slots_mask.slot_assignment_strat(
-                        self.slot_manager.slots_per_frame,
-                        alloc.known_slots,
-                        self.slot_manager.node_id,
-                    ) {
-                        Some(free_slot) => {
-                            self.slot_manager.my_tx_slot = Some(free_slot);
-                            self.slot_manager.known_slots_mask.claim(free_slot);
-                        }
-                        None => error!("Network is full!"),
-                    }
+        // Only allocate a new slot if we don't have one
+        if self.slot_manager.my_tx_slot.is_none() {
+            match self.slot_manager.known_slots_mask.slot_assignment_strat(
+                self.slot_manager.slots_per_frame,
+                alloc.known_slots,
+                self.slot_manager.node_id,
+            ) {
+                Some(free_slot) => {
+                    self.slot_manager.my_tx_slot = Some(free_slot);
+                    self.slot_manager.known_slots_mask.claim(free_slot);
                 }
-                break;
+                None => error!("Network is full!"),
             }
         }
     }
