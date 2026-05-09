@@ -30,6 +30,8 @@ impl Controller {
     pub(crate) fn calc_drift_duration(&self, duration: u64) -> u64 {
         ((duration as i64 * self.v_s) / 1_000_000_000) as u64
     }
+
+    /// Controller figures out the error and corregates according to the recorded error
     pub(crate) fn run_transferfunction(
         &mut self,
         hb: &SlotAllocation,

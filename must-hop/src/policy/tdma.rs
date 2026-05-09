@@ -1,4 +1,4 @@
-use crate::{MHNode, PacketType, RxPacket};
+use crate::{MHNode, PacketType, RxPacket, policy::tdma::slots::SlotMask};
 
 #[cfg(not(feature = "in_std"))]
 use defmt::{debug, error, info};
@@ -8,7 +8,7 @@ use log::{debug, error, info};
 #[cfg(feature = "debug")]
 use embedded_hal::digital::OutputPin;
 
-use core::{fmt, marker::PhantomData, num::NonZeroU8};
+use core::{marker::PhantomData, num::NonZeroU8};
 use postcard::{from_bytes, ser_flavors::Size, serialize_with_flavor, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -22,99 +22,10 @@ use super::controller::Controller;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
-pub struct SlotMask {
-    mask: u8,
-}
-impl Default for SlotMask {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl fmt::Debug for SlotMask {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Taken Slots: [")?;
-        let mut first = true;
-
-        for i in 0..32 {
-            if self.is_taken(i) {
-                if !first {
-                    write!(f, ", ")?;
-                }
-                write!(f, "{}", i)?;
-                first = false;
-            }
-        }
-        write!(f, "]")
-    }
-}
-
-#[cfg(not(feature = "in_std"))]
-impl defmt::Format for SlotMask {
-    fn format(&self, fmt: defmt::Formatter) {
-        defmt::write!(fmt, "Taken Slots: [");
-        let mut first = true;
-
-        for i in 0..32 {
-            if self.is_taken(i) {
-                if !first {
-                    defmt::write!(fmt, ", ");
-                }
-                // We use {=u8} to tell defmt exactly what type it is sending over the wire
-                defmt::write!(fmt, "{=u8}", i);
-                first = false;
-            }
-        }
-        defmt::write!(fmt, "]");
-    }
-}
-
-impl SlotMask {
-    pub const fn new() -> Self {
-        Self { mask: 0 }
-    }
-    /// To set a slot inside mask
-    pub fn claim(&mut self, slot: u8) {
-        // shift 1 over to slot pos, and or with mask
-        self.mask |= 1 << slot;
-    }
-
-    /// Check given slot is occupied
-    pub fn is_taken(&self, slot: u8) -> bool {
-        (self.mask & (1 << slot)) != 0
-    }
-
-    pub fn as_u32(&self) -> u8 {
-        self.mask
-    }
-
-    /// Get the next available slot given another node's mask and yours. Uses the node_id to avoid conflicts in race conditions
-    pub fn slot_assignment_strat(
-        &self,
-        max_slots: u8,
-        another_mask: u8,
-        node_id: u8,
-    ) -> Option<u8> {
-        let combined_mask = SlotMask {
-            mask: self.mask | another_mask,
-        };
-        let start_offset = node_id % max_slots;
-
-        (0..max_slots).find_map(|i| {
-            let slot = (start_offset + i) % max_slots;
-            debug!("looking in slot {}", slot);
-            if !combined_mask.is_taken(slot) {
-                Some(slot)
-            } else {
-                None
-            }
-        })
-    }
-}
+mod slots;
 
 type VecT3 = Vec<(u8, i32), 5>;
 
-// TODO: Add tau_hb to packet
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SlotAllocation {
     my_slot: u8,
@@ -126,7 +37,8 @@ pub(crate) struct SlotAllocation {
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     pub(crate) t3_deltas: VecT3,
 }
-/// Onl used for tests
+
+/// Only used for tests
 #[allow(dead_code)]
 impl SlotAllocation {
     pub(super) fn new() -> Self {
@@ -148,84 +60,6 @@ impl<T: embedded_hal::digital::OutputPin> DebugPin for T {}
 pub trait DebugPin {}
 #[cfg(not(feature = "debug"))]
 impl<T> DebugPin for T {}
-
-pub(crate) struct SlotManager {
-    slot_duration: Duration,
-    slots_per_frame: u8,
-    my_tx_slot: Option<u8>,
-    tau_hb: TauHbMode,
-    /// A mask to know what other node's one know
-    known_slots_mask: SlotMask,
-    /// Used for the slot allocation. You should convert the MAC address into a u32 with the
-    /// biggest chance of two nodes not having the same u32 representation
-    node_id: u8,
-    gw_hops: u8,
-    leader_id: Option<u8>,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
-enum TauHbMode {
-    High,
-    Low,
-}
-impl TauHbMode {
-    pub const fn as_secs(&self) -> u8 {
-        match self {
-            // FIXME: These should not be set here, make it global or a variable
-            Self::High => 30,
-            Self::Low => 10,
-        }
-    }
-
-    pub const fn as_micros(&self) -> u64 {
-        self.as_secs() as u64 * 1_000_000
-    }
-
-    pub fn from_secs(secs: u8) -> Self {
-        match secs {
-            10 => Self::Low,
-            _ => Self::High,
-        }
-    }
-}
-
-const ERR_THRESHOLD: u32 = 10_000; // 10ms
-// If received 10 synced messages, then go up into high tau mode
-const IN_SYNC_THRESHOLD: u8 = 10;
-pub(crate) struct TimeManager<const SIZE: usize> {
-    /// a tuple of timestamp in micros, and instant when that timestamp was set
-    time_sync: Option<(u64, Instant)>,
-    hbt_pkt: Option<MHPacket<SIZE>>,
-    /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    t3_deltas: VecT3,
-    /// Handles error correction
-    controller: Controller,
-    /// The same type as from t3_deltas
-    err_threshold: u32,
-    /// Sync counter, if a node is out of sync, it adds one to this.
-    sync_counter: u8,
-    /// If a single node is out of sync, we set this to go into low tau
-    out_of_sync: bool,
-}
-
-pub struct Builder;
-pub struct Runner;
-
-/// A TDMA MAC policy, which synchronizes nodes across the network to only listen when known slots
-/// could be transmitting, saving power.
-pub struct TdmaMac<State, P, const SIZE: usize> {
-    _state: PhantomData<State>,
-    slot_manager: SlotManager,
-    time_manager: TimeManager<SIZE>,
-
-    // FIXME: Remove later
-    counter: u8,
-    #[cfg(feature = "debug")]
-    pub debug_pin: Option<P>,
-    #[cfg(not(feature = "debug"))]
-    _marker: PhantomData<P>,
-}
 
 impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     pub fn new(
@@ -350,6 +184,85 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
             None,
         )
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
+enum TauHbMode {
+    High,
+    Low,
+}
+
+impl TauHbMode {
+    pub const fn as_secs(&self) -> u8 {
+        match self {
+            // TODO: These are counters, High means 3 Tx slots before sending a HB
+            Self::High => 3,
+            Self::Low => 1,
+        }
+    }
+
+    pub const fn as_micros(&self) -> u64 {
+        self.as_secs() as u64 * 1_000_000
+    }
+
+    pub fn from_secs(secs: u8) -> Self {
+        match secs {
+            10 => Self::Low,
+            _ => Self::High,
+        }
+    }
+}
+
+pub(crate) struct SlotManager {
+    slot_duration: Duration,
+    slots_per_frame: u8,
+    my_tx_slot: Option<u8>,
+    tau_hb: TauHbMode,
+    /// A mask to know what other node's one know
+    known_slots_mask: SlotMask,
+    /// Used for the slot allocation. You should convert the MAC address into a u32 with the
+    /// biggest chance of two nodes not having the same u32 representation
+    node_id: u8,
+    gw_hops: u8,
+    leader_id: Option<u8>,
+}
+
+const ERR_THRESHOLD: u32 = 10_000; // 10ms
+// If received 10 synced messages, then go up into high tau mode
+const IN_SYNC_THRESHOLD: u8 = 10;
+pub(crate) struct TimeManager<const SIZE: usize> {
+    /// a tuple of timestamp in micros, and instant when that timestamp was set
+    time_sync: Option<(u64, Instant)>,
+    hbt_pkt: Option<MHPacket<SIZE>>,
+    /// A list of (node_id, T3 - T2 delta in ms) for PTP
+    t3_deltas: VecT3,
+    /// Handles error correction
+    controller: Controller,
+    /// The same type as from t3_deltas
+    err_threshold: u32,
+    /// Sync counter, if a node is out of sync, it adds one to this.
+    sync_counter: u8,
+    /// If a single node is out of sync, we set this to go into low tau
+    out_of_sync: bool,
+}
+
+pub struct Builder;
+pub struct Runner;
+
+/// A TDMA MAC policy, which synchronizes nodes across the network to only listen when known slots
+/// could be transmitting, saving power.
+pub struct TdmaMac<State, P, const SIZE: usize> {
+    _state: PhantomData<State>,
+    slot_manager: SlotManager,
+    time_manager: TimeManager<SIZE>,
+
+    // FIXME: Remove later
+    counter: u8,
+    #[cfg(feature = "debug")]
+    pub debug_pin: Option<P>,
+    #[cfg(not(feature = "debug"))]
+    _marker: PhantomData<P>,
 }
 
 impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
