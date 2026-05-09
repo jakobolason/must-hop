@@ -1,7 +1,7 @@
 use crate::node::RxPacket;
 
 /// This contains node implementations for Lora
-use super::node::{MHNode, MHPacket};
+use super::{MHNode, MHPacket};
 use lora_modulation::BaseBandModulationParams;
 use lora_phy::mod_params::{
     Bandwidth, CodingRate, ModulationParams, PacketParams, SpreadingFactor,

@@ -1,0 +1,114 @@
+use crate::node::MHNode;
+use crate::policy::MacPolicy;
+
+use super::MHPacket;
+
+use embassy_time::{Duration, Instant};
+use heapless::Vec;
+
+const GATEWAY_ID: u8 = 1;
+
+pub trait NodeRole {
+    fn check_heartbeat(&self) -> bool;
+}
+
+pub struct NodePolicy;
+impl NodeRole for NodePolicy {
+    fn check_heartbeat(&self) -> bool {
+        false
+    }
+}
+
+/// A gateway sends out periodic heartbeats
+#[cfg(feature = "in_std")]
+pub struct GatewayPolicy {
+    pub last_heartbeat: Option<Instant>,
+    pub timeout: u8,
+}
+#[cfg(feature = "in_std")]
+impl GatewayPolicy {
+    pub fn new(timeout: u8) -> Self {
+        Self {
+            last_heartbeat: None,
+            timeout,
+        }
+    }
+}
+
+#[cfg(feature = "in_std")]
+impl NodeRole for GatewayPolicy {
+    fn check_heartbeat(&self) -> bool {
+        let now = Instant::now();
+        match self.last_heartbeat {
+            None => true,
+            Some(last) => now.duration_since(last) >= Duration::from_secs(self.timeout as u64),
+        }
+    }
+}
+
+/// A RA MAC policy which sends when it has a packet to send, and listens otherwise
+pub struct RandomAccessMac<const SIZE: usize, NR: NodeRole> {
+    hbt_pkt: Option<MHPacket<SIZE>>,
+    node_role: NR,
+}
+
+impl<const SIZE: usize, NR: NodeRole> RandomAccessMac<SIZE, NR> {
+    pub fn new(node_role: NR) -> Self {
+        Self {
+            hbt_pkt: None,
+            node_role,
+        }
+    }
+}
+
+// impl<const SIZE: usize, NR: NodeRole> Default for RandomAccessMac<SIZE, NR> {
+//     fn default() -> Self {
+//         Self::new(NodePolicy)
+//     }
+// }
+
+impl<Node, const SIZE: usize, const LEN: usize, NR: NodeRole> MacPolicy<Node, SIZE, LEN>
+    for RandomAccessMac<SIZE, NR>
+where
+    Node: MHNode<SIZE, LEN>,
+{
+    fn set_gw_hops(&mut self, _gw_hops: u8) {}
+
+    fn shoud_tx_heartbeat(&self) -> bool {
+        self.node_role.check_heartbeat()
+    }
+    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
+        self.hbt_pkt = Some(hbt);
+    }
+
+    async fn run_mac(
+        &mut self,
+        node: &mut Node,
+        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        rx_buffer: &mut Node::ReceiveBuffer,
+    ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
+        if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
+            if let Some(pkt) = self.hbt_pkt.take()
+                && let Err(pkt) = tx_queue.push(pkt)
+            {
+                // If queue full
+                self.hbt_pkt = Some(pkt)
+            }
+            node.transmit(tx_queue).await?;
+            tx_queue.clear();
+        }
+        match node
+            .listen(rx_buffer, Some(core::time::Duration::from_secs(1)))
+            .await
+        {
+            Ok(conn) => match node.receive(conn, rx_buffer).await {
+                Ok((pkts, _rx_hw_timestamp)) => Ok(Some(pkts)),
+                Err(e) => Err(e),
+            },
+            Err(_e) => {
+                // error!("Error in listening: {:?}", e);
+                Ok(None)
+            }
+        }
+    }
+}

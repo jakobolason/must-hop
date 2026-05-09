@@ -5,6 +5,8 @@ use core::future::Future;
 use core::time::Duration;
 use heapless::Vec;
 
+pub mod lora;
+
 use crate::{MHPacket, RxPacket};
 /// Any radio wanting to be a node, has to be able to transmit and receive
 pub trait MHNode<const SIZE: usize, const LEN: usize> {
