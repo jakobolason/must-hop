@@ -74,7 +74,7 @@ where
 {
     fn set_gw_hops(&mut self, _gw_hops: u8) {}
 
-    fn shoud_tx_heartbeat(&self) -> bool {
+    fn should_tx_heartbeat(&mut self) -> bool {
         self.node_role.check_heartbeat()
     }
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {

@@ -105,16 +105,17 @@ impl Controller {
         let gw_diff = current_true_time - old_gps as i64;
 
         let phase_err = gw_diff - predicted_elapsed as i64;
-        let freq_err = {
-            if predicted_elapsed > ((tau_hb_us * 7) / 6) {
-                // > 1.16*tau_hb_us
-                0
-            } else {
-                tau_hb_us as i64 - predicted_elapsed as i64
-            }
-        };
+        // let freq_err = {
+        //     if predicted_elapsed > ((tau_hb_us * 7) / 6) {
+        //         // > 1.16*tau_hb_us
+        //         0
+        //     } else {
+        //         tau_hb_us as i64 - predicted_elapsed as i64
+        //     }
+        // };
 
-        let err = freq_err + phase_err;
+        // let err = freq_err + phase_err;
+        let err = phase_err;
 
         let delta_err = err - self.prev_err;
         let delta_u = (self.kp * delta_err) + (self.ki * err);

@@ -35,12 +35,9 @@ use lora_phy::{
 };
 
 use must_hop::{
-    lora::{LoraNode, TransmitParameters},
-    node::{
-        mesh_router, network_manager,
-        policy::NodePolicy,
-        policy::{RandomAccessMac, TdmaMac},
-    },
+    mesh_router, network_manager,
+    node::lora::{LoraNode, TransmitParameters},
+    policy::{ra::RandomAccessMac, tdma::TdmaMac},
 };
 use {defmt_rtt as _, panic_probe as _};
 
@@ -196,7 +193,7 @@ pub async fn lora_task(
         .build();
     let nm =
         network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(source_id, timeout, max_retries);
-    let mut router = mesh_router::MeshRouter::new(node, nm, mac, NodePolicy);
+    let mut router = mesh_router::MeshRouter::new(node, nm, mac);
     info!("Waiting for packet or sensor data to send");
     loop {
         let mut receiving_buffer = [00u8; MAX_RADIO_BUFFER];

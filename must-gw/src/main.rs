@@ -5,7 +5,7 @@ use must_gw::{create_concentrator, node};
 use must_hop::{
     mesh_router::MeshRouter,
     network_manager::NetworkManager,
-    policy::{GatewayPolicy, RandomAccessMac, TdmaMac},
+    policy::{ra::RandomAccessMac, tdma::TdmaMac},
 };
 use rppal::gpio::Gpio;
 use std::io::Write;

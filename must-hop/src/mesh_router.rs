@@ -32,7 +32,6 @@ impl<E: fmt::Debug> fmt::Display for MeshRouterError<E> {
     }
 }
 
-// 3. Implement the Error trait.
 // We bound E to also implement Error so the inner error is valid too.
 impl<E: fmt::Debug + core::error::Error> core::error::Error for MeshRouterError<E> {}
 
@@ -95,8 +94,7 @@ where
         &mut self,
         rx_buf: &mut Node::ReceiveBuffer,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
-        // Heartbeats, only for GW
-        if self.mac_policy.shoud_tx_heartbeat() {
+        if self.mac_policy.should_tx_heartbeat() {
             // trace!("SENDING OUT HEARTBEAT!!");
             self.mac_policy.tx_heartbeat(self.manager.add_heartbeat()?);
         }

@@ -11,7 +11,7 @@ use crate::{
     MHNode,
     mesh_router::{MeshRouter, MeshRouterError},
     network_manager::NetworkManager,
-    policy::{MacPolicy, NodePolicy},
+    policy::MacPolicy,
 };
 
 use lora_phy::mod_params::RadioError;
