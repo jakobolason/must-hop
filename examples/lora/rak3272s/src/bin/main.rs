@@ -205,7 +205,6 @@ pub async fn lora_task(
             error!("Error queing sensor data: {:?}", e);
         }
 
-        // TODO: This should take in the Option<Data> from above
         match router.tick(&mut receiving_buffer).await {
             Ok(my_pkts) => {
                 if !my_pkts.is_empty() {

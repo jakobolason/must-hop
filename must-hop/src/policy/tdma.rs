@@ -324,7 +324,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
         // Look for a heartbeat and get allocation from byte slices
-        let result = pkts
+        let received_hb = pkts
             .iter()
             .filter(|pkt| {
                 pkt.packet_type == PacketType::HeartBeat
@@ -338,7 +338,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             });
 
         // Check for there not being a heartbeat
-        let (pkt, alloc) = match result {
+        let (pkt, alloc) = match received_hb {
             Some(tple) => tple,
             None => return,
         };
@@ -346,6 +346,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let (src, val) = if self.slot_manager.node_id != GATEWAY_ID
             && pkt.hop_to_gw < self.slot_manager.gw_hops
         {
+            self.time_manager.last_hb_instant = Some(Instant::now());
             // Controller updates internal drift, and returns adjusted stamps
             self.time_manager.time_sync = self.time_manager.controller.run_transferfunction(
                 &alloc,
@@ -649,6 +650,14 @@ where
             {
                 self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
+            } else {
+                // Check to see if we haven't heard from *leader* in some time
+                if let Some(inst) = self.time_manager.last_hb_instant
+                    && Instant::now() > inst + HB_TIMEOUT
+                {
+                    // then we go into listening mode
+                    self.time_manager.time_sync = None;
+                }
             }
         }
         #[cfg(feature = "debug")]
