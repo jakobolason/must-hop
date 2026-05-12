@@ -226,9 +226,9 @@ pub(crate) struct SlotManager {
     leader_id: Option<u8>,
 }
 
-const ERR_THRESHOLD: u32 = 10_000; // 10ms
+const ERR_THRESHOLD: u32 = 20_000; // 10ms
 // If received 10 synced messages, then go up into high tau mode
-const IN_SYNC_THRESHOLD: u8 = 10;
+const IN_SYNC_THRESHOLD: u8 = 5;
 // How long it takes, before a node goes back into full listening mode
 const HB_TIMEOUT: Duration = Duration::from_secs(120);
 pub(crate) struct TimeManager<const SIZE: usize> {
@@ -473,6 +473,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
         let queue_size =
             serialize_with_flavor(tx_queue, Size::default()).expect("Failed to size tx queue");
+
+        // Even though this seems excessive to do the full postcard transformation, it seems to
+        // result in a much better approximated total size
         let mut temp_queue = tx_queue.clone();
         let _ = temp_queue.push(dummy_pkt);
         let mut buffer = [0u8; 255];
@@ -514,7 +517,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 } else {
                     self.time_manager.sync_counter =
                         self.time_manager.sync_counter.saturating_add(1);
-                    info!("THEY WAS IN SYNC");
+                    info!("THEY WAS IN SYNC: {}", self.time_manager.sync_counter);
                     if self.time_manager.sync_counter >= IN_SYNC_THRESHOLD {
                         self.slot_manager.tau_hb = TauHbMode::High;
                         // Reset sync counter for next time an out of sync happens

@@ -1,12 +1,6 @@
 use chrono::Local;
 use crossterm::event::KeyCode;
-use std::{
-    env,
-    fs::File,
-    io::Write,
-    str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{env, fs::File, io::Write, str::FromStr};
 
 use crate::composables::stats::DashStats;
 use crate::navigator::LandingFocus;
@@ -83,7 +77,7 @@ impl App {
     }
 
     pub fn save_data(&self) {
-        let timestamp = Local::now().format("%d-%m-%H-%M").to_string();
+        let timestamp = Local::now().format("%d-%m:%H.%M").to_string();
 
         let prefix = "./analysis/data/";
         let main_filename = format!("{prefix}main_stats_{timestamp}.csv");

@@ -100,9 +100,9 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) 
         Constraint::Percentage(10), // Δ Down
         Constraint::Percentage(10), // HW Avg
         Constraint::Percentage(10), // GW µs
-        Constraint::Percentage(8),  // GW B
+        Constraint::Percentage(5),  // GW B
         Constraint::Percentage(10), // Node µs
-        Constraint::Percentage(8),  // Node B
+        Constraint::Percentage(5),  // Node B
     ];
 
     let history_table = Table::new(history_items, widths)
