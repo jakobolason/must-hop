@@ -95,7 +95,7 @@ where
         rx_buf: &mut Node::ReceiveBuffer,
     ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
         if self.mac_policy.should_tx_heartbeat() {
-            // trace!("SENDING OUT HEARTBEAT!!");
+            trace!("SENDING OUT HEARTBEAT!!");
             self.mac_policy.tx_heartbeat(self.manager.add_heartbeat()?);
         }
 

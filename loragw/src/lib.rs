@@ -12,7 +12,6 @@ use std::{
     cell::Cell,
     convert::{TryFrom, TryInto},
     marker::PhantomData,
-    sync::atomic::{AtomicBool, Ordering},
 };
 
 pub mod cfg;
@@ -20,10 +19,6 @@ pub mod raspberrypi;
 // pub(crate) use libloragw_sys as llg;
 pub(crate) use libloragw_sys as llg;
 
-// Ensures we only have 0 or 1 gateway instances opened at a time.
-// This is not a great solution, since another process has its
-// own count.
-static GW_IS_OPEN: AtomicBool = AtomicBool::new(false);
 struct GatewayGuard {}
 
 impl Drop for GatewayGuard {
@@ -32,7 +27,6 @@ impl Drop for GatewayGuard {
         unsafe {
             let _ = hal_call!(lgw_stop());
         }
-        GW_IS_OPEN.store(false, Ordering::SeqCst);
     }
 }
 
@@ -88,15 +82,6 @@ impl ResetToken {
 impl Concentrator<Closed> {
     // Open the spidev-connected concentrator.
     pub fn open<'a>(_token: &ResetToken) -> Result<Concentrator<Builder<'a>>> {
-        // We expect `false`, and want to swap to `true`.
-        // If it fails (is_err), the lock is already held.
-        if GW_IS_OPEN
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            log::error!("concentrator busy");
-            return Err(Error::Busy); // Make sure Error::Busy is properly in scope!
-        }
         log::info!("Gateware model initialized");
 
         Ok(Concentrator {
@@ -115,7 +100,6 @@ impl<'a> Concentrator<Builder<'a>> {
     /// This function is intended to check if we the concentrator chip
     /// exists and is the correct version.
     pub fn connect(mut self) -> Result<Self> {
-        log::info!("self state: {:?}", self.state.board);
         let board_conf = self
             .state
             .board
@@ -280,8 +264,7 @@ impl Concentrator<Running> {
         }
     }
 
-    // TODO: How to do this
-    // /// Transmit `packet` over the air.
+    /// Transmit `packet` over the air.
     pub fn transmit(&self, packet: TxPacket) -> Result {
         unsafe { hal_call!(lgw_send(&mut packet.try_into()?)) }?;
         Ok(())
@@ -371,19 +354,18 @@ impl Concentrator<Running> {
                 if msg_type as u32 == 2 {
                     frame_size = 0;
                 }
-            } else if sync_char == llg::LGW_GPS_NMEA_SYNC_CHAR as u8 {
-                if let Some(end_offset) = self.state.gps_buffer[rd_idx..wr_idx]
+            } else if sync_char == llg::LGW_GPS_NMEA_SYNC_CHAR as u8
+                && let Some(end_offset) = self.state.gps_buffer[rd_idx..wr_idx]
                     .iter()
                     .position(|&b| b == 0x0A)
-                {
-                    frame_size = end_offset + 1;
-                    let _msg_type = unsafe {
-                        llg::lgw_parse_nmea(
-                            self.state.gps_buffer[rd_idx..].as_ptr() as *const _,
-                            frame_size as std::os::raw::c_int,
-                        )
-                    };
-                }
+            {
+                frame_size = end_offset + 1;
+                let _msg_type = unsafe {
+                    llg::lgw_parse_nmea(
+                        self.state.gps_buffer[rd_idx..].as_ptr() as *const _,
+                        frame_size as std::os::raw::c_int,
+                    )
+                };
             }
 
             if frame_size > 0 {
@@ -437,34 +419,3 @@ impl Concentrator<Running> {
         tx_status.try_into()
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use std::sync::Mutex;
-//
-//     lazy_static! {
-//         static ref TEST_MUTEX: Mutex<()> = Mutex::new(());
-//     }
-//
-//     #[test]
-//     fn test_open_close_succeeds() {
-//         let _lock = TEST_MUTEX.lock().unwrap();
-//         assert!(!GW_IS_OPEN.load(Ordering::Relaxed));
-//         {
-//             let _gw = Concentrator::open().unwrap();
-//             assert!(GW_IS_OPEN.load(Ordering::Relaxed));
-//             // _gw `drop`ped here
-//         }
-//         assert!(!GW_IS_OPEN.load(Ordering::Relaxed));
-//     }
-//
-//     #[test]
-//     fn test_double_open_fails() {
-//         let _lock = TEST_MUTEX.lock().unwrap();
-//         assert!(!GW_IS_OPEN.load(Ordering::Relaxed));
-//         let _gw1 = Concentrator::open().unwrap();
-//         assert!(GW_IS_OPEN.load(Ordering::Relaxed));
-//         assert!(Concentrator::open().is_err());
-//     }
-// }

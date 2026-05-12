@@ -81,7 +81,7 @@ impl Controller {
             let delta_down = hb.gps_time_us as i64 - my_stamp as i64;
             let up_ms = *delta_up as f32 / 1000.0;
             let down_ms = delta_down as f32 / 1000.0;
-            if delta_down.abs() > 20_000 || delta_up.abs() > 20_000 {
+            if delta_down.abs() > 20_000 || delta_up.abs() > 30_000 {
                 info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
                 0
             } else {
@@ -121,7 +121,7 @@ impl Controller {
         let err = phase_err;
 
         // Only re-sync if the error is substantially large
-        let time_sync = if err.abs() > 20_000 {
+        let time_sync = if err.abs() > 30_000 {
             Some(((current_true_time as u64), sending_instant))
         } else {
             Some(((my_stamp), sending_instant))

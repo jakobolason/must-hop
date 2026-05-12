@@ -564,12 +564,15 @@ where
     }
 
     fn should_tx_heartbeat(&mut self) -> bool {
+        // First case is when just initiated, then it does want to send a hb
+        if self.time_manager.time_sync.is_none() && self.time_manager.hbt_pkt.is_none() {
+            return true;
+        }
         if self.slot_manager.hb_countdown == 0 {
             self.slot_manager.hb_countdown =
                 self.slot_manager.tau_hb.skip_slots().saturating_sub(1);
             true
         } else {
-            self.slot_manager.hb_countdown -= 1;
             false
         }
     }
@@ -601,6 +604,26 @@ where
                     let (rec, rx_pkt) = node.receive(conn, rx_buffer).await?;
                     // Check for being heartbeat
                     self.sync_epoch(&rec, rx_pkt);
+                    // TODO: Wait 200ms, then transmit HB yourself
+                    Timer::after(Duration::from_millis(200)).await;
+                    if let Some(hbt_pkt) = self.time_manager.hbt_pkt.take()
+                        && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
+                    {
+                        let extracted_deltas: VecT3 =
+                            core::mem::take(&mut self.time_manager.t3_deltas);
+                        let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
+                            self.approximate_packet_size(
+                                my_tx_slot,
+                                extracted_deltas.clone(),
+                                tx_queue,
+                            ),
+                        ));
+                        self.update_tau_hb();
+                        let upd_pkt =
+                            self.update_heartbeat(hbt_pkt, 0, extracted_deltas, adjusted_timestamp);
+                        node.transmit(&[upd_pkt]).await?;
+                    }
+
                     return Ok(Some(rec));
                 }
                 Err(e) => {
@@ -644,11 +667,26 @@ where
                     error!("Queue is full even though we just checked??");
                     self.time_manager.hbt_pkt = Some(pkt);
                 }
+            } else {
+                // Update so we eventually send a hb out
+                self.slot_manager.hb_countdown -= 1;
             }
             if !tx_queue.is_empty() {
                 let tx_result = node.transmit(tx_queue).await;
                 tx_queue.clear();
                 tx_result?;
+            }
+
+            // TODO: Wait 100ms, then listen for 200ms for new nodes on network
+            Timer::after(Duration::from_millis(100)).await;
+            let conn = node
+                .listen(rx_buffer, Some(core::time::Duration::from_millis(200)))
+                .await;
+            if let Ok(conn) = conn
+                && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
+            {
+                self.sync_epoch(&pkts, rx_pkt);
+                received_packets = pkts;
             }
         } else {
             // debug!(" -- NOT MY SLOT ---   ");
@@ -665,6 +703,9 @@ where
                 if let Some(inst) = self.time_manager.last_hb_instant
                     && Instant::now() > inst + HB_TIMEOUT
                 {
+                    info!(
+                        "Have not heard from leader before timeout, returning to listening moode"
+                    );
                     // then we go into listening mode
                     // self.time_manager.time_sync = None;
                     self.reset_sync();
