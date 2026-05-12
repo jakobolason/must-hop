@@ -6,7 +6,7 @@ use super::MHPacket;
 use embassy_time::{Duration, Instant};
 use heapless::Vec;
 
-const GATEWAY_ID: u8 = 1;
+// const GATEWAY_ID: u8 = 1;
 
 pub trait NodeRole {
     fn check_heartbeat(&self) -> bool;

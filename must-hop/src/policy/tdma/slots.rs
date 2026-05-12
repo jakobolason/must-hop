@@ -2,10 +2,8 @@ use core::fmt;
 
 #[cfg(not(feature = "in_std"))]
 use defmt::debug;
-use heapless::Vec;
 #[cfg(feature = "in_std")]
 use log::debug;
-use serde::{Deserialize, Serialize};
 
 pub struct SlotMask {
     mask: u8,

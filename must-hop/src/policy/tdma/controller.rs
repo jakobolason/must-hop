@@ -121,15 +121,15 @@ impl Controller {
         let err = phase_err;
 
         // Only re-sync if the error is substantially large
-        // let time_sync = if err.abs() > 50_000 {
-        //     Some(((my_stamp), sending_instant))
-        // } else {
-        //     time_sync
-        // };
-        let time_sync = Some(((my_stamp), sending_instant));
+        let time_sync = if err.abs() > 20_000 {
+            Some(((current_true_time as u64), sending_instant))
+        } else {
+            Some(((my_stamp), sending_instant))
+        };
+        // let time_sync = Some(((my_stamp), sending_instant));
 
         let delta_err = err - self.prev_err;
-        let delta_u = (self.kp * delta_err) + (self.ki * err);
+        let delta_u = (self.kp * delta_err) + (self.ki / 10 * err);
 
         let new_speed = self.v_s + delta_u;
 

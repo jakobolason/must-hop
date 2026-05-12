@@ -468,11 +468,11 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         for _ in 0..alloc_size {
             let _ = dummy_pkt.payload.push(0);
         }
-        let hbt_size =
-            serialize_with_flavor(&dummy_pkt, Size::default()).expect("failed to size hbt");
-
-        let queue_size =
-            serialize_with_flavor(tx_queue, Size::default()).expect("Failed to size tx queue");
+        // let hbt_size =
+        //     serialize_with_flavor(&dummy_pkt, Size::default()).expect("failed to size hbt");
+        //
+        // let queue_size =
+        //     serialize_with_flavor(tx_queue, Size::default()).expect("Failed to size tx queue");
 
         // Even though this seems excessive to do the full postcard transformation, it seems to
         // result in a much better approximated total size

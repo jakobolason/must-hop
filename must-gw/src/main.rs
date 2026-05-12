@@ -14,8 +14,8 @@ use tokio::time::Instant;
 async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("Now try and use loragw:");
 
-    let mut conc = match create_concentrator() {
-        Ok(concc) => concc,
+    let conc = match create_concentrator() {
+        Ok(conc) => conc,
         Err(e) => {
             log::error!("Error creating concentrator: {:?}", e);
             // We return the error here instead of just returning empty
@@ -24,19 +24,19 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     };
 
     log::info!("check receive status");
-    match conc.receive_status() {
-        Ok(status) => log::info!("Receive status: {:?}", status),
-        Err(e) => log::error!("Error checking receive status: {:?}", e),
-    }
-    let tty_path = "/dev/serial0";
-    let gps_family = "ubx8";
+    // match conc.receive_status() {
+    //     Ok(status) => log::info!("Receive status: {:?}", status),
+    //     Err(e) => log::error!("Error checking receive status: {:?}", e),
+    // }
+    // let tty_path = "/dev/serial0";
+    // let gps_family = "ubx8";
 
-    match conc.enable_gps(tty_path, gps_family) {
-        Ok(_) => log::info!("GPS enabled successfully on {}!", tty_path),
-        Err(e) => {
-            log::error!("Error enabling gps: {:?}", e)
-        }
-    }
+    // match conc.enable_gps(tty_path, gps_family) {
+    //     Ok(_) => log::info!("GPS enabled successfully on {}!", tty_path),
+    //     Err(e) => {
+    //         log::error!("Error enabling gps: {:?}", e)
+    //     }
+    // }
     log::info!("now try receive!");
     let node = node::GWNode::new(conc);
 

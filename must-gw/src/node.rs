@@ -3,9 +3,7 @@ use std::collections::VecDeque;
 use embassy_time::{Duration, Instant, Timer};
 use log::{error, trace};
 use lora_modulation::BaseBandModulationParams;
-use loragw::{
-    Concentrator, Error, Running, RxPacket, RxPacketLoRa, TxPacket, TxPacketLoRa, TxStatus,
-};
+use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
 use must_hop::{MHNode, MHPacket};
 use postcard::to_slice;
 
@@ -86,7 +84,6 @@ impl From<PacketParams> for TxPacketLoRa {
 
 pub struct GWNode {
     radio: Concentrator<Running>,
-    /// Kind of a hack to do it like this, perhaps MHNODE will be altered?
     fetched_packets: VecDeque<RxPacket>,
     pkt_params: PacketParams,
 }
@@ -108,7 +105,6 @@ impl GWNode {
                 return Err(Error::Data);
             }
         };
-        // log::info!("BUFFER SIZE IS: {}", used_slice.len());
         Ok((
             TxPacket::LoRa(TxPacketLoRa {
                 payload: used_slice.to_vec(),
@@ -134,10 +130,6 @@ impl MHNode<SIZE, LEN> for GWNode {
     type ReceiveBuffer = Option<RxPacket>;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
-        // packets
-        //     .iter()
-        //     .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
-        let before = Instant::now();
         let (tx_pkt, payload_size) = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
             embassy_time::Timer::after(Duration::from_millis(5)).await;
@@ -146,7 +138,6 @@ impl MHNode<SIZE, LEN> for GWNode {
         // Because the SX1302 is independent of the process running this program, this returns
         // before its done transmitting, and just returns after it's done sending the bytes to the radio
         let after = Instant::now();
-        // let only_tx = after - before;
         trace!(
             "[TAU_SLICE_POST] | {} | {} |",
             after.as_micros(),

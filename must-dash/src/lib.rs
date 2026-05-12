@@ -59,7 +59,7 @@ fn spawn_pty_reader(
     let child = pair.slave.spawn_command(cmd).expect("Failed to spawn");
 
     let mut master_reader = pair.master.try_clone_reader().unwrap();
-    let program = args[0].to_string().clone();
+    // let program = args[0].to_string().clone();
 
     tokio::task::spawn_blocking(move || {
         let mut buf = Vec::new();
