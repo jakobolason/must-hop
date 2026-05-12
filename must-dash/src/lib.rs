@@ -232,6 +232,9 @@ pub async fn run_app(
                             } else {
                                 // Resets logs and data for new run
                                 app.reset_data();
+                                // set the user-specified things to env
+                                app.save_to_env_file();
+                                // app.save_data();
                                 navigator.view = NavigatorView::Dashboard;
                                 (node_child, gw_child, delay_child) =
                                     spawn_children(&app, tx.clone());

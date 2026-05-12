@@ -1,5 +1,8 @@
 use chrono::Local;
 use crossterm::event::KeyCode;
+use dotenv::dotenv;
+use std::fs;
+use std::path::Path;
 use std::{env, fs::File, io::Write, str::FromStr};
 
 use crate::composables::stats::DashStats;
@@ -37,6 +40,7 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
+        let _ = dotenv();
         let kp = env::var("KP").unwrap_or_else(|_| KI_DEFAULT.to_string());
         let ki = env::var("KI").unwrap_or_else(|_| KP_DEFAULT.to_string());
         let source_id = env::var("SOURCEID").unwrap_or_else(|_| "7".to_string());
@@ -64,6 +68,59 @@ impl App {
     pub fn backspace(&mut self, landing_focus: LandingFocus) {
         if let Some(s) = self.field_for_focus(landing_focus) {
             s.pop();
+        }
+    }
+
+    pub fn save_to_env_file(&self) {
+        let path = Path::new(".env");
+
+        let content = if path.exists() {
+            match fs::read_to_string(path) {
+                Ok(ss) => ss,
+                Err(e) => {
+                    log::error!("Error readong path {:?}: {:?}", path, e);
+                    String::new()
+                }
+            }
+        } else {
+            String::new()
+        };
+
+        let mut kp_found = false;
+        let mut ki_found = false;
+        let mut source_id_found = false;
+
+        let mut new_content = String::new();
+
+        for line in content.lines() {
+            if line.starts_with("KP=") {
+                new_content.push_str(&format!("KP={}\n", self.env_vars.kp));
+                kp_found = true;
+            } else if line.starts_with("KI=") {
+                new_content.push_str(&format!("KI={}\n", self.env_vars.ki));
+                ki_found = true;
+            } else if line.starts_with("SOURCEID=") {
+                new_content.push_str(&format!("SOURCEID={}\n", self.env_vars.source_id));
+                source_id_found = true;
+            } else {
+                // Keep the original line (this preserves comments and other env vars!)
+                new_content.push_str(line);
+                new_content.push('\n');
+            }
+        }
+
+        if !kp_found {
+            new_content.push_str(&format!("KP={}\n", self.env_vars.kp));
+        }
+        if !ki_found {
+            new_content.push_str(&format!("KI={}\n", self.env_vars.ki));
+        }
+        if !source_id_found {
+            new_content.push_str(&format!("SOURCEID={}\n", self.env_vars.source_id));
+        }
+
+        if let Err(e) = fs::write(path, new_content) {
+            log::error!("Error saving env file: {:?}", e);
         }
     }
 

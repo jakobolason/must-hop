@@ -286,7 +286,11 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
         let elapsed_in_current_slot = current_gps_time % slot_dur;
 
-        let next_slot_start_offset = slot_dur - elapsed_in_current_slot;
+        let mut next_slot_start_offset = slot_dur - elapsed_in_current_slot;
+        // Avoid waking up 2ms before a slot stops
+        if next_slot_start_offset < 2000 {
+            next_slot_start_offset += slot_dur;
+        }
         // let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
         //     / self.skew_gw_diff as u128) as u64;
         let node_offset = next_slot_start_offset
@@ -564,8 +568,11 @@ where
     }
 
     fn should_tx_heartbeat(&mut self) -> bool {
+        if self.time_manager.hbt_pkt.is_some() {
+            return false;
+        }
         // First case is when just initiated, then it does want to send a hb
-        if self.time_manager.time_sync.is_none() && self.time_manager.hbt_pkt.is_none() {
+        if self.time_manager.time_sync.is_none() {
             return true;
         }
         if self.slot_manager.hb_countdown == 0 {
@@ -688,7 +695,8 @@ where
                 self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
             }
-        } else {
+        } else if self.slot_manager.known_slots_mask.is_taken(slot) {
+            // Only listen if its for a known node
             // debug!(" -- NOT MY SLOT ---   ");
             let conn = node
                 .listen(rx_buffer, Some(core::time::Duration::from_millis(500)))
