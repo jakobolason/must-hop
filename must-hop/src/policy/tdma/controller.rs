@@ -210,7 +210,7 @@ mod controller_tests {
         let alloc = make_alloc(123_456_789);
         let rx = make_rx_pkt(now);
 
-        let result = c.run_transferfunction(&alloc, rx, now, None, 1);
+        let result = c.run_transferfunction(&alloc, rx, None, 1);
 
         // Should return the GPS time from the heartbeat as the initial epoch
         let (gps_us, _instant) = result.expect("Expected an initial time_sync to be returned");
@@ -230,7 +230,7 @@ mod controller_tests {
         let alloc = make_alloc(0);
         let rx = make_rx_pkt(now);
 
-        c.run_transferfunction(&alloc, rx, now, None, 1);
+        c.run_transferfunction(&alloc, rx, None, 1);
 
         assert_eq!(
             c.v_s, initial_v_s,
@@ -255,7 +255,7 @@ mod controller_tests {
         let rx = make_rx_pkt(rx_instant);
         let prior_sync = Some((gps_base, base_instant));
 
-        c.run_transferfunction(&alloc, rx, rx_instant, prior_sync, 1);
+        c.run_transferfunction(&alloc, rx, prior_sync, 1);
 
         assert_eq!(
             c.v_s, initial_v_s,

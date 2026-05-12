@@ -1,10 +1,10 @@
 use embassy_time::Instant;
 use heapless::Vec;
-use must_hop::node::{
+use must_hop::{
     MHNode, MHPacket, RxPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
-    policy::{GatewayPolicy, NodePolicy, RandomAccessMac},
+    policy::ra::{GatewayPolicy, NodePolicy, NodeRole, RandomAccessMac},
 };
 use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, time::Duration};
@@ -138,8 +138,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_b = MeshRouter::new(
@@ -148,8 +147,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_c = MeshRouter::new(
@@ -158,8 +156,7 @@ async fn test_mesh_topology() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
@@ -214,8 +211,7 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_b = MeshRouter::new(
@@ -224,8 +220,7 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_c = MeshRouter::new(
@@ -234,8 +229,7 @@ async fn test_node_b_to_node_c() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
@@ -284,8 +278,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_b = MeshRouter::new(
@@ -294,8 +287,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_c = MeshRouter::new(
@@ -304,8 +296,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_d = MeshRouter::new(
@@ -314,8 +305,7 @@ async fn testing_multiple_nodes_can_hear_a() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
@@ -377,8 +367,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_b = MeshRouter::new(
@@ -387,8 +376,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_c = MeshRouter::new(
@@ -397,8 +385,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_d = MeshRouter::new(
@@ -407,8 +394,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut gw_router = MeshRouter::new(
@@ -417,8 +403,7 @@ async fn testing_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(gw, 5, 3),
-        RandomAccessMac::new(),
-        GatewayPolicy::new(30),
+        RandomAccessMac::new(GatewayPolicy::new(10)),
     );
     // First GW sends out Bootup
     gw_router.tick(&mut ()).await.unwrap();
@@ -488,8 +473,7 @@ async fn testing_complex_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_b = MeshRouter::new(
@@ -498,8 +482,7 @@ async fn testing_complex_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_c = MeshRouter::new(
@@ -508,8 +491,7 @@ async fn testing_complex_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut router_d = MeshRouter::new(
@@ -518,8 +500,7 @@ async fn testing_complex_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
-        RandomAccessMac::new(),
-        NodePolicy,
+        RandomAccessMac::new(NodePolicy {}),
     );
 
     let mut gw_router = MeshRouter::new(
@@ -528,8 +509,7 @@ async fn testing_complex_gw_communication() {
             env: env.clone(),
         },
         NetworkManager::<SIZE, LEN>::new(gw, 5, 3),
-        RandomAccessMac::new(),
-        GatewayPolicy::new(30),
+        RandomAccessMac::new(GatewayPolicy::new(10)),
     );
     // First GW sends out Bootup
     gw_router.tick(&mut ()).await.unwrap();
