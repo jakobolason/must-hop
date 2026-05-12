@@ -81,7 +81,7 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) 
     let history_items = history_lines.into_iter().map(Row::new);
 
     let header = Row::new(vec![
-        "Pkt", "Err", "Delay", "Speed", "Δ Up", "Δ Down", "HW Avg", "GW µs", "GW B", "Node µs",
+        "Pkt", "HW Avg", "Err", "Delay", "Δ Up", "Δ Down", "Speed", "GW µs", "GW B", "Node µs",
         "Node B",
     ])
     .style(

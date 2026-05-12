@@ -131,12 +131,12 @@ impl DashStats {
 
                 vec![
                     format!("{:02}", i),
+                    fmt_ms(p.mean_hw_delay_ms),
                     fmt_ms(p.err_ms),
                     fmt_ms(p.delay_ms),
-                    format!("{}", p.new_speed as i64),
                     fmt_opt_ms(p.delta_up_ms),
                     fmt_opt_ms(p.delta_down_ms),
-                    fmt_ms(p.mean_hw_delay_ms),
+                    format!("{}", p.new_speed as i64),
                     gw_us,
                     gw_b,
                     node_us,

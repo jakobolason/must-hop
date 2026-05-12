@@ -59,7 +59,7 @@ impl Controller {
         sending_instant: Instant,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
-        payload_size: u64,
+        _payload_size: u64,
     ) -> (i64, Option<(u64, Instant)>, i64, i64) {
         let (old_gps, last_stamp) = match time_sync {
             Some(stamps) => stamps,
@@ -78,14 +78,14 @@ impl Controller {
         // Check if a t3 delta is availale for us
         let delay = if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == node_id) {
             // delta is our T3 - T2
-            let delta_down = (hb.gps_time_us as i64 - my_stamp as i64) / payload_size as i64;
+            let delta_down = hb.gps_time_us as i64 - my_stamp as i64;
             let up_ms = *delta_up as f32 / 1000.0;
             let down_ms = delta_down as f32 / 1000.0;
             if delta_down.abs() > 20_000 || delta_up.abs() > 20_000 {
                 info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
                 0
             } else {
-                let nw_delay = (delta_down + *delta_up as i64) * payload_size as i64 / 2;
+                let nw_delay = (delta_down + *delta_up as i64) / 2;
                 info!(
                     "[DELTAS]|{}|{}|{}|",
                     up_ms,
