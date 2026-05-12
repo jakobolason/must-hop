@@ -355,9 +355,6 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 self.slot_manager
                     .my_tx_slot
                     .unwrap_or(self.slot_manager.node_id),
-                // convert from sec -> microsecs
-                // FIXME: Not used
-                0,
             );
             // TODO:
             // denote this as a leader node. This should only be set once (with a timeout
@@ -391,8 +388,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             // if we are GW, then we want to update out t3 deltas on this node
             let t3 = if let Some(stamps) = self.time_manager.time_sync {
                 // Cast to i64 to not panic at my_time < alloc
-                (self.gps_time_at(stamps, rx_pkt.rx_done_instant) as i64 - alloc.gps_time_us as i64)
-                    as i32
+                ((self.gps_time_at(stamps, rx_pkt.rx_done_instant) as i64
+                    - alloc.gps_time_us as i64)
+                    / rx_pkt.payload_size as i64) as i32
             } else {
                 0
             };
@@ -438,7 +436,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             }
         };
         info!("[TAU_SLICE]|{}|", Instant::now().as_micros());
-        let measured_spi_delay = 0;
+        // FIXME: Remember setting this
+        let measured_spi_delay = 11_000;
         tx_stamp + toa + measured_spi_delay
     }
 
@@ -656,7 +655,8 @@ where
                     && Instant::now() > inst + HB_TIMEOUT
                 {
                     // then we go into listening mode
-                    self.time_manager.time_sync = None;
+                    // self.time_manager.time_sync = None;
+                    self.reset_sync();
                 }
             }
         }

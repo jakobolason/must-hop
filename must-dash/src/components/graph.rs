@@ -18,7 +18,7 @@ pub fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect) {
 
     let datasets = vec![
         Dataset::default()
-            .name("Delay")
+            .name("error")
             .marker(symbols::Marker::Dot)
             .graph_type(GraphType::Scatter)
             .style(Style::default().fg(Color::Cyan))

@@ -1,3 +1,4 @@
+use chrono::Local;
 use crossterm::event::KeyCode;
 use std::{
     env,
@@ -9,6 +10,9 @@ use std::{
 
 use crate::composables::stats::DashStats;
 use crate::navigator::LandingFocus;
+
+const KI_DEFAULT: &str = "0.4";
+const KP_DEFAULT: &str = "0.5";
 
 pub enum AppEvent {
     Input(KeyCode),
@@ -39,8 +43,8 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
-        let kp = env::var("KP").unwrap_or_else(|_| "20".to_string());
-        let ki = env::var("KI").unwrap_or_else(|_| "25".to_string());
+        let kp = env::var("KP").unwrap_or_else(|_| KI_DEFAULT.to_string());
+        let ki = env::var("KI").unwrap_or_else(|_| KP_DEFAULT.to_string());
         let source_id = env::var("SOURCEID").unwrap_or_else(|_| "7".to_string());
 
         Self {
@@ -79,14 +83,11 @@ impl App {
     }
 
     pub fn save_data(&self) {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let timestamp = Local::now().format("%d-%m-%H-%M").to_string();
 
         let prefix = "./analysis/data/";
-        let main_filename = format!("{prefix}main_stats_{timestamp:02}.csv");
-        let hw_filename = format!("{prefix}hw_stats_{timestamp:02}.csv");
+        let main_filename = format!("{prefix}main_stats_{timestamp}.csv");
+        let hw_filename = format!("{prefix}hw_stats_{timestamp}.csv");
 
         if let Ok(mut f) = File::create(&main_filename) {
             let _ = writeln!(

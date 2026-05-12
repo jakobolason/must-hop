@@ -81,7 +81,8 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) 
     let history_items = history_lines.into_iter().map(Row::new);
 
     let header = Row::new(vec![
-        "Pkt", "Err", "Speed", "Δ Up", "Δ Down", "HW Avg", "GW µs", "GW B", "Node µs", "Node B",
+        "Pkt", "Err", "Delay", "Speed", "Δ Up", "Δ Down", "HW Avg", "GW µs", "GW B", "Node µs",
+        "Node B",
     ])
     .style(
         Style::default()
@@ -92,8 +93,9 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) 
 
     let widths = [
         Constraint::Length(4),      // "Pkt" — "00"
-        Constraint::Percentage(10), // Err
-        Constraint::Percentage(10), // Speed (ppb, no decimal needed)
+        Constraint::Percentage(7),  // Err
+        Constraint::Percentage(7),  // delay
+        Constraint::Percentage(7),  // Speed (ppb, no decimal needed)
         Constraint::Percentage(10), // Δ Up
         Constraint::Percentage(10), // Δ Down
         Constraint::Percentage(10), // HW Avg
@@ -114,4 +116,3 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) 
         draw_dash_charts(f, app, right_area);
     }
 }
-

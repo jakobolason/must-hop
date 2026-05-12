@@ -17,3 +17,4 @@ regex = "1.12.3"
 
 log = "0.4.29"
 simplelog = "0.12.2"
+chrono = "0.4.44"
