@@ -473,10 +473,19 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
         let queue_size =
             serialize_with_flavor(tx_queue, Size::default()).expect("Failed to size tx queue");
-
+        let mut temp_queue = tx_queue.clone();
+        let _ = temp_queue.push(dummy_pkt);
+        let mut buffer = [0u8; 255];
+        let used_slice = match to_slice(&temp_queue, &mut buffer) {
+            Ok(slice) => slice,
+            Err(e) => {
+                error!("Serialization failed: {:?}", e);
+                return 0;
+            }
+        };
         // FIXME: Remember setting this
         let measured_constant_offset = 0;
-        let total_size = queue_size + hbt_size + measured_constant_offset;
+        let total_size = used_slice.len() + measured_constant_offset;
 
         info!("[SIZE EXPECTED]|{}|", total_size);
         total_size

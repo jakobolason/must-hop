@@ -87,6 +87,8 @@ where
     }
 }
 
+const OUTPUT_POWER: i32 = 1;
+
 impl<RK, DLY, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN>
     for LoraNode<'_, RK, DLY, SIZE, LEN>
 where
@@ -109,7 +111,12 @@ where
         };
 
         self.lora
-            .prepare_for_tx(&self.mdltn_params, &mut self.pkt_params, 20, used_slice)
+            .prepare_for_tx(
+                &self.mdltn_params,
+                &mut self.pkt_params,
+                OUTPUT_POWER,
+                used_slice,
+            )
             .await?;
         let now_sending = Instant::now();
         self.lora.tx().await?;
