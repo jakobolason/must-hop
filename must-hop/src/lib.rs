@@ -21,10 +21,6 @@ pub mod mesh_router;
 pub mod network_manager;
 pub mod policy;
 
-// TODO: Move these into lib.rs, move all files in node/ into appropriate places
-// MEans that mesh_router and network_manager goes into this dir, and tdma goes into policy/ instead
-// of node/policy/
-
 use embassy_time::Instant;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
