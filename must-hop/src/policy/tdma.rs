@@ -145,7 +145,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn set_tau_hb(self, tau_hb: u8) -> Self {
-        let tau_hb = TauHbMode::from_skip_count(tau_hb);
+        let tau_hb = TauHbMode::from_secs(tau_hb);
         Self {
             slot_manager: SlotManager {
                 tau_hb,
@@ -203,9 +203,9 @@ impl TauHbMode {
         }
     }
 
-    pub fn from_skip_count(count: u8) -> Self {
+    pub fn from_secs(count: u8) -> Self {
         match count {
-            1 => Self::Low,
+            10 => Self::Low,
             _ => Self::High,
         }
     }
@@ -452,7 +452,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     ) -> usize {
         let dummy_allocation = SlotAllocation {
             my_slot: my_tx_slot,
-            known_slots: self.slot_manager.known_slots_mask.as_u32(),
+            known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_slots(),
             gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
             t3_deltas,
@@ -542,7 +542,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     ) -> MHPacket<SIZE> {
         let allocation = SlotAllocation {
             my_slot: my_tx_slot,
-            known_slots: self.slot_manager.known_slots_mask.as_u32(),
+            known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_slots(),
             gps_time_us: adjusted_timestamp,
             t3_deltas,
