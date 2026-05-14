@@ -273,8 +273,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
     fn gps_time_at(&self, (base_gps_us, sync_instant): (u64, Instant), at_instant: Instant) -> u64 {
         let elapsed_us = (at_instant - sync_instant).as_micros();
-        let gw_elapsed_us =
-            elapsed_us + self.time_manager.controller.calc_drift_duration(elapsed_us);
+        let gw_elapsed_us = (elapsed_us as i64
+            + self.time_manager.controller.calc_drift_duration(elapsed_us))
+            as u64;
         // let gw_elapsed_ms = ((elapsed_ms as u128 * self.skew_gw_diff as u128)
         //     / self.skew_local_diff as u128) as u64;
         base_gps_us + gw_elapsed_us
@@ -293,11 +294,11 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         }
         // let node_offset = ((next_slot_start_offset as u128 * self.skew_local_diff as u128)
         //     / self.skew_gw_diff as u128) as u64;
-        let node_offset = next_slot_start_offset
+        let node_offset = (next_slot_start_offset as i64
             - self
                 .time_manager
                 .controller
-                .calc_drift_duration(next_slot_start_offset);
+                .calc_drift_duration(next_slot_start_offset)) as u64;
 
         // Wake up just a bit before the slot starts to ensure listening at correct time
         // FIXME: If everyone does this, then everyone just wakes up 5ms before

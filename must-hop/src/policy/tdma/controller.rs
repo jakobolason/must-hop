@@ -27,8 +27,8 @@ impl Controller {
         }
     }
     /// v_s is current error, so this maps the error to drift ppb
-    pub(crate) fn calc_drift_duration(&self, duration: u64) -> u64 {
-        ((duration as i64 * self.v_s) / 1_000_000_000) as u64
+    pub(crate) fn calc_drift_duration(&self, duration: u64) -> i64 {
+        (duration as i64 * self.v_s) / 1_000_000_000
     }
 
     /// Controller figures out the error and corregates according to the recorded error
@@ -72,7 +72,7 @@ impl Controller {
         // Calculate skews
         // let my_stamp = self.current_gps_time((old_gps, last_stamp));
         let my_diff = (sending_instant - last_stamp).as_micros();
-        let predicted_elapsed = my_diff + self.calc_drift_duration(my_diff);
+        let predicted_elapsed = (my_diff as i64 + self.calc_drift_duration(my_diff)) as u64;
         let my_stamp = predicted_elapsed + old_gps;
 
         // Check if a t3 delta is availale for us
