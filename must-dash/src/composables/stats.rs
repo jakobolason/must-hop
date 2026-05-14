@@ -248,8 +248,8 @@ impl DashStats {
     pub fn on_node_slice_post(&mut self, ts_us: u64, size: usize) {
         self.node_diff.push(SliceDiff {
             time_us: ts_us.saturating_sub(self.last_node_slice_us),
-            bytes: size.saturating_sub(self.last_node_slice_size),
-            // bytes: size,
+            // bytes: size.saturating_sub(self.last_node_slice_size),
+            bytes: size,
         });
     }
 
@@ -260,8 +260,8 @@ impl DashStats {
     pub fn on_gw_slice_post(&mut self, ts_us: u64, size: usize) {
         self.gw_diff.push(SliceDiff {
             time_us: ts_us.saturating_sub(self.last_gw_slice_us),
-            bytes: size.saturating_sub(self.last_gw_slice_size),
-            // bytes: size,
+            // bytes: size.saturating_sub(self.last_gw_slice_size),
+            bytes: size,
         });
     }
 

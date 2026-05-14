@@ -133,12 +133,14 @@ impl App {
         }
     }
 
+    /// Saves the data in stats to 2 files, main_stats for the history list of captured data, and
+    /// full_hw for every delta captured between the trigger and signal on the discovery board
     pub fn save_data(&self) {
         let timestamp = Local::now().format("%d-%m:%H.%M").to_string();
 
         let prefix = "./analysis/data/";
-        let main_filename = format!("{prefix}main_stats_{timestamp}.csv");
-        let hw_filename = format!("{prefix}hw_stats_{timestamp}.csv");
+        let main_filename = format!("{prefix}/main/main_stats_{timestamp}.csv");
+        let hw_filename = format!("{prefix}/full_hw/hw_stats_{timestamp}.csv");
 
         if let Ok(mut f) = File::create(&main_filename) {
             let _ = writeln!(
