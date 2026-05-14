@@ -5,6 +5,7 @@ use defmt::debug;
 #[cfg(feature = "in_std")]
 use log::debug;
 
+#[derive(Copy, Clone)]
 pub struct SlotMask {
     mask: u8,
 }
@@ -19,7 +20,7 @@ impl fmt::Debug for SlotMask {
         write!(f, "Taken Slots: [")?;
         let mut first = true;
 
-        for i in 0..32 {
+        for i in 0..8 {
             if self.is_taken(i) {
                 if !first {
                     write!(f, ", ")?;
@@ -38,7 +39,7 @@ impl defmt::Format for SlotMask {
         defmt::write!(fmt, "Taken Slots: [");
         let mut first = true;
 
-        for i in 0..32 {
+        for i in 0..8 {
             if self.is_taken(i) {
                 if !first {
                     defmt::write!(fmt, ", ");
@@ -52,12 +53,24 @@ impl defmt::Format for SlotMask {
     }
 }
 
+/// Used to retrieve the mask as u8 in an ergonomic way
+impl From<SlotMask> for u8 {
+    fn from(msk: SlotMask) -> Self {
+        msk.mask
+    }
+}
+
 impl SlotMask {
     pub const fn new() -> Self {
         Self { mask: 0 }
     }
-    /// To set a slot inside mask
+    /// To set a slot inside mask, does not accept slots higher than 7
     pub fn claim(&mut self, slot: u8) {
+        // Do not allow over the bit limit of self.mask(u8 -> 8bits)
+        let bit_capacity = u8::BITS as u8;
+        if slot >= bit_capacity {
+            return;
+        }
         // shift 1 over to slot pos, and or with mask
         self.mask |= 1 << slot;
     }
@@ -65,10 +78,6 @@ impl SlotMask {
     /// Check given slot is occupied
     pub fn is_taken(&self, slot: u8) -> bool {
         (self.mask & (1 << slot)) != 0
-    }
-
-    pub fn as_u32(&self) -> u8 {
-        self.mask
     }
 
     /// Get the next available slot given another node's mask and yours. Uses the node_id to avoid conflicts in race conditions
