@@ -226,7 +226,7 @@ pub(crate) struct SlotManager {
     leader_id: Option<u8>,
 }
 
-const ERR_THRESHOLD: u32 = 20_000; // 10ms
+const ERR_THRESHOLD: u32 = 30_000;
 // If received 10 synced messages, then go up into high tau mode
 const IN_SYNC_THRESHOLD: u8 = 5;
 // How long it takes, before a node goes back into full listening mode
@@ -341,6 +341,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     .ok()
                     .map(|alloc| (pkt, alloc))
             });
+        info!("Received hb? {:?}", received_hb.is_some());
 
         // Check for there not being a heartbeat
         let (pkt, alloc) = match received_hb {
@@ -410,10 +411,10 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             }
         }
         self.slot_manager.known_slots_mask.claim(alloc.my_slot);
-        // info!(
-        //     "Other node claimed slot at {}. {:?}",
-        //     alloc.my_slot, self.slot_manager.known_slots_mask
-        // );
+        info!(
+            "Other node claimed slot at {}. {:?}",
+            alloc.my_slot, self.slot_manager.known_slots_mask
+        );
 
         // Only allocate a new slot if we don't have one
         if self.slot_manager.my_tx_slot.is_none() {
@@ -499,6 +500,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         total_size
     }
 
+    /// This updates the tau_hb, the time before sending a new heartbeat.
+    /// If in High mode, look to see if a node is out of sync => Low
+    /// If in Low mode: Check if all nodes are synced, and if enough passes of sync => High
     fn update_tau_hb(&mut self) {
         match self.slot_manager.tau_hb {
             TauHbMode::High => {
@@ -693,6 +697,7 @@ where
             if let Ok(conn) = conn
                 && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
             {
+                info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts);
                 self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
             }
