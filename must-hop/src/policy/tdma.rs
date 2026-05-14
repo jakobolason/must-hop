@@ -185,20 +185,39 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 enum TauHbMode {
     High,
-    Low,
+    /// The bool represents that it can message storm
+    Low(bool),
+    Sync,
+}
+
+impl Default for TauHbMode {
+    fn default() -> Self {
+        TauHbMode::Low(true)
+    }
 }
 
 impl TauHbMode {
     pub const fn skip_frames(&self) -> u8 {
         match self {
             Self::High => 3,
-            Self::Low => 1,
+            Self::Low(_b) => 1,
+            // Sync mode is where the leader is storming the follower,
+            Self::Sync => 1,
+        }
+    }
+
+    pub fn to_secs(&self) -> u8 {
+        match self {
+            Self::Sync => 0,
+            Self::Low(_b) => 10,
+            Self::High => 30,
         }
     }
 
     pub fn from_secs(count: u8) -> Self {
         match count {
-            10 => Self::Low,
+            0 => Self::Sync,
+            10 => Self::Low(true),
             _ => Self::High,
         }
     }
@@ -213,6 +232,8 @@ pub(crate) struct SlotManager {
     hb_countdown: u8,
     /// A mask to know what other node's one know
     known_slots_mask: SlotMask,
+    /// Neighbour node's known slots, used in message storm
+    hidden_node_slots_mask: SlotMask,
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
     /// biggest chance of two nodes not having the same u32 representation
     node_id: u8,
@@ -242,6 +263,9 @@ pub(crate) struct TimeManager<const SIZE: usize> {
     sync_counter: u8,
     /// If a single node is out of sync, we set this to go into low tau
     out_of_sync: bool,
+    /// Set when we receive a HB from our leader whose known_slots includes our own slot.
+    /// Only then do we consider ourselves "heard" and advance the sync counter.
+    heard_by_leader: bool,
 }
 
 pub struct Builder;
@@ -311,6 +335,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let slot_dur = self.slot_manager.slot_duration.as_micros();
         ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
     }
+
     fn reset_sync(&mut self) {
         self.time_manager.time_sync = None;
         self.time_manager.last_hb_instant = None;
@@ -319,7 +344,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         self.slot_manager.my_tx_slot = None;
         self.slot_manager.leader_id = None;
         self.slot_manager.known_slots_mask = SlotMask::default();
-        self.slot_manager.tau_hb = TauHbMode::Low;
+        self.slot_manager.tau_hb = TauHbMode::Low(true);
         self.slot_manager.hb_countdown = 0;
     }
 
@@ -357,8 +382,15 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 self.slot_manager
                     .my_tx_slot
                     .unwrap_or(self.slot_manager.node_id),
-            ));
-            // TODO:
+            );
+            // Mark ourselves as heard when the leader's allocation already knows our slot,
+            // so followers only advance toward High mode once they're confirmed visible.
+            if let Some(my_slot) = self.slot_manager.my_tx_slot
+                && alloc.known_slots & (1 << my_slot) != 0
+            {
+                self.time_manager.heard_by_leader = true;
+            }
+            // TODO: timeout missing
             // denote this as a leader node. This should only be set once (with a timeout
             // perhaps) such that 2 equal leader nodes don't make this follower node unstable
             let leader_id = match self.slot_manager.leader_id {
@@ -369,11 +401,21 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     pkt.source_id
                 }
             };
-            // If this is leader, then we check if the tau_hb matches theirs
-            // if leader_id == pkt.source_id && alloc.tau_hb != self.slot_manager.tau_hb.as_secs() {
-            //     self.slot_manager.tau_hb = TauHbMode::from_secs(alloc.tau_hb);
-            //     info!("Swicthed Tau mode to {:?}", self.slot_manager.tau_hb);
-            // }
+            // If leader is in low mode, then we go into Sync mode
+            if leader_id == pkt.source_id {
+                let mode = TauHbMode::from_secs(alloc.tau_hb);
+                // If the leader is in low, and can message storm, then we go into sync
+                if mode == TauHbMode::Low(true) {
+                    self.slot_manager.tau_hb = TauHbMode::Sync;
+                    info!("Swicthed Tau mode to {:?}", self.slot_manager.tau_hb);
+                } else if mode == TauHbMode::Sync
+                    && self.slot_manager.tau_hb == TauHbMode::Low(true)
+                {
+                    // Then the leader is being stormed, so we cant also storm
+                    self.slot_manager.tau_hb = TauHbMode::Low(false);
+                    info!("Switched to Low(false) because leader is in sync storm");
+                }
+            }
             (leader_id, self.time_manager.controller.prev_err as i32)
         } else {
             // If a follower's error is above threshold, increase out of sync counter
@@ -504,14 +546,14 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             TauHbMode::High => {
                 // We check if we are out of sync
                 if self.time_manager.out_of_sync {
-                    self.slot_manager.tau_hb = TauHbMode::Low;
+                    self.slot_manager.tau_hb = TauHbMode::Low(true);
                     self.time_manager.sync_counter = 0;
                     self.time_manager.out_of_sync = false;
 
                     info!("Drift detected so changed to low");
                 }
             }
-            TauHbMode::Low => {
+            TauHbMode::Low(_) | TauHbMode::Sync => {
                 // If in low, we check if enough nodes are synced
                 if self.time_manager.out_of_sync {
                     self.time_manager.sync_counter = 0;
@@ -576,6 +618,10 @@ where
         if self.time_manager.time_sync.is_none() {
             return true;
         }
+        // If in Low(can_storm) mode, then we always want a heartbeat packet
+        if self.slot_manager.tau_hb == TauHbMode::Low(true) {
+            return true;
+        }
         if self.slot_manager.hb_countdown == 0 {
             self.slot_manager.hb_countdown =
                 self.slot_manager.tau_hb.skip_frames().saturating_sub(1);
@@ -601,7 +647,7 @@ where
 
         // Don't transmit anything until you have a slot, which you only have once you've heard a
         // heartbeat.
-        // TODO: Go back into this, if not heard a heartbeat in some time
+        // NOTE: A follower goes back into this, if not heard a heartbeat by leader in some time
         let Some(timestamps) = self.time_manager.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             let conn = node
@@ -612,7 +658,7 @@ where
                     let (rec, rx_pkt) = node.receive(conn, rx_buffer).await?;
                     // Check for being heartbeat
                     self.sync_epoch(&rec, rx_pkt);
-                    // TODO: Wait 200ms, then transmit HB yourself
+                    // Wait 200ms, then transmit HB yourself
                     Timer::after(Duration::from_millis(200)).await;
                     if let Some(hbt_pkt) = self.time_manager.hbt_pkt.take()
                         && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
@@ -724,6 +770,30 @@ where
                     // self.time_manager.time_sync = None;
                     self.reset_sync();
                 }
+            }
+        } else if self.slot_manager.tau_hb == TauHbMode::Low(true)
+            && !self.slot_manager.known_slots_mask.is_taken(slot)
+        {
+            // In Low mode the leader broadcasts a HB on every unclaimed slot so that followers
+            // can see the updated known_slots bitmask (and confirm they are "heard") without
+            // waiting for the leader's own fixed tx slot.
+            if let Some(hbt_pkt) = self.time_manager.hbt_pkt.take()
+                && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
+            {
+                let extracted_deltas: VecT3 = core::mem::take(&mut self.time_manager.t3_deltas);
+                let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
+                    self.approximate_packet_size(my_tx_slot, extracted_deltas.clone(), tx_queue),
+                ));
+                self.update_tau_hb();
+                let upd_pkt = self.update_heartbeat(
+                    hbt_pkt,
+                    my_tx_slot,
+                    extracted_deltas,
+                    adjusted_timestamp,
+                );
+                node.transmit(&[upd_pkt]).await?;
+            } else {
+                error!("No hbt pkt??");
             }
         }
         #[cfg(feature = "debug")]
