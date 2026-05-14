@@ -75,24 +75,17 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             _state: PhantomData,
             slot_manager: SlotManager {
                 slot_duration,
-                tau_hb: TauHbMode::Low,
-                hb_countdown: 0,
+                tau_hb: TauHbMode::Low(true),
                 slots_per_frame: slots_per_frame.into(),
-                my_tx_slot: None,
-                known_slots_mask: SlotMask::default(),
-                node_id: 0,
                 gw_hops: 255,
-                leader_id: None,
+                ..Default::default()
             },
             time_manager: TimeManager {
                 time_sync,
-                last_hb_instant: None,
-                hbt_pkt: None,
-                t3_deltas: Vec::new(),
                 controller,
                 err_threshold: ERR_THRESHOLD,
-                sync_counter: 0,
                 out_of_sync: true,
+                ..Default::default()
             },
             counter: 0,
 
@@ -211,6 +204,7 @@ impl TauHbMode {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct SlotManager {
     slot_duration: Duration,
     slots_per_frame: u8,
@@ -227,10 +221,12 @@ pub(crate) struct SlotManager {
 }
 
 const ERR_THRESHOLD: u32 = 30_000;
-// If received 10 synced messages, then go up into high tau mode
+// If received IN_SYNC_THRESHOLD synced frames, then go up into high tau mode
 const IN_SYNC_THRESHOLD: u8 = 5;
 // How long it takes, before a node goes back into full listening mode
 const HB_TIMEOUT: Duration = Duration::from_secs(120);
+
+#[derive(Default)]
 pub(crate) struct TimeManager<const SIZE: usize> {
     /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,

@@ -17,6 +17,13 @@ pub(crate) struct Controller {
     pub prev_err: i64,
     prev_delay: i64,
 }
+
+impl Default for Controller {
+    fn default() -> Self {
+        Self::new(0, 0, 0)
+    }
+}
+
 impl Controller {
     pub(crate) fn new(v_s: i64, kp: i64, ki: i64) -> Self {
         Self {
