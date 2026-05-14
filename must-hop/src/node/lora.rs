@@ -69,6 +69,10 @@ where
     preamble_instant: Option<Instant>,
 }
 
+/// Calculated in calc_tau_spi
+const INTERCEPT: u64 = 690;
+const SLOPE: u64 = 1;
+
 impl<'a, RK, DLY, const SIZE: usize, const LEN: usize> LoraNode<'a, RK, DLY, SIZE, LEN>
 where
     RK: RadioKind,
@@ -82,8 +86,8 @@ where
         bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes)
     }
 
-    fn avg_slice_delay(&self, _payload_len: u8) -> u64 {
-        0
+    fn avg_slice_delay(&self, payload_len: u8) -> u64 {
+        INTERCEPT + SLOPE * payload_len as u64
     }
 }
 

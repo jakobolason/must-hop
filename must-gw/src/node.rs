@@ -88,6 +88,10 @@ pub struct GWNode {
     pkt_params: PacketParams,
 }
 
+/// Calculated in calc_tau_spi
+const INTERCEPT: u64 = 1478;
+const SLOPE: u64 = 4;
+
 impl GWNode {
     pub fn new(concentrator: Concentrator<Running>) -> Self {
         Self {
@@ -121,6 +125,9 @@ impl GWNode {
             self.pkt_params.coderate.into(),
         );
         bb_mod.time_on_air_us(None, true, payload_len)
+    }
+    fn avg_slice_delay(&self, payload_len: usize) -> u64 {
+        INTERCEPT + SLOPE * payload_len as u64
     }
 }
 
@@ -238,6 +245,6 @@ impl MHNode<SIZE, LEN> for GWNode {
         }
     }
     fn calc_tx_delay(&self, payload_len: usize) -> u64 {
-        self.calc_toa(payload_len as u8) as u64
+        self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len)
     }
 }
