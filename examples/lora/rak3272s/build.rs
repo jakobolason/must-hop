@@ -7,6 +7,8 @@ use std::{
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SOURCEID");
+    println!("cargo:rerun-if-env-changed=KP");
+    println!("cargo:rerun-if-env-changed=KI");
 
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let path = &out.join("source_id.rs");

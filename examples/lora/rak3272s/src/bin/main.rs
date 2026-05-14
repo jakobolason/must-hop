@@ -186,6 +186,7 @@ pub async fn lora_task(
 
     let ki = KI.unwrap_or(DEFAULT_KP);
     let kp = KP.unwrap_or(DEFAULT_KP);
+    info!("God kp: {} and ki {}", kp, ki);
     let mac = TdmaMac::default()
         .set_controller(23334395, kp, ki)
         .set_debug_pin(debug_pin)
