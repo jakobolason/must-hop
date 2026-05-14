@@ -259,6 +259,16 @@ pub async fn run_app(
                             navigator.view = NavigatorView::Landing;
                         }
                         KeyCode::Tab => navigator.toggle_dash_focus(),
+                        KeyCode::Char('p') => {
+                            // Stops the processes, but doesn't go back to landing. They can still
+                            // press est to go back
+                            shutdown_processes(vec![
+                                node_child.take(),
+                                gw_child.take(),
+                                delay_child.take(),
+                            ])
+                            .await;
+                        }
                         _ => {}
                     },
                 },
