@@ -8,6 +8,7 @@ use log::info;
 
 use embassy_time::Instant;
 
+#[derive(Default)]
 pub(crate) struct Controller {
     /// speed of clock drift, used to try and mitigate clock drift at nodes with no HSE
     pub v_s: i64,
@@ -23,9 +24,7 @@ impl Controller {
             v_s,
             ki,
             kp,
-            error_sum: 0,
-            prev_err: 0,
-            prev_delay: 0,
+            ..Default::default()
         }
     }
     /// v_s is current error, so this maps the error to drift ppb
@@ -52,13 +51,34 @@ impl Controller {
         // Now calculate the error the controller can use
         let (time_sync, error, delay) =
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
-        // And add the error so our integral controller works
-        // TODO: Clamping of this?
-        self.error_sum += error;
+
+        // Conditional integration anti-windup
+        let tentative_v_s = self.apply_pi_controller(error, delay);
+        let delta_vs = tentative_v_s - self.v_s;
+        let delta_err = error - self.prev_err;
+        let should_sum_error =
+            delta_err == 0 || delta_vs == 0 || delta_vs.signum() == delta_vs.signum();
+
+        let v_s = if should_sum_error {
+            info!("ADDING TO SUM");
+            self.error_sum = (self.error_sum + error).clamp(-50_000, 50_000);
+            self.apply_pi_controller(error, delay)
+        } else {
+            info!("NOT ADDING TO SUM");
+            tentative_v_s
+        };
+
         info!(" ERROR SUM {}", self.error_sum);
 
+        // Debug info:
+        info!(
+            "[SYNC]|{}|{}|{}|{}|",
+            delay as f32 / 1000.0,
+            error as f32 / 1000.0,
+            self.v_s,
+            v_s,
+        );
         // And get the new speed for our controller
-        let v_s = self.apply_pi_controller(error, delay);
         self.v_s = v_s;
         self.prev_delay = delay;
         self.prev_err = error;
@@ -156,14 +176,6 @@ impl Controller {
         let delta_u = (self.kp * err) / 10 + (self.ki * self.error_sum) / 10;
         let new_speed = self.v_s + delta_u;
 
-        // Debug info:
-        info!(
-            "[SYNC]|{}|{}|{}|{}|",
-            delay as f32 / 1000.0,
-            err as f32 / 1000.0,
-            self.v_s,
-            new_speed,
-        );
         new_speed
     }
 }
