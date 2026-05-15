@@ -184,7 +184,7 @@ pub async fn lora_task(
     };
     // let mac = RandomAccessMac::new();
 
-    let ki = KI.unwrap_or(DEFAULT_KP);
+    let ki = KI.unwrap_or(DEFAULT_KI);
     let kp = KP.unwrap_or(DEFAULT_KP);
     info!("God kp: {} and ki {}", kp, ki);
     let mac = TdmaMac::default()

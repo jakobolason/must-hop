@@ -1,9 +1,9 @@
 use chrono::Local;
 use crossterm::event::KeyCode;
 use dotenv::dotenv;
-use std::fs;
 use std::path::Path;
 use std::{env, fs::File, io::Write, str::FromStr};
+use std::{fs, io};
 
 use crate::composables::stats::DashStats;
 use crate::navigator::LandingFocus;
@@ -78,7 +78,7 @@ impl App {
             match fs::read_to_string(path) {
                 Ok(ss) => ss,
                 Err(e) => {
-                    log::error!("Error readong path {:?}: {:?}", path, e);
+                    log::error!("Error reading path {:?}: {:?}", path, e);
                     String::new()
                 }
             }
@@ -138,9 +138,21 @@ impl App {
     pub fn save_data(&self) {
         let timestamp = Local::now().format("%d-%m:%H.%M").to_string();
 
-        let prefix = "./analysis/data/";
-        let main_filename = format!("{prefix}/main/main_stats_{timestamp}.csv");
-        let hw_filename = format!("{prefix}/full_hw/hw_stats_{timestamp}.csv");
+        let prefix = "./analysis/data";
+        let main_prefix = format!("{prefix}/main");
+        let hw_prefix = format!("{prefix}/full_hw");
+        let main_filename = format!("{main_prefix}/main_stats_{timestamp}.csv");
+        let hw_filename = format!("{hw_prefix}/hw_stats_{timestamp}.csv");
+
+        // Make sure the dirs exist
+        if let Err(e) = fs::create_dir_all(main_prefix) {
+            log::error!("Error in dir creation: {:?}", e);
+            return;
+        }
+        if let Err(e) = fs::create_dir(hw_prefix) {
+            log::error!("Error in dir creation: {:?}", e);
+            return;
+        }
 
         if let Ok(mut f) = File::create(&main_filename) {
             let _ = writeln!(

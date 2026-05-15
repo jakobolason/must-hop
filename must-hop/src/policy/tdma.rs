@@ -196,7 +196,7 @@ enum TauHbMode {
 }
 
 impl TauHbMode {
-    pub const fn skip_slots(&self) -> u8 {
+    pub const fn skip_frames(&self) -> u8 {
         match self {
             Self::High => 3,
             Self::Low => 1,
@@ -455,7 +455,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let dummy_allocation = SlotAllocation {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
-            tau_hb: self.slot_manager.tau_hb.skip_slots(),
+            tau_hb: self.slot_manager.tau_hb.skip_frames(),
             gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
             t3_deltas,
         };
@@ -548,7 +548,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let allocation = SlotAllocation {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
-            tau_hb: self.slot_manager.tau_hb.skip_slots(),
+            tau_hb: self.slot_manager.tau_hb.skip_frames(),
             gps_time_us: adjusted_timestamp,
             t3_deltas,
         };
@@ -582,7 +582,7 @@ where
         }
         if self.slot_manager.hb_countdown == 0 {
             self.slot_manager.hb_countdown =
-                self.slot_manager.tau_hb.skip_slots().saturating_sub(1);
+                self.slot_manager.tau_hb.skip_frames().saturating_sub(1);
             true
         } else {
             false
@@ -631,8 +631,12 @@ where
                             ),
                         ));
                         self.update_tau_hb();
-                        let upd_pkt =
-                            self.update_heartbeat(hbt_pkt, 0, extracted_deltas, adjusted_timestamp);
+                        let upd_pkt = self.update_heartbeat(
+                            hbt_pkt,
+                            my_tx_slot,
+                            extracted_deltas,
+                            adjusted_timestamp,
+                        );
                         node.transmit(&[upd_pkt]).await?;
                     }
 
