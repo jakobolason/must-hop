@@ -232,8 +232,10 @@ pub async fn run_app(
                             navigator.next_landing_focus(!app.node_logs.is_empty())
                         }
                         KeyCode::Char('s') | KeyCode::Char('S') => {
-                            app.save_data();
-                            app.reset_data();
+                            if !app.node_logs.is_empty() {
+                                app.save_data();
+                                app.reset_data();
+                            }
                         }
                         KeyCode::Enter => {
                             if navigator.landing_focus == LandingFocus::Save {
