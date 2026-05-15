@@ -38,11 +38,7 @@ pub struct SensorData {
 
 /// Parameters that define send and receive parameters
 #[derive(Clone, Copy)]
-pub struct TransmitParameters {
-    pub sf: SpreadingFactor,
-    pub bw: Bandwidth,
-    pub cr: CodingRate,
-    pub lora_hz: u32,
+pub struct RadioPackParams {
     pub pre_amp: u16,
     pub imp_hed: bool,
     pub max_pack_len: usize,
@@ -50,11 +46,20 @@ pub struct TransmitParameters {
     pub iq: bool,
 }
 
+#[derive(Clone, Copy)]
+pub struct RatioModParams {
+    pub sf: SpreadingFactor,
+    pub bw: Bandwidth,
+    pub cr: CodingRate,
+    pub lora_hz: u32,
+}
+
 /// Unsure whether this will be used
 pub enum RadioState {
     Rx,
     Tx,
 }
+
 /// A node implementatino for lora, where a LoRa interface variant type has to be implemented to
 /// use. An IV for a SX126x is shown in `/examples`
 pub struct LoraNode<'a, RK, DLY, const SIZE: usize, const LEN: usize>
@@ -63,9 +68,11 @@ where
     DLY: DelayNs,
 {
     lora: &'a mut LoRa<RK, DLY>,
-    _tp: TransmitParameters,
-    pkt_params: PacketParams,
+    tx_pkt_params: PacketParams,
+    rx_pkt_params: PacketParams,
     mdltn_params: ModulationParams,
+    /// Used if different parameters should be use for the Rx
+    alt_mdtln_params: Option<ModulationParams>,
     preamble_instant: Option<Instant>,
 }
 
@@ -81,9 +88,17 @@ where
     /// Returns the (preamble, packet) ToA
     fn calc_toa(&self, bytes: u8) -> u32 {
         // Using the formula to calculate time-on-air
-        let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
+        let bb_mod = BaseBandModulationParams::new(
+            self.mdltn_params.spreading_factor,
+            self.mdltn_params.bandwidth,
+            self.mdltn_params.coding_rate,
+        );
 
-        bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes)
+        bb_mod.time_on_air_us(
+            Some(self.tx_pkt_params.preamble_length as u8),
+            self.tx_pkt_params.implicit_header,
+            bytes,
+        )
     }
 
     fn avg_slice_delay(&self, payload_len: u8) -> u64 {
@@ -117,7 +132,7 @@ where
         self.lora
             .prepare_for_tx(
                 &self.mdltn_params,
-                &mut self.pkt_params,
+                &mut self.tx_pkt_params,
                 OUTPUT_POWER,
                 used_slice,
             )
@@ -186,6 +201,7 @@ where
     ) -> Result<Self::Connection, RadioError> {
         self.prepare_for_rx(RxMode::Continuous).await?;
         self.preamble_instant = None;
+        // TODO: Remove this? I'm not using it anymore, don't plan to do
         let get_preamb_instant = || {
             if self.preamble_instant.is_none() {
                 self.preamble_instant = Some(Instant::now())
@@ -195,7 +211,8 @@ where
             Some(timeout) => {
                 match embassy_time::with_timeout(
                     embassy_time::Duration::from_micros(timeout.as_micros() as u64),
-                    self.lora.rx(&self.pkt_params, rec_buf, get_preamb_instant),
+                    self.lora
+                        .rx(&self.rx_pkt_params, rec_buf, get_preamb_instant),
                 )
                 .await
                 {
@@ -205,7 +222,7 @@ where
             }
             None => Ok(self
                 .lora
-                .rx(&self.pkt_params, rec_buf, get_preamb_instant)
+                .rx(&self.rx_pkt_params, rec_buf, get_preamb_instant)
                 .await),
         }
     }
@@ -220,22 +237,50 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
-    pub fn new(lora: &'a mut LoRa<RK, DLY>, tp: TransmitParameters) -> Result<Self, RadioError> {
-        let mdltn_params = lora.create_modulation_params(tp.sf, tp.bw, tp.cr, tp.lora_hz)?;
+    /// Takes a LoRa radio, transmit parameters and optionally receive parameters. If receive
+    /// parameters are not given, then tp are used for both Tx and Rx
+    pub fn new(
+        lora: &'a mut LoRa<RK, DLY>,
+        pack_params: RadioPackParams,
+        tx_mod: RatioModParams,
+        rx_opt: Option<RatioModParams>,
+    ) -> Result<Self, RadioError> {
+        let mdltn_params =
+            lora.create_modulation_params(tx_mod.sf, tx_mod.bw, tx_mod.cr, tx_mod.lora_hz)?;
 
-        let pkt_params = lora.create_rx_packet_params(
-            tp.pre_amp,
-            tp.imp_hed,
-            tp.max_pack_len as u8,
-            tp.crc,
-            tp.iq,
+        let tx_pkt_params = lora.create_rx_packet_params(
+            pack_params.pre_amp,
+            pack_params.imp_hed,
+            pack_params.max_pack_len as u8,
+            pack_params.crc,
+            pack_params.iq,
             &mdltn_params,
         )?;
+
+        let alt_mdtln_params = if let Some(rx_mod) = rx_opt {
+            let rx_mdltn_params =
+                lora.create_modulation_params(rx_mod.sf, rx_mod.bw, rx_mod.cr, rx_mod.lora_hz)?;
+            Some(rx_mdltn_params)
+        } else {
+            None
+        };
+        let rx_mdltn_params = alt_mdtln_params.as_ref().unwrap_or(&mdltn_params);
+
+        let rx_pkt_params = lora.create_rx_packet_params(
+            pack_params.pre_amp,
+            pack_params.imp_hed,
+            pack_params.max_pack_len as u8,
+            pack_params.crc,
+            pack_params.iq,
+            rx_mdltn_params,
+        )?;
+
         Ok(Self {
             lora,
-            _tp: tp,
-            pkt_params,
+            tx_pkt_params,
+            rx_pkt_params,
             mdltn_params,
+            alt_mdtln_params,
             preamble_instant: None,
         })
     }
@@ -243,8 +288,12 @@ where
     pub async fn prepare_for_rx(&mut self, rx_mode: RxMode) -> Result<(), RadioError> {
         // TODO: Is it a proble using single here? Should it be continouos to not get timeout
         // errors all the time? Can this listening be timed and synchronized for a TDMA?
+        let mdltn_params = match &self.alt_mdtln_params {
+            Some(p) => p,
+            None => &self.mdltn_params,
+        };
         self.lora
-            .prepare_for_rx(rx_mode, &self.mdltn_params, &self.pkt_params)
+            .prepare_for_rx(rx_mode, mdltn_params, &self.rx_pkt_params)
             .await
     }
 }
