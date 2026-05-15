@@ -55,6 +55,7 @@ impl Controller {
         // And add the error so our integral controller works
         // TODO: Clamping of this?
         self.error_sum += error;
+        info!(" ERROR SUM {}", self.error_sum);
 
         // And get the new speed for our controller
         let v_s = self.apply_pi_controller(error, delay);
@@ -81,7 +82,7 @@ impl Controller {
         let my_stamp = predicted_elapsed + old_gps;
 
         // Check if a t3 delta is availale for us
-        let delay = if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == node_id) {
+        let nw_delay = if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == node_id) {
             // delta is our T3 - T2
             let delta_down = hb.gps_time_us as i64 - my_stamp as i64;
             let up_ms = *delta_up as f32 / 1000.0;
@@ -104,10 +105,10 @@ impl Controller {
         };
 
         // Simple filter ofr now
-        let avg_delay = (self.prev_delay + delay) / 2;
+        // let avg_delay = (self.prev_delay + nw_delay) / 2;
 
         // Use the network delay to make up for transmission time, etc.
-        let current_true_time = hb.gps_time_us as i64 - avg_delay;
+        let current_true_time = hb.gps_time_us as i64 - nw_delay;
 
         // Now update drift
         let gw_diff = current_true_time - old_gps as i64;
@@ -126,10 +127,14 @@ impl Controller {
         let err = phase_err;
 
         // Only re-sync if the error is substantially large
-        let time_sync = if err.abs() > 100_000 {
+        let time_sync = if err.abs() > 70_000 {
             // re-sync means the last error was not enough to put the controller onto the correct speed,
-            // so we should 2x the error here?
-            ((current_true_time as u64), rx_pkt.rx_done_instant)
+            // to not fuck up the controller, just adjust the stamp appropriately?
+            let adjustment = if err > 0 { -50_000 } else { 50_000 };
+            (
+                ((current_true_time + adjustment) as u64),
+                rx_pkt.rx_done_instant,
+            )
         } else {
             ((my_stamp), rx_pkt.rx_done_instant)
         };
@@ -144,13 +149,11 @@ impl Controller {
     /// new skew ratio for the node to be properly synchronized.
     fn apply_pi_controller(&self, err: i64, delay: i64) -> i64 {
         // TODO: Switch the self.* to f32, this is just runtime overhead
-        let kp: f32 = self.kp as f32 / 10.0;
-        let ki: f32 = self.ki as f32 / 10.0;
-
-        info!("kp: {}, ki: {}", kp, ki);
+        // let kp: f32 = self.kp as f32 / 10.0;
+        // let ki: f32 = self.ki as f32 / 10.0;
+        // info!("kp: {}, ki: {}", kp, ki);
 
         let delta_u = (self.kp * err) / 10 + (self.ki * self.error_sum) / 10;
-
         let new_speed = self.v_s + delta_u;
 
         // Debug info:
