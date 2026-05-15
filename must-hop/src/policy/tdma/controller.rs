@@ -149,7 +149,7 @@ impl Controller {
 
         info!("kp: {}, ki: {}", kp, ki);
 
-        let delta_u = ((self.kp * err) / 10 + (self.ki * self.error_sum) / 10) as i64;
+        let delta_u = (self.kp * err) / 10 + (self.ki * self.error_sum) / 10;
 
         let new_speed = self.v_s + delta_u;
 
