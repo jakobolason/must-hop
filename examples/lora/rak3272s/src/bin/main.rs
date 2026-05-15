@@ -35,12 +35,9 @@ use lora_phy::{
 };
 
 use must_hop::{
-    lora::{LoraNode, TransmitParameters},
-    node::{
-        mesh_router, network_manager,
-        policy::NodePolicy,
-        policy::{RandomAccessMac, TdmaMac},
-    },
+    mesh_router, network_manager,
+    node::lora::{LoraNode, TransmitParameters},
+    policy::{ra::RandomAccessMac, tdma::TdmaMac},
 };
 use {defmt_rtt as _, panic_probe as _};
 
@@ -80,13 +77,13 @@ async fn main(spawner: Spawner) {
     let p = embassy_stm32::init(config);
 
     info!("config done...");
-    let tx_pin = Output::new(p.PC13, Level::Low, Speed::VeryHigh);
     let rx_pin = Output::new(p.PB8, Level::Low, Speed::VeryHigh);
+    let tx_pin = Output::new(p.PC13, Level::Low, Speed::VeryHigh);
 
     let spi = Spi::new_subghz(p.SUBGHZSPI, p.DMA1_CH1, p.DMA1_CH2);
     let spi = SubghzSpiDevice(spi);
     // TODO: Can it work wit low power?
-    let use_high_power_pa = true;
+    let use_high_power_pa = false;
     let config = sx126x::Config {
         chip: Stm32wl { use_high_power_pa },
         tcxo_ctrl: None,
@@ -187,16 +184,17 @@ pub async fn lora_task(
     };
     // let mac = RandomAccessMac::new();
 
-    let ki = KI.unwrap_or(DEFAULT_KP);
+    let ki = KI.unwrap_or(DEFAULT_KI);
     let kp = KP.unwrap_or(DEFAULT_KP);
+    info!("God kp: {} and ki {}", kp, ki);
     let mac = TdmaMac::default()
-        .set_controller(20334395, kp, ki)
+        .set_controller(23334395, kp, ki)
         .set_debug_pin(debug_pin)
         .set_node_id(source_id)
         .build();
     let nm =
         network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(source_id, timeout, max_retries);
-    let mut router = mesh_router::MeshRouter::new(node, nm, mac, NodePolicy);
+    let mut router = mesh_router::MeshRouter::new(node, nm, mac);
     info!("Waiting for packet or sensor data to send");
     loop {
         let mut receiving_buffer = [00u8; MAX_RADIO_BUFFER];
@@ -208,7 +206,6 @@ pub async fn lora_task(
             error!("Error queing sensor data: {:?}", e);
         }
 
-        // TODO: This should take in the Option<Data> from above
         match router.tick(&mut receiving_buffer).await {
             Ok(my_pkts) => {
                 if !my_pkts.is_empty() {

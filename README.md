@@ -49,8 +49,7 @@ Thus everything can be compiled and then the binaries can be copied to a remote 
 - [x] Each node sends and receives information
 - [x] Communication with a gateway
   - [x] Define gateway communication
-  - [ ] Have a nice dashboard kind of, to see information
-        could use Ratatui for this perhaps
+- [x] Dashboard to follow the system at runtime
 - [x] Traits required for radios to use this library: `MHNode`
   - [x] lora-rs implements this in `must-hop/lora.rs`
   - [x] SX1302 concentrator implements this in `must-gw/node.rs`

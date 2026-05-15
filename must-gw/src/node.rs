@@ -3,10 +3,8 @@ use std::collections::VecDeque;
 use embassy_time::{Duration, Instant, Timer};
 use log::{error, trace};
 use lora_modulation::BaseBandModulationParams;
-use loragw::{
-    Concentrator, Error, Running, RxPacket, RxPacketLoRa, TxPacket, TxPacketLoRa, TxStatus,
-};
-use must_hop::node::{MHNode, MHPacket};
+use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
+use must_hop::{MHNode, MHPacket};
 use postcard::to_slice;
 
 const SIZE: usize = 128;
@@ -86,10 +84,13 @@ impl From<PacketParams> for TxPacketLoRa {
 
 pub struct GWNode {
     radio: Concentrator<Running>,
-    /// Kind of a hack to do it like this, perhaps MHNODE will be altered?
     fetched_packets: VecDeque<RxPacket>,
     pkt_params: PacketParams,
 }
+
+/// Calculated in calc_tau_spi
+const INTERCEPT: u64 = 1478;
+const SLOPE: u64 = 4;
 
 impl GWNode {
     pub fn new(concentrator: Concentrator<Running>) -> Self {
@@ -99,7 +100,7 @@ impl GWNode {
             pkt_params: PacketParams::default(),
         }
     }
-    fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<TxPacket, Error> {
+    fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<(TxPacket, usize), Error> {
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
@@ -108,25 +109,25 @@ impl GWNode {
                 return Err(Error::Data);
             }
         };
-        log::info!("BUFFER SIZE IS: {}", used_slice.len());
-        Ok(TxPacket::LoRa(TxPacketLoRa {
-            payload: used_slice.to_vec(),
-            ..self.pkt_params.clone().into()
-        }))
+        Ok((
+            TxPacket::LoRa(TxPacketLoRa {
+                payload: used_slice.to_vec(),
+                ..self.pkt_params.clone().into()
+            }),
+            used_slice.len(),
+        ))
     }
-    fn calc_toa(&self, rx_pkt: &RxPacketLoRa) -> (u32, u32) {
+    fn calc_toa(&self, payload_len: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(
-            rx_pkt.spreading.into(),
-            rx_pkt.bandwidth.into(),
-            rx_pkt.coderate.into(),
+            self.pkt_params.spreading.into(),
+            self.pkt_params.bandwidth.into(),
+            self.pkt_params.coderate.into(),
         );
-        let total_toa_us = bb_mod.time_on_air_us(None, true, rx_pkt.payload.len() as u8);
-        let t_sym_ms = bb_mod.symbols_to_ms(1) as f32;
-        // calculate the time of just the preamble
-        let preamble_toa_ms = t_sym_ms * (8_f32 + 4.25);
-        let preamble_toa_us = (preamble_toa_ms * 1000.0) as u32;
-        (preamble_toa_us, total_toa_us)
+        bb_mod.time_on_air_us(None, true, payload_len)
+    }
+    fn avg_slice_delay(&self, payload_len: usize) -> u64 {
+        INTERCEPT + SLOPE * payload_len as u64
     }
 }
 
@@ -136,23 +137,20 @@ impl MHNode<SIZE, LEN> for GWNode {
     type ReceiveBuffer = Option<RxPacket>;
 
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
-        packets
-            .iter()
-            .for_each(|p| trace!(" !!!! Sending packet id: {}", p.packet_id));
-        let before = Instant::now();
-        let tx_pkt = self.to_tx_packet(packets)?;
+        let (tx_pkt, payload_size) = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
             embassy_time::Timer::after(Duration::from_millis(5)).await;
         }
         self.radio.transmit(tx_pkt)?;
+        // Because the SX1302 is independent of the process running this program, this returns
+        // before its done transmitting, and just returns after it's done sending the bytes to the radio
         let after = Instant::now();
-        let only_tx = after - before;
-
         trace!(
-            "[TX DURATION] millis: {},\t ticks: {}",
-            only_tx.as_millis(),
-            after.as_micros()
+            "[TAU_SLICE_POST] | {} | {} |",
+            after.as_micros(),
+            payload_size
         );
+
         Ok(())
     }
 
@@ -161,7 +159,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         &mut self,
         _conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, must_hop::node::RxPacket), Self::Error> {
+    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, must_hop::RxPacket), Self::Error> {
         // This is a hack, but we only want one entry
         let Some(pkt) = rec_buf else {
             return Err(loragw::Error::Generic);
@@ -174,24 +172,24 @@ impl MHNode<SIZE, LEN> for GWNode {
             RxPacket::FSK(_) => return Err(loragw::Error::Generic),
         };
         let raw_bytes = &pkt.payload;
-        log::info!(
-            "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
-            pkt.spreading,
-            pkt.bandwidth,
-            pkt.freq,
-            pkt.rssi,
-            pkt.snr
-        );
+        // log::info!(
+        //     "Received LoRa Packet | SF: {:?}, BW: {:?}, Freq: {} Hz, RSSI: {:.1} dBm, SNR: {:.1} dB",
+        //     pkt.spreading,
+        //     pkt.bandwidth,
+        //     pkt.freq,
+        //     pkt.rssi,
+        //     pkt.snr
+        // );
 
         let packets = postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes)
             .map_err(|_| {
                 error!("Could not convert to bytes!");
                 loragw::Error::Generic
             })?;
-        log::info!(
-            "SUCCESS !!!! Received amount of packets: {:?}",
-            packets.len()
-        );
+        // log::info!(
+        //     "SUCCESS !!!! Received amount of packets: {:?}",
+        //     packets.len()
+        // );
         let now_host = Instant::now();
         let rx_heartbeat_timestamp = if let Ok(now_radio) = self.radio.get_instcnt() {
             // Calculate our local ticks when this was captured
@@ -211,11 +209,11 @@ impl MHNode<SIZE, LEN> for GWNode {
 
         Ok((
             rec_packets,
-            must_hop::node::RxPacket {
-                preamble_instant: None,
+            must_hop::RxPacket {
+                // preamble_instant: None,
                 rx_done_instant: rx_heartbeat_timestamp,
                 payload_size: pkt.payload.len() as u8,
-                estimated_toa: self.calc_toa(pkt),
+                // estimated_toa: self.calc_toa(pkt),
             },
         ))
     }
@@ -246,7 +244,7 @@ impl MHNode<SIZE, LEN> for GWNode {
             Timer::after(Duration::from_millis(5)).await;
         }
     }
-    fn calc_tx_delay(&self, payload_len: usize) -> core::time::Duration {
-        core::time::Duration::from_millis(60 * payload_len as u64)
+    fn calc_tx_delay(&self, payload_len: usize) -> u64 {
+        self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len)
     }
 }

@@ -14,3 +14,8 @@ tokio = { version = "1.52.1", features = ["full"] }
 nix = { version = "0.31.2", features = ["signal"] }
 
 regex = "1.12.3"
+
+log = "0.4.29"
+simplelog = "0.12.2"
+chrono = "0.4.44"
+dotenv = "0.15.0"

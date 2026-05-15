@@ -414,10 +414,10 @@ impl<P, const SIZE: usize> TdmaMac<P, SIZE> {
                     };
                 }
                 self.known_slots_mask.claim(alloc.my_slot);
-                info!(
-                    "Other node claimed slot at {}. {:?}",
-                    alloc.my_slot, self.known_slots_mask
-                );
+                # info!(
+                #     "Other node claimed slot at {}. {:?}",
+                #     alloc.my_slot, self.known_slots_mask
+                # );
 
                 // Only allocate a new slot if we don't have one
                 if self.my_tx_slot.is_none() {

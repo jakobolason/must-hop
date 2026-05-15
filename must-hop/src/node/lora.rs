@@ -1,7 +1,7 @@
 use crate::node::RxPacket;
 
 /// This contains node implementations for Lora
-use super::node::{MHNode, MHPacket};
+use super::{MHNode, MHPacket};
 use lora_modulation::BaseBandModulationParams;
 use lora_phy::mod_params::{
     Bandwidth, CodingRate, ModulationParams, PacketParams, SpreadingFactor,
@@ -69,24 +69,29 @@ where
     preamble_instant: Option<Instant>,
 }
 
+/// Calculated in calc_tau_spi
+const INTERCEPT: u64 = 690;
+const SLOPE: u64 = 1;
+
 impl<'a, RK, DLY, const SIZE: usize, const LEN: usize> LoraNode<'a, RK, DLY, SIZE, LEN>
 where
     RK: RadioKind,
     DLY: DelayNs,
 {
-    fn calc_toa(&self, bytes: u8) -> (u32, u32) {
+    /// Returns the (preamble, packet) ToA
+    fn calc_toa(&self, bytes: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(self._tp.sf, self._tp.bw, self._tp.cr);
-        let total_toa_us =
-            bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes);
 
-        let t_sym_ms = bb_mod.symbols_to_ms(1) as f32;
-        // calculate the time of just the preamble
-        let preamble_toa_ms = t_sym_ms * (self._tp.pre_amp as f32 + 4.25);
-        let preamble_toa_us = (preamble_toa_ms * 1000.0) as u32;
-        (preamble_toa_us, total_toa_us)
+        bb_mod.time_on_air_us(Some(self._tp.pre_amp as u8), self._tp.imp_hed, bytes)
+    }
+
+    fn avg_slice_delay(&self, payload_len: u8) -> u64 {
+        INTERCEPT + SLOPE * payload_len as u64
     }
 }
+
+const OUTPUT_POWER: i32 = 1;
 
 impl<RK, DLY, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN>
     for LoraNode<'_, RK, DLY, SIZE, LEN>
@@ -98,12 +103,9 @@ where
     type Connection = Result<(u8, PacketStatus), RadioError>;
     type ReceiveBuffer = [u8; TRANSMISSION_BUFFER];
 
+    /// Slices up packets into bytes and transmits, does not call `lora.sleep`
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {
-        let now = Instant::now();
-
-        // TODO: Can this be made opt-in? Such that individual transmission is possible?
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
-        trace!("BUFFER SIZE IS: {}", SIZE);
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
             Err(e) => {
@@ -111,44 +113,22 @@ where
                 return Err(RadioError::OpError(1));
             }
         };
-        trace!("used slice size is {}", used_slice.len());
-        // Simple listen to talk logic
-        // TODO: This crashes when in a loop
-        // loop {
-        // trace!("preparing for cad ...");
-        // self.lora.prepare_for_cad(&self.mdltn_params).await?;
-        // if self.lora.cad(&self.mdltn_params).await? {
-        //     warn!("cad successfull with activity detected");
-        //     // self.lora.sleep(false).await?;
-        //     Timer::after_millis(50).await;
-        //     // TODO: Get some random amount of time before continuing loop
-        // } else {
-        //     trace!("cad successfull with NO activity detected");
-        //     // break;
-        // }
-        // }
-        let before_tx = Instant::now();
+
         self.lora
-            .prepare_for_tx(&self.mdltn_params, &mut self.pkt_params, 20, used_slice)
+            .prepare_for_tx(
+                &self.mdltn_params,
+                &mut self.pkt_params,
+                OUTPUT_POWER,
+                used_slice,
+            )
             .await?;
         let now_sending = Instant::now();
         self.lora.tx().await?;
-        trace!("Transmit successfull! micros: {}", now_sending.as_micros());
-        let after = Instant::now();
-        let tx_dur = after - now;
-        let only_tx = after - before_tx;
         trace!(
-            "[TX DURATION] millis: {},\t ticks: {}",
-            tx_dur.as_millis(),
-            tx_dur
+            "[TAU_SLICE_POST] |{}|{}|",
+            now_sending.as_micros(),
+            used_slice.len()
         );
-        trace!(
-            "[ONLY TX DURATION] millis: {},\t ticks: {}",
-            only_tx.as_millis(),
-            only_tx
-        );
-        // Takes around 1.9 seconds for full transmit function, and 1.6 for just transmitting
-
         // NOTE: This might create a delay between transmitting something and being able to receive
         // again
         // lora.sleep(false).await?;
@@ -156,7 +136,6 @@ where
         Ok(())
     }
 
-    // Should transition to Rx if in Tx
     async fn receive(
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
@@ -187,14 +166,14 @@ where
             }
         };
         trace!("Got packet!");
-        let estimated_toa = self.calc_toa(len);
+        // let estimated_toa = self.calc_toa(len);
 
         let rx_pkt = RxPacket {
-            preamble_instant: self.preamble_instant.take(),
+            // preamble_instant: self.preamble_instant.take(),
             // preamble_instant: None,
             rx_done_instant: rx_hardware_timestamp,
             payload_size: len,
-            estimated_toa,
+            // estimated_toa,
         };
 
         Ok((packets, rx_pkt))
@@ -231,8 +210,8 @@ where
         }
     }
 
-    fn calc_tx_delay(&self, payload_len: usize) -> Duration {
-        Duration::from_millis(60 * payload_len as u64)
+    fn calc_tx_delay(&self, payload_len: usize) -> u64 {
+        self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len as u8)
     }
 }
 

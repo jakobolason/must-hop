@@ -1,4 +1,4 @@
-use crate::app::{App, DashFocus};
+use crate::{app::App, navigator::DashFocus};
 use ansi_to_tui::IntoText;
 use ratatui::{
     Frame,
@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) {
     let log_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -17,7 +17,7 @@ pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    let log_title_style = if app.dash_focus == DashFocus::Logs {
+    let log_title_style = if *dash_focus == DashFocus::Logs {
         Style::default().fg(Color::White)
     } else {
         Style::default().fg(Color::DarkGray)

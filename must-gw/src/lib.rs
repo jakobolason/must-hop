@@ -45,7 +45,7 @@ pub fn create_concentrator() -> Result<Concentrator<Running>, Error> {
         })
         .unwrap_or_default();
     println!("Resetting board first ...");
-    let token = loragw::ResetToken::generate(|| raspberrypi::reset_lgw())
+    let token = loragw::ResetToken::generate(raspberrypi::reset_lgw)
         .expect("Failed to generate reset token");
 
     println!("Starting concentrator...");

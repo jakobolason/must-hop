@@ -1,12 +1,15 @@
 pub mod app;
 pub mod components;
 pub mod composables;
+pub mod navigator;
 pub mod pages;
 pub mod ui;
 
 use crate::mpsc::Sender;
-use app::{App, AppEvent, AppView, LandingFocus};
+use crate::navigator::Navigator;
+use app::{App, AppEvent};
 use crossterm::event::{self, Event as CEvent, KeyCode};
+use navigator::{LandingFocus, NavigatorView};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -14,24 +17,16 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::sync::Mutex;
-
-static DEBUG_LOG: std::sync::LazyLock<Mutex<std::fs::File>> = std::sync::LazyLock::new(|| {
-    Mutex::new(
-        OpenOptions::new()
+pub fn init_logger() {
+    let _ = simplelog::WriteLogger::init(
+        simplelog::LevelFilter::Debug, // Change to Info or Trace as needed
+        simplelog::Config::default(),
+        std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open("/tmp/must-dash-debug.log")
-            .expect("Failed to open debug log"),
-    )
-});
-
-pub fn debug_log(msg: &str) {
-    if let Ok(mut f) = DEBUG_LOG.lock() {
-        let _ = writeln!(f, "{}", msg);
-    }
+            .expect("Failed to open debug log file"),
+    );
 }
 
 type ChildProcess = Box<dyn portable_pty::Child + Send + Sync>;
@@ -64,28 +59,23 @@ fn spawn_pty_reader(
     let child = pair.slave.spawn_command(cmd).expect("Failed to spawn");
 
     let mut master_reader = pair.master.try_clone_reader().unwrap();
-    let program = args[0].to_string().clone();
+    // let program = args[0].to_string().clone();
 
     tokio::task::spawn_blocking(move || {
         let mut buf = Vec::new();
         let mut byte = [0u8; 1];
         let mut pending_cr = false;
-        let log = |st: &str| {
-            if program == "remote-run" {
-                debug_log(st);
-            }
-        };
         loop {
             if let Ok(0) | Err(_) = master_reader.read(&mut byte) {
                 break;
             }
             match byte[0] {
                 b'\r' => {
-                    log(&format!(
-                        "CR (pending_cr was: {}), buf so far: {:?}",
-                        pending_cr,
-                        String::from_utf8_lossy(&buf)
-                    ));
+                    // log::debug!(
+                    //     "CR (pending_cr was: {}), buf so far: {:?}",
+                    //     pending_cr,
+                    //     String::from_utf8_lossy(&buf)
+                    // );
                     if pending_cr {
                         // Back-to-back \r\r — flush previous as overwrite
                         if !buf.is_empty() {
@@ -100,7 +90,7 @@ fn spawn_pty_reader(
                     pending_cr = false;
                     if !buf.is_empty() {
                         let line = String::from_utf8_lossy(&buf).into_owned();
-                        debug_log(&format!("NEWLINE: {:?}", line));
+                        // log::debug!("NEWLINE: {:?}", line);
                         let is_erase_line = buf.starts_with(b"\x1b[2K");
                         let _ = tx.blocking_send(event_mapper(line, is_erase_line));
                         buf.clear();
@@ -120,9 +110,9 @@ fn spawn_pty_reader(
                         }
                         pending_cr = false;
                     }
-                    if byte[0] < 0x20 || byte[0] == 0x7f {
-                        log(&format!("CTRL: 0x{:02x}", byte[0]));
-                    }
+                    // if byte[0] < 0x20 || byte[0] == 0x7f {
+                    //     log::debug!("CTRL: 0x{:02x}", byte[0]);
+                    // }
                     buf.push(b);
                 }
             }
@@ -140,6 +130,11 @@ fn spawn_children(
     Option<ChildProcess>,
     Option<ChildProcess>,
 ) {
+    let cast_f32_to_str = |s: &String| {
+        let f = s.parse::<f32>().unwrap_or(0_f32);
+        let casted = (f * 10.0) as u64;
+        format!("{casted}")
+    };
     let node_child = spawn_pty_reader(
         "just",
         &["remote-run", "7"],
@@ -147,8 +142,8 @@ fn spawn_children(
             ("CARGO_TERM_COLOR", "always"),
             ("CLICOLOR_FORCE", "1"),
             ("DEFMT_LOG_STYLE", "always"),
-            ("KP", &app.env_vars.kp),
-            ("KI", &app.env_vars.ki),
+            ("KP", cast_f32_to_str(&app.env_vars.kp).as_str()),
+            ("KI", cast_f32_to_str(&app.env_vars.ki).as_str()),
             ("SOURCEID", &app.env_vars.source_id),
         ],
         tx.clone(),
@@ -178,6 +173,7 @@ pub async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (tx, mut rx) = mpsc::channel(100);
+    init_logger();
 
     let tx_input = tx.clone();
     tokio::spawn(async move {
@@ -195,25 +191,26 @@ pub async fn run_app(
     });
 
     let mut app = App::new();
+    let mut navigator = Navigator::new();
 
     // Hold our process handles in Options, they start as None
     let mut node_child: Option<ChildProcess> = None;
     let mut gw_child: Option<ChildProcess> = None;
     let mut delay_child: Option<ChildProcess> = None;
 
-    let quit_fn = |app: &mut App, terminal: &mut Terminal<_>| {
-        app.shutting_down = true;
+    let quit_fn = |app: &mut App, ngtr: &mut Navigator, terminal: &mut Terminal<_>| {
+        ngtr.shutting_down = true;
         app.reset_data();
-        let _ = terminal.draw(|f| ui::draw(f, app));
+        let _ = terminal.draw(|f| ui::draw(f, app, ngtr));
     };
 
     loop {
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &app, &navigator))?;
 
         if let Some(event) = rx.recv().await {
             match event {
-                AppEvent::Input(key_code) => match app.view {
-                    AppView::Landing => match key_code {
+                AppEvent::Input(key_code) => match navigator.view {
+                    NavigatorView::Landing => match key_code {
                         KeyCode::Esc => {
                             // Shut them down if they exist
                             shutdown_processes(vec![
@@ -222,35 +219,45 @@ pub async fn run_app(
                                 delay_child.take(),
                             ])
                             .await;
-                            quit_fn(&mut app, terminal);
-                            match app.view {
-                                AppView::Landing => break,
-                                AppView::Dashboard => app.view = AppView::Landing,
+                            quit_fn(&mut app, &mut navigator, terminal);
+                            match navigator.view {
+                                NavigatorView::Landing => break,
+                                NavigatorView::Dashboard => navigator.view = NavigatorView::Landing,
                             }
                         }
-                        KeyCode::Up | KeyCode::BackTab => app.prev_landing_focus(),
-                        KeyCode::Down | KeyCode::Tab => app.next_landing_focus(),
+                        KeyCode::Up | KeyCode::BackTab => {
+                            navigator.prev_landing_focus(!app.node_logs.is_empty())
+                        }
+                        KeyCode::Down | KeyCode::Tab => {
+                            navigator.next_landing_focus(!app.node_logs.is_empty())
+                        }
                         KeyCode::Char('s') | KeyCode::Char('S') => {
-                            app.save_data();
+                            if !app.node_logs.is_empty() {
+                                app.save_data();
+                                app.reset_data();
+                            }
                         }
                         KeyCode::Enter => {
-                            if app.landing_focus == LandingFocus::Save {
+                            if navigator.landing_focus == LandingFocus::Save {
                                 app.save_data();
                             } else {
                                 // Resets logs and data for new run
                                 app.reset_data();
-                                app.view = AppView::Dashboard;
+                                // set the user-specified things to env
+                                app.save_to_env_file();
+                                // app.save_data();
+                                navigator.view = NavigatorView::Dashboard;
                                 (node_child, gw_child, delay_child) =
                                     spawn_children(&app, tx.clone());
                             }
                         }
-                        KeyCode::Backspace => app.backspace(),
-                        KeyCode::Char(c) => app.type_char(c),
+                        KeyCode::Backspace => app.backspace(navigator.landing_focus),
+                        KeyCode::Char(c) => app.type_char(c, navigator.landing_focus),
                         _ => {}
                     },
-                    AppView::Dashboard => match key_code {
+                    NavigatorView::Dashboard => match key_code {
                         KeyCode::Char('q') => {
-                            quit_fn(&mut app, terminal);
+                            quit_fn(&mut app, &mut navigator, terminal);
                             break;
                         }
                         KeyCode::Esc => {
@@ -260,9 +267,19 @@ pub async fn run_app(
                                 delay_child.take(),
                             ])
                             .await;
-                            app.view = AppView::Landing;
+                            navigator.view = NavigatorView::Landing;
                         }
-                        KeyCode::Tab => app.toggle_dash_focus(),
+                        KeyCode::Tab => navigator.toggle_dash_focus(),
+                        KeyCode::Char('p') => {
+                            // Stops the processes, but doesn't go back to landing. They can still
+                            // press est to go back
+                            shutdown_processes(vec![
+                                node_child.take(),
+                                gw_child.take(),
+                                delay_child.take(),
+                            ])
+                            .await;
+                        }
                         _ => {}
                     },
                 },

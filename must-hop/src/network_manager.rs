@@ -236,7 +236,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             return Ok(None);
         }
         if pkt.packet_type == PacketType::HeartBeat {
-            trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
+            // trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
             // TODO: What about GW failure/node failure, altering this?
             if pkt.hop_count >= self.gw_hops
                 || self.recent_seen.contains((pkt.source_id, pkt.packet_id))
@@ -244,7 +244,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 // If incoming route has the same length, then discard this
                 return Ok(None);
             }
-            trace!("!!! SENDING HEARTBEAT ON {}", pkt.packet_id);
+            // trace!("!!! SENDING HEARTBEAT ON {}", pkt.packet_id);
             // GW sends 0, first node has 1 hop, therefore:
             self.gw_hops = pkt.hop_count + 1;
             // Add to recent seen, to compare later
@@ -381,10 +381,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     pub fn add_heartbeat(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError> {
         self.next_packet_id += 1;
         self.recent_seen.push((self.source_id, self.next_packet_id));
-        trace!(
-            "----------- Sending Heartbeat with packet id: {} -------------",
-            self.next_packet_id
-        );
+        // trace!(
+        //     "----------- Sending Heartbeat with packet id: {} -------------",
+        //     self.next_packet_id
+        // );
         // If we are calling this, then we are a GW
         self.gw_hops = 0;
         Ok(MHPacket {

@@ -44,7 +44,6 @@ except ImportError:
 dwf = cdll.LoadLibrary("libdwf.so")
 
 
-# ── Open device ───────────────────────────────────────────────────────────
 hdwf = c_int()
 print("Opening Digital Discovery...")
 dwf.FDwfDeviceOpen(c_int(-1), byref(hdwf))
@@ -61,7 +60,6 @@ _CLOCK_HZ = hzSys.value
 _DIVIDER = int(round(_CLOCK_HZ / SAMPLE_RATE_HZ))
 
 dwf.FDwfDigitalInTriggerAutoTimeoutSet(hdwf, c_double(0))
-# ── Configure logic analyser ──────────────────────────────────────────────
 dwf.FDwfDigitalInDividerSet(hdwf, c_int(_DIVIDER))
 dwf.FDwfDigitalInSampleFormatSet(hdwf, c_int(16))   # 16-bit words, DIN0–DIN15
 dwf.FDwfDigitalInBufferSizeSet(hdwf, c_int(NUM_SAMPLES))
@@ -75,14 +73,8 @@ print(f"  Sample rate : {SAMPLE_RATE_HZ / 1e6:.4g} MHz  (divider {_DIVIDER})")
 print(f"  Window      : {_WINDOW_S * 1000:.1f} ms  ({NUM_SAMPLES} samples)")
 print(f"  Trigger     : DIN{TRIGGER_PIN} rising  |  Signal: DIN{SIGNAL_PIN} rising")
 
-# ── Output file ───────────────────────────────────────────────────────────
-# with open(OUTPUT_FILE, "w") as f:
-#     f.write("Capture,Delta_ms\n")
-
-# print(f"Logging to {OUTPUT_FILE} — Ctrl-C to stop\n")
 print(f"Logging to console -> Ctrl-C to stop\n")
 
-# ── Capture loop ──────────────────────────────────────────────────────────
 rgwData = (c_uint16 * NUM_SAMPLES)()
 status  = c_byte()
 
