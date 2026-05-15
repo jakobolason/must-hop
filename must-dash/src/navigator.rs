@@ -44,19 +44,31 @@ impl Navigator {
         }
     }
 
-    pub fn next_landing_focus(&mut self) {
+    pub fn next_landing_focus(&mut self, can_save: bool) {
         self.landing_focus = match self.landing_focus {
             LandingFocus::Kp => LandingFocus::Ki,
             LandingFocus::Ki => LandingFocus::SourceId,
             LandingFocus::SourceId => LandingFocus::Start,
-            LandingFocus::Start => LandingFocus::Save,
+            LandingFocus::Start => {
+                if can_save {
+                    LandingFocus::Save
+                } else {
+                    LandingFocus::Kp
+                }
+            }
             LandingFocus::Save => LandingFocus::Kp,
         }
     }
 
-    pub fn prev_landing_focus(&mut self) {
+    pub fn prev_landing_focus(&mut self, can_save: bool) {
         self.landing_focus = match self.landing_focus {
-            LandingFocus::Kp => LandingFocus::Save,
+            LandingFocus::Kp => {
+                if can_save {
+                    LandingFocus::Save
+                } else {
+                    LandingFocus::Start
+                }
+            }
             LandingFocus::Ki => LandingFocus::Kp,
             LandingFocus::SourceId => LandingFocus::Ki,
             LandingFocus::Start => LandingFocus::SourceId,

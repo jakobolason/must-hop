@@ -3,6 +3,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Margin},
     style::{Color, Modifier, Style},
+    text::Line,
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
@@ -49,7 +50,8 @@ pub fn draw_landing(f: &mut Frame, app: &App, landing_focus: LandingFocus) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" KP (Environment Variable) "),
+                .title(Line::from(" Kp  ").left_aligned())
+                .title(Line::from("[Note: Only 1 decimal used]").right_aligned()),
         )
         .style(chosen_style(LandingFocus::Kp));
     f.render_widget(kp_p, chunks[0]);
@@ -58,17 +60,15 @@ pub fn draw_landing(f: &mut Frame, app: &App, landing_focus: LandingFocus) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" KI (Environment Variable) "),
+                .title_position(ratatui::widgets::TitlePosition::Top)
+                .title(Line::from(" Ki  ").left_aligned())
+                .title(Line::from("[Note: Only 1 decimal used]").right_aligned()),
         )
         .style(chosen_style(LandingFocus::Ki));
     f.render_widget(ki_p, chunks[1]);
 
     let src_p = Paragraph::new(app.env_vars.source_id.as_str())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" SOURCEID (Environment Variable) "),
-        )
+        .block(Block::default().borders(Borders::ALL).title(" source id "))
         .style(chosen_style(LandingFocus::SourceId));
     f.render_widget(src_p, chunks[2]);
 

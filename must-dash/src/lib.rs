@@ -130,6 +130,11 @@ fn spawn_children(
     Option<ChildProcess>,
     Option<ChildProcess>,
 ) {
+    let cast_f32_to_str = |s: &String| {
+        let f = s.parse::<f32>().unwrap_or(0_f32);
+        let casted = (f * 10.0) as u64;
+        format!("{casted}")
+    };
     let node_child = spawn_pty_reader(
         "just",
         &["remote-run", "7"],
@@ -137,8 +142,8 @@ fn spawn_children(
             ("CARGO_TERM_COLOR", "always"),
             ("CLICOLOR_FORCE", "1"),
             ("DEFMT_LOG_STYLE", "always"),
-            ("KP", &app.env_vars.kp),
-            ("KI", &app.env_vars.ki),
+            ("KP", cast_f32_to_str(&app.env_vars.kp).as_str()),
+            ("KI", cast_f32_to_str(&app.env_vars.ki).as_str()),
             ("SOURCEID", &app.env_vars.source_id),
         ],
         tx.clone(),
@@ -220,8 +225,12 @@ pub async fn run_app(
                                 NavigatorView::Dashboard => navigator.view = NavigatorView::Landing,
                             }
                         }
-                        KeyCode::Up | KeyCode::BackTab => navigator.prev_landing_focus(),
-                        KeyCode::Down | KeyCode::Tab => navigator.next_landing_focus(),
+                        KeyCode::Up | KeyCode::BackTab => {
+                            navigator.prev_landing_focus(!app.node_logs.is_empty())
+                        }
+                        KeyCode::Down | KeyCode::Tab => {
+                            navigator.next_landing_focus(!app.node_logs.is_empty())
+                        }
                         KeyCode::Char('s') | KeyCode::Char('S') => {
                             app.save_data();
                             app.reset_data();
