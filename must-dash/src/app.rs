@@ -23,6 +23,7 @@ pub struct EnvVars {
     pub kp: String,
     pub ki: String,
     pub source_id: String,
+    pub alt_mdltn: String,
 }
 
 pub struct App {
@@ -44,9 +45,15 @@ impl App {
         let kp = env::var("KP").unwrap_or_else(|_| KI_DEFAULT.to_string());
         let ki = env::var("KI").unwrap_or_else(|_| KP_DEFAULT.to_string());
         let source_id = env::var("SOURCEID").unwrap_or_else(|_| "7".to_string());
+        let alt_mdltn = env::var("ALT_MDLTN").unwrap_or_else(|_| "false".to_string());
 
         Self {
-            env_vars: EnvVars { kp, ki, source_id },
+            env_vars: EnvVars {
+                kp,
+                ki,
+                source_id,
+                alt_mdltn,
+            },
             node_logs: Vec::new(),
             gw_logs: Vec::new(),
             dash_stats: DashStats::new(),

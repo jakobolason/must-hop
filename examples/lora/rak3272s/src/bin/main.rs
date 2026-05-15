@@ -36,7 +36,7 @@ use lora_phy::{
 
 use must_hop::{
     mesh_router, network_manager,
-    node::lora::{LoraNode, TransmitParameters},
+    node::lora::{LoraNode, RadioPackParams, RatioModParams},
     policy::{ra::RandomAccessMac, tdma::TdmaMac},
 };
 use {defmt_rtt as _, panic_probe as _};
@@ -58,6 +58,7 @@ include!(concat!(env!("OUT_DIR"), "/source_id.rs"));
 const DEFAULT_SOURCEID: u8 = 2;
 const DEFAULT_KI: i64 = 25;
 const DEFAULT_KP: i64 = 20;
+const DEFAULT_ALT_MDLTN: bool = false;
 
 bind_interrupts!(struct Irqs{
     SUBGHZ_RADIO => InterruptHandler;
@@ -161,11 +162,13 @@ pub async fn lora_task(
     let sf = SpreadingFactor::_7;
     let bw = Bandwidth::_125KHz;
     let cr = CodingRate::_4_8;
-    let tp: TransmitParameters = TransmitParameters {
+    let mp = RatioModParams {
         sf,
         bw,
         cr,
         lora_hz: LORA_FREQUENCY_IN_HZ,
+    };
+    let tp = RadioPackParams {
         pre_amp: 8,
         imp_hed: false,
         max_pack_len: MAX_PACK_LEN,
@@ -173,9 +176,24 @@ pub async fn lora_task(
         iq: false,
     };
     let source_id: u8 = SOURCEID.unwrap_or(DEFAULT_SOURCEID);
+
+    // For experiment 2: Set bool such that it uses SF 9 for Rx
+    // (GW) <-> (A) <-> (B)
+    //          A is the only one who should use this here
+    let should_have_alt_mdltn_params: bool = ALT_MDLTN.unwrap_or(DEFAULT_ALT_MDLTN);
+    let alt_mdltn = if should_have_alt_mdltn_params {
+        Some(RatioModParams {
+            sf: SpreadingFactor::_9,
+            bw,
+            cr,
+            lora_hz: LORA_FREQUENCY_IN_HZ,
+        })
+    } else {
+        None
+    };
     let timeout = 3;
     let max_retries = 3;
-    let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp) {
+    let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp, mp, alt_mdltn) {
         Ok(node) => node,
         Err(e) => {
             error!("Failed to initialize lora node: {:?}", e);
@@ -186,7 +204,6 @@ pub async fn lora_task(
 
     let ki = KI.unwrap_or(DEFAULT_KI);
     let kp = KP.unwrap_or(DEFAULT_KP);
-    info!("God kp: {} and ki {}", kp, ki);
     let mac = TdmaMac::default()
         .set_controller(23334395, kp, ki)
         .set_debug_pin(debug_pin)
