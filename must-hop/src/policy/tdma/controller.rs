@@ -11,6 +11,7 @@ use embassy_time::Instant;
 pub(crate) struct Controller {
     /// speed of clock drift, used to try and mitigate clock drift at nodes with no HSE
     pub v_s: i64,
+    error_sum: i64,
     ki: i64,
     kp: i64,
     pub prev_err: i64,
@@ -22,6 +23,7 @@ impl Controller {
             v_s,
             ki,
             kp,
+            error_sum: 0,
             prev_err: 0,
             prev_delay: 0,
         }
@@ -38,40 +40,43 @@ impl Controller {
         rx_pkt: RxPacket,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
-    ) -> Option<(u64, Instant)> {
-        let (v_s, time_sync, error, delay) = self.update_skew_and_stamp(
-            hb,
-            rx_pkt.rx_done_instant,
-            time_sync,
-            node_id,
-            rx_pkt.payload_size as u64,
-        );
+    ) -> (u64, Instant) {
+        // Unpack this to see if we have anything to compare to
+        let some_stamps = match time_sync {
+            Some(stamps) => stamps,
+            None => {
+                info!("[SYNC] Initial epoch set");
+                return (hb.gps_time_us, rx_pkt.rx_done_instant);
+            }
+        };
+        // Now calculate the error the controller can use
+        let (time_sync, error, delay) =
+            self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
+        // And add the error so our integral controller works
+        // TODO: Clamping of this?
+        self.error_sum += error;
+
+        // And get the new speed for our controller
+        let v_s = self.apply_pi_controller(error, delay);
         self.v_s = v_s;
         self.prev_delay = delay;
         self.prev_err = error;
         time_sync
     }
-    /// Given a heartbeat packet from a nearer-gw node, this calculates the new timestamp and the
-    /// new skew ratio for the node to be properly synchronized.
-    fn update_skew_and_stamp(
+
+    /// Calculates the error this node has from it's follower, using given parameters to approximate
+    /// the timestamp
+    fn calc_error(
         &self,
         hb: &SlotAllocation,
-        sending_instant: Instant,
-        time_sync: Option<(u64, Instant)>,
+        rx_pkt: RxPacket,
+        old_gps: u64,
+        last_stamp: Instant,
         node_id: u8,
-        _payload_size: u64,
-    ) -> (i64, Option<(u64, Instant)>, i64, i64) {
-        let (old_gps, last_stamp) = match time_sync {
-            Some(stamps) => stamps,
-            None => {
-                info!("[SYNC] Initial epoch set");
-                return (self.v_s, Some((hb.gps_time_us, sending_instant)), 0, 0);
-            }
-        };
-
+    ) -> ((u64, Instant), i64, i64) {
         // Calculate skews
         // let my_stamp = self.current_gps_time((old_gps, last_stamp));
-        let my_diff = (sending_instant - last_stamp).as_micros();
+        let my_diff = (rx_pkt.rx_done_instant - last_stamp).as_micros();
         let predicted_elapsed = (my_diff as i64 + self.calc_drift_duration(my_diff)) as u64;
         let my_stamp = predicted_elapsed + old_gps;
 
@@ -121,38 +126,42 @@ impl Controller {
         let err = phase_err;
 
         // Only re-sync if the error is substantially large
-        let time_sync = if err.abs() > 50_000 {
+        let time_sync = if err.abs() > 100_000 {
             // re-sync means the last error was not enough to put the controller onto the correct speed,
             // so we should 2x the error here?
-            Some(((current_true_time as u64), sending_instant))
+            ((current_true_time as u64), rx_pkt.rx_done_instant)
         } else {
-            Some(((my_stamp), sending_instant))
+            ((my_stamp), rx_pkt.rx_done_instant)
         };
         // let time_sync = Some(((my_stamp), sending_instant));
+
+        // let delta_err = err - self.prev_err;
+        let delay = hb.gps_time_us as i64 - my_stamp as i64;
+        (time_sync, err, delay)
+    }
+
+    /// Given a heartbeat packet from a nearer-gw node, this calculates the new timestamp and the
+    /// new skew ratio for the node to be properly synchronized.
+    fn apply_pi_controller(&self, err: i64, delay: i64) -> i64 {
+        // TODO: Switch the self.* to f32, this is just runtime overhead
         let kp: f32 = self.kp as f32 / 10.0;
         let ki: f32 = self.ki as f32 / 10.0;
 
         info!("kp: {}, ki: {}", kp, ki);
-        let delta_err = err - self.prev_err;
-        let delta_u = ((kp * delta_err as f32) + (ki * err as f32)) as i64;
+
+        let delta_u = ((self.kp * err) / 10 + (self.ki * self.error_sum) / 10) as i64;
 
         let new_speed = self.v_s + delta_u;
 
         // Debug info:
-        if my_stamp != hb.gps_time_us {
-            let measured_delay: i64 = hb.gps_time_us as i64 - my_stamp as i64;
-            info!(
-                "[SYNC]|{}|{}|{}|{}|",
-                measured_delay as f32 / 1000.0,
-                err as f32 / 1000.0,
-                self.v_s,
-                new_speed,
-            );
-        } else {
-            info!("[SYNC]   Perfectly synced?!");
-        }
-
-        (new_speed, time_sync, err, avg_delay)
+        info!(
+            "[SYNC]|{}|{}|{}|{}|",
+            delay as f32 / 1000.0,
+            err as f32 / 1000.0,
+            self.v_s,
+            new_speed,
+        );
+        new_speed
     }
 }
 

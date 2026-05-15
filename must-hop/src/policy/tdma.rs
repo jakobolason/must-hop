@@ -354,14 +354,14 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         {
             self.time_manager.last_hb_instant = Some(Instant::now());
             // Controller updates internal drift, and returns adjusted stamps
-            self.time_manager.time_sync = self.time_manager.controller.run_transferfunction(
+            self.time_manager.time_sync = Some(self.time_manager.controller.run_transferfunction(
                 &alloc,
                 rx_pkt,
                 self.time_manager.time_sync,
                 self.slot_manager
                     .my_tx_slot
                     .unwrap_or(self.slot_manager.node_id),
-            );
+            ));
             // TODO:
             // denote this as a leader node. This should only be set once (with a timeout
             // perhaps) such that 2 equal leader nodes don't make this follower node unstable
