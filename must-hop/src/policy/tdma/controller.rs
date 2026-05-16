@@ -53,16 +53,16 @@ impl Controller {
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
 
         // Conditional integration anti-windup
-        let tentative_v_s = self.apply_pi_controller(error, delay);
+        let tentative_v_s = self.apply_pi_controller(error);
         let delta_vs = tentative_v_s - self.v_s;
         let delta_err = error - self.prev_err;
         let should_sum_error =
-            delta_err == 0 || delta_vs == 0 || delta_vs.signum() == delta_vs.signum();
+            delta_err == 0 || delta_vs == 0 || delta_vs.signum() == delta_err.signum();
 
         let v_s = if should_sum_error {
             info!("ADDING TO SUM");
-            self.error_sum = (self.error_sum + error).clamp(-50_000, 50_000);
-            self.apply_pi_controller(error, delay)
+            self.error_sum = (self.error_sum + error).clamp(-20_000, 20_000);
+            self.apply_pi_controller(error)
         } else {
             info!("NOT ADDING TO SUM");
             tentative_v_s
@@ -167,16 +167,14 @@ impl Controller {
 
     /// Given a heartbeat packet from a nearer-gw node, this calculates the new timestamp and the
     /// new skew ratio for the node to be properly synchronized.
-    fn apply_pi_controller(&self, err: i64, delay: i64) -> i64 {
+    fn apply_pi_controller(&self, err: i64) -> i64 {
         // TODO: Switch the self.* to f32, this is just runtime overhead
         // let kp: f32 = self.kp as f32 / 10.0;
         // let ki: f32 = self.ki as f32 / 10.0;
         // info!("kp: {}, ki: {}", kp, ki);
 
-        let delta_u = (self.kp * err) / 10 + (self.ki * self.error_sum) / 10;
-        let new_speed = self.v_s + delta_u;
-
-        new_speed
+        let delta_u = (self.kp * err) / 10 + (self.ki * self.error_sum) / 100;
+        self.v_s + delta_u
     }
 }
 

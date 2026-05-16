@@ -145,6 +145,7 @@ const MAX_PACK_LEN: usize = 40;
 const MAX_RADIO_BUFFER: usize = 256; // kB
 const LEN: usize = 5; // floor(256/MAX_PACK_LEN)
 
+const GW_ID: u8 = 1;
 // const KP: f32 = 0.4;
 // const KI: f32 = 0.5;
 //
@@ -218,7 +219,8 @@ pub async fn lora_task(
 
         // Before letting router do its thing, we check if we want to send something
         if let Ok(data) = channel.try_receive()
-            && let Err(e) = router.queue_payload(data.into(), 1)
+            // And call the router to send this data for us
+            && let Err(e) = router.queue_payload(data.into(), GW_ID)
         {
             error!("Error queing sensor data: {:?}", e);
         }
