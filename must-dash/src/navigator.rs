@@ -1,16 +1,15 @@
+use crate::app::ProbeConfigFocus;
+
 #[derive(PartialEq)]
 pub enum NavigatorView {
     Landing,
     Dashboard,
 }
 
-#[derive(PartialEq, Clone, Copy)]
-pub enum LandingFocus {
-    Kp,
-    Ki,
-    SourceId,
-    Start,
-    Save,
+#[derive(PartialEq)]
+pub enum LandingSubView {
+    ProbeList,
+    ProbeConfig,
 }
 
 #[derive(PartialEq)]
@@ -21,10 +20,13 @@ pub enum DashFocus {
 
 pub struct Navigator {
     pub view: NavigatorView,
-    pub landing_focus: LandingFocus,
+    pub landing_sub_view: LandingSubView,
+    /// Cursor position in the available-probes list
+    pub probe_list_cursor: usize,
+    /// Which field is active in the ProbeConfig form
+    pub probe_config_focus: ProbeConfigFocus,
     pub dash_focus: DashFocus,
     pub history_scroll: usize,
-
     pub shutting_down: bool,
 }
 
@@ -37,44 +39,43 @@ impl Default for Navigator {
 impl Navigator {
     pub fn new() -> Self {
         Self {
-            landing_focus: LandingFocus::Kp,
-            dash_focus: DashFocus::Logs,
             view: NavigatorView::Landing,
+            landing_sub_view: LandingSubView::ProbeList,
+            probe_list_cursor: 0,
+            probe_config_focus: ProbeConfigFocus::Kp,
+            dash_focus: DashFocus::Logs,
             history_scroll: 0,
-
             shutting_down: false,
         }
     }
 
-    pub fn next_landing_focus(&mut self, can_save: bool) {
-        self.landing_focus = match self.landing_focus {
-            LandingFocus::Kp => LandingFocus::Ki,
-            LandingFocus::Ki => LandingFocus::SourceId,
-            LandingFocus::SourceId => LandingFocus::Start,
-            LandingFocus::Start => {
-                if can_save {
-                    LandingFocus::Save
-                } else {
-                    LandingFocus::Kp
-                }
-            }
-            LandingFocus::Save => LandingFocus::Kp,
+    pub fn probe_list_up(&mut self, probe_count: usize) {
+        if probe_count > 0 {
+            self.probe_list_cursor = self.probe_list_cursor.saturating_sub(1);
         }
     }
 
-    pub fn prev_landing_focus(&mut self, can_save: bool) {
-        self.landing_focus = match self.landing_focus {
-            LandingFocus::Kp => {
-                if can_save {
-                    LandingFocus::Save
-                } else {
-                    LandingFocus::Start
-                }
-            }
-            LandingFocus::Ki => LandingFocus::Kp,
-            LandingFocus::SourceId => LandingFocus::Ki,
-            LandingFocus::Start => LandingFocus::SourceId,
-            LandingFocus::Save => LandingFocus::Start,
+    pub fn probe_list_down(&mut self, probe_count: usize) {
+        if probe_count > 0 {
+            self.probe_list_cursor = (self.probe_list_cursor + 1).min(probe_count - 1);
+        }
+    }
+
+    pub fn next_config_focus(&mut self) {
+        self.probe_config_focus = match self.probe_config_focus {
+            ProbeConfigFocus::Kp => ProbeConfigFocus::Ki,
+            ProbeConfigFocus::Ki => ProbeConfigFocus::SourceId,
+            ProbeConfigFocus::SourceId => ProbeConfigFocus::Confirm,
+            ProbeConfigFocus::Confirm => ProbeConfigFocus::Kp,
+        };
+    }
+
+    pub fn prev_config_focus(&mut self) {
+        self.probe_config_focus = match self.probe_config_focus {
+            ProbeConfigFocus::Kp => ProbeConfigFocus::Confirm,
+            ProbeConfigFocus::Ki => ProbeConfigFocus::Kp,
+            ProbeConfigFocus::SourceId => ProbeConfigFocus::Ki,
+            ProbeConfigFocus::Confirm => ProbeConfigFocus::SourceId,
         };
     }
 

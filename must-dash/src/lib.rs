@@ -7,9 +7,9 @@ pub mod ui;
 
 use crate::mpsc::Sender;
 use crate::navigator::Navigator;
-use app::{App, AppEvent};
+use app::{App, AppEvent, ProcessDescriptor};
 use crossterm::event::{self, Event as CEvent, KeyCode};
-use navigator::{DashFocus, LandingFocus, NavigatorView};
+use navigator::{DashFocus, LandingSubView, NavigatorView};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -122,51 +122,26 @@ fn spawn_pty_reader(
     child
 }
 
-fn spawn_children(
-    app: &App,
-    tx: Sender<AppEvent>,
-) -> (
-    Option<ChildProcess>,
-    Option<ChildProcess>,
-    Option<ChildProcess>,
-) {
-    let cast_f32_to_str = |s: &String, mult: f32| {
-        let f = s.parse::<f32>().unwrap_or(0_f32);
-        let casted = (f * mult) as u64;
-        format!("{casted}")
-    };
-    let node_child = spawn_pty_reader(
-        "just",
-        &["remote-run", "7"],
-        &[
-            ("CARGO_TERM_COLOR", "always"),
-            ("CLICOLOR_FORCE", "1"),
-            ("DEFMT_LOG_STYLE", "always"),
-            ("KP", cast_f32_to_str(&app.env_vars.kp, 10.0).as_str()),
-            ("KI", cast_f32_to_str(&app.env_vars.ki, 100.0).as_str()),
-            ("SOURCEID", &app.env_vars.source_id),
-        ],
-        tx.clone(),
-        |text, overwrite| AppEvent::NodeLog { text, overwrite },
-    );
-
-    let gw_child = spawn_pty_reader(
-        "just",
-        &["run-gw"],
-        &[
-            ("CARGO_TERM_COLOR", "always"),
-            ("CLICOLOR_FORCE", "1"),
-            ("DEFMT_LOG_STYLE", "always"),
-        ],
-        tx.clone(),
-        |text, overwrite| AppEvent::GwLog { text, overwrite },
-    );
-
-    let delay_child = spawn_pty_reader("just", &["run-delay"], &[], tx.clone(), |delay_ms, _| {
-        AppEvent::HardwareLog { delay_ms }
-    });
-
-    (Some(node_child), Some(gw_child), Some(delay_child))
+fn spawn_log_processes(descriptors: &[ProcessDescriptor], tx: Sender<AppEvent>) -> Vec<ChildProcess> {
+    descriptors
+        .iter()
+        .map(|d| {
+            let args: Vec<&str> = d.args.iter().map(String::as_str).collect();
+            let envs: Vec<(&str, &str)> = d.envs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            let source_id = d.source_id.clone();
+            spawn_pty_reader(
+                &d.command,
+                &args,
+                &envs,
+                tx.clone(),
+                move |text, overwrite| AppEvent::ProcessLog {
+                    source: source_id.clone(),
+                    text,
+                    overwrite,
+                },
+            )
+        })
+        .collect()
 }
 
 pub async fn run_app(
@@ -193,9 +168,7 @@ pub async fn run_app(
     let mut app = App::new();
     let mut navigator = Navigator::new();
 
-    // Hold our process handles in Options, they start as None
-    let mut node_child: Option<ChildProcess> = None;
-    let mut gw_child: Option<ChildProcess> = None;
+    let mut log_children: Vec<ChildProcess> = Vec::new();
     let mut delay_child: Option<ChildProcess> = None;
 
     let quit_fn = |app: &mut App, ngtr: &mut Navigator, terminal: &mut Terminal<_>| {
@@ -210,50 +183,84 @@ pub async fn run_app(
         if let Some(event) = rx.recv().await {
             match event {
                 AppEvent::Input(key_code) => match navigator.view {
-                    NavigatorView::Landing => match key_code {
-                        KeyCode::Esc => {
-                            // Shut them down if they exist
-                            shutdown_processes(vec![
-                                node_child.take(),
-                                gw_child.take(),
-                                delay_child.take(),
-                            ])
-                            .await;
-                            quit_fn(&mut app, &mut navigator, terminal);
-                            match navigator.view {
-                                NavigatorView::Landing => break,
-                                NavigatorView::Dashboard => navigator.view = NavigatorView::Landing,
+                    NavigatorView::Landing => match navigator.landing_sub_view {
+                        LandingSubView::ProbeList => match key_code {
+                            KeyCode::Esc => {
+                                shutdown_processes(
+                                    log_children.drain(..).map(Some).chain([delay_child.take()]).collect(),
+                                )
+                                .await;
+                                quit_fn(&mut app, &mut navigator, terminal);
+                                break;
                             }
-                        }
-                        KeyCode::Up | KeyCode::BackTab => {
-                            navigator.prev_landing_focus(!app.node_logs.is_empty())
-                        }
-                        KeyCode::Down | KeyCode::Tab => {
-                            navigator.next_landing_focus(!app.node_logs.is_empty())
-                        }
-                        KeyCode::Char('s') | KeyCode::Char('S') => {
-                            if !app.node_logs.is_empty() {
-                                app.save_data();
-                                app.reset_data();
+                            KeyCode::Up => {
+                                let n = app.available_probes.len();
+                                navigator.probe_list_up(n);
                             }
-                        }
-                        KeyCode::Enter => {
-                            if navigator.landing_focus == LandingFocus::Save {
-                                app.save_data();
-                            } else {
-                                // Resets logs and data for new run
-                                app.reset_data();
-                                // set the user-specified things to env
-                                app.save_to_env_file();
-                                // app.save_data();
-                                navigator.view = NavigatorView::Dashboard;
-                                (node_child, gw_child, delay_child) =
-                                    spawn_children(&app, tx.clone());
+                            KeyCode::Down => {
+                                let n = app.available_probes.len();
+                                navigator.probe_list_down(n);
                             }
-                        }
-                        KeyCode::Backspace => app.backspace(navigator.landing_focus),
-                        KeyCode::Char(c) => app.type_char(c, navigator.landing_focus),
-                        _ => {}
+                            KeyCode::Enter => {
+                                let cursor = navigator.probe_list_cursor;
+                                if cursor < app.available_probes.len() {
+                                    app.start_configuring_probe(cursor);
+                                    navigator.probe_config_focus =
+                                        app::ProbeConfigFocus::Kp;
+                                    navigator.landing_sub_view = LandingSubView::ProbeConfig;
+                                }
+                            }
+                            KeyCode::Char('d') | KeyCode::Char('D') => {
+                                app.pop_configured_node();
+                            }
+                            KeyCode::Char('r') | KeyCode::Char('R') => {
+                                app.fetch_probes();
+                                navigator.probe_list_cursor = 0;
+                            }
+                            KeyCode::Char('s') | KeyCode::Char('S') => {
+                                if !app.configured_nodes.is_empty() {
+                                    app.reset_data();
+                                    app.save_to_env_file();
+                                    navigator.view = NavigatorView::Dashboard;
+                                    let descriptors = app.build_descriptors();
+                                    app.init_sources(&descriptors);
+                                    log_children = spawn_log_processes(&descriptors, tx.clone());
+                                    delay_child = Some(spawn_pty_reader(
+                                        "just", &["run-delay"], &[], tx.clone(),
+                                        |delay_ms, _| AppEvent::HardwareLog { delay_ms },
+                                    ));
+                                }
+                            }
+                            KeyCode::Char('w') | KeyCode::Char('W') => {
+                                if app.has_data() {
+                                    app.save_data();
+                                }
+                            }
+                            _ => {}
+                        },
+                        LandingSubView::ProbeConfig => match key_code {
+                            KeyCode::Esc => {
+                                app.pending_node = None;
+                                navigator.landing_sub_view = LandingSubView::ProbeList;
+                            }
+                            KeyCode::Tab | KeyCode::Down => navigator.next_config_focus(),
+                            KeyCode::BackTab | KeyCode::Up => navigator.prev_config_focus(),
+                            KeyCode::Enter => {
+                                if navigator.probe_config_focus == app::ProbeConfigFocus::Confirm {
+                                    app.confirm_pending_node();
+                                    navigator.landing_sub_view = LandingSubView::ProbeList;
+                                } else {
+                                    navigator.next_config_focus();
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                app.backspace_pending(navigator.probe_config_focus);
+                            }
+                            KeyCode::Char(c) => {
+                                app.type_char_pending(c, navigator.probe_config_focus);
+                            }
+                            _ => {}
+                        },
                     },
                     NavigatorView::Dashboard => match key_code {
                         KeyCode::Char('q') => {
@@ -261,11 +268,9 @@ pub async fn run_app(
                             break;
                         }
                         KeyCode::Esc => {
-                            shutdown_processes(vec![
-                                node_child.take(),
-                                gw_child.take(),
-                                delay_child.take(),
-                            ])
+                            shutdown_processes(
+                                log_children.drain(..).map(Some).chain([delay_child.take()]).collect(),
+                            )
                             .await;
                             navigator.view = NavigatorView::Landing;
                         }
@@ -278,19 +283,18 @@ pub async fn run_app(
                         }
                         KeyCode::Char('p') => {
                             // Stops the processes, but doesn't go back to landing. They can still
-                            // press est to go back
-                            shutdown_processes(vec![
-                                node_child.take(),
-                                gw_child.take(),
-                                delay_child.take(),
-                            ])
+                            // press esc to go back
+                            shutdown_processes(
+                                log_children.drain(..).map(Some).chain([delay_child.take()]).collect(),
+                            )
                             .await;
                         }
                         _ => {}
                     },
                 },
-                AppEvent::NodeLog { text, overwrite } => app.add_node_log(text, overwrite),
-                AppEvent::GwLog { text, overwrite } => app.add_gw_log(text, overwrite),
+                AppEvent::ProcessLog { source, text, overwrite } => {
+                    app.add_log(&source, text, overwrite)
+                }
                 AppEvent::HardwareLog { delay_ms } => app.add_hw_delay(delay_ms),
                 AppEvent::Tick => {}
             }
@@ -298,7 +302,7 @@ pub async fn run_app(
     }
 
     // Graceful Shutdown (Only attempt to kill if they were spawned)
-    shutdown_processes(vec![node_child, gw_child, delay_child]).await;
+    shutdown_processes(log_children.into_iter().map(Some).chain([delay_child]).collect()).await;
 
     Ok(())
 }

@@ -8,60 +8,45 @@ use ratatui::{
 };
 
 pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) {
-    let log_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(45),
-            Constraint::Percentage(5),
-        ])
-        .split(area);
-
     let log_title_style = if *dash_focus == DashFocus::Logs {
         Style::default().fg(Color::White)
     } else {
         Style::default().fg(Color::DarkGray)
     };
 
-    // --- Node Logs (Left) ---
-    let node_raw = app.node_logs.to_vec().join("\n");
-    let node_text = node_raw
-        .into_text()
-        .unwrap_or_else(|_| ratatui::text::Text::raw(&node_raw));
+    let n = app.sources.len();
+    let delay_pct = 5u16;
+    let source_pct = (100u16 - delay_pct) / n as u16;
+    let leftover = (100u16 - delay_pct) % n as u16;
 
-    let node_panel = Paragraph::new(node_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Node (remote-run) ")
-            .style(log_title_style),
-    );
+    let mut constraints: Vec<Constraint> = (0..n)
+        .map(|i| Constraint::Percentage(source_pct + if i == 0 { leftover } else { 0 }))
+        .collect();
+    constraints.push(Constraint::Percentage(delay_pct));
 
-    let node_scroll = app
-        .node_logs
-        .len()
-        .saturating_sub(log_chunks[0].height as usize - 2);
-    f.render_widget(node_panel.scroll((node_scroll as u16, 0)), log_chunks[0]);
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
 
-    // --- GW Logs (Right) ---
-    let gw_raw = app.gw_logs.to_vec().join("\n");
-    let gw_text = gw_raw
-        .into_text()
-        .unwrap_or_else(|_| ratatui::text::Text::raw(&gw_raw));
+    for (i, source) in app.sources.iter().enumerate() {
+        let raw = source.logs.join("\n");
+        let text = raw
+            .into_text()
+            .unwrap_or_else(|_| ratatui::text::Text::raw(&raw));
 
-    let gw_panel = Paragraph::new(gw_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Gateway (run-gw) ")
-            .style(log_title_style),
-    );
+        let panel = Paragraph::new(text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" {} ", source.id))
+                .style(log_title_style),
+        );
 
-    let gw_scroll = app
-        .gw_logs
-        .len()
-        .saturating_sub(log_chunks[1].height as usize - 2);
-    f.render_widget(gw_panel.scroll((gw_scroll as u16, 0)), log_chunks[1]);
+        let scroll = source.logs.len().saturating_sub(chunks[i].height as usize - 2);
+        f.render_widget(panel.scroll((scroll as u16, 0)), chunks[i]);
+    }
 
-    // --- Delay Logs
+    // Delay panel is always last, driven by DashStats rather than a log buffer
     let delay_raw = app
         .dash_stats
         .hardware_delay
@@ -75,13 +60,13 @@ pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFoc
     let delay_panel = Paragraph::new(delay_text).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Measured delay between GW and Node")
+            .title(" hw delay ")
             .style(log_title_style),
     );
     let delay_scroll = app
         .dash_stats
         .hardware_delay
         .len()
-        .saturating_sub(log_chunks[2].height as usize - 2);
-    f.render_widget(delay_panel.scroll((delay_scroll as u16, 0)), log_chunks[2]);
+        .saturating_sub(chunks[n].height as usize - 2);
+    f.render_widget(delay_panel.scroll((delay_scroll as u16, 0)), chunks[n]);
 }

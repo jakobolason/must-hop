@@ -1,5 +1,5 @@
 set shell := ["bash", "-c"]
-set dotenv-load := true
+set dotenv-load
 
 PI_HOST := env_var_or_default("HOST_URL", "localhost")
 PI_USER := env_var_or_default("PI_USER", "pi")
@@ -95,12 +95,18 @@ remote-attach:
         --token="$PROBE_TOKEN" \
         target/thumbv7em-none-eabi/release/main
 
+[group('probe-rs')]
+probe-list:
+    probe-rs list \
+      --host ws://"$HOST_URL":3000 \
+      --token="$PROBE_TOKEN"
+
 # Run python script on Pi
 [group('Pi deployments')]
 run-delay:
-  @echo "Running capture_deltas.py on pi"
-  scp ./analysis/scripts/capture_deltas.py {{ PI_HOST }}:{{ PI_TARGET_DIR }}/
-  ssh -tt {{ PI_USER }}@{{ PI_HOST }} "python {{ PI_TARGET_DIR }}/capture_deltas.py"
+    @echo "Running capture_deltas.py on pi"
+    scp ./analysis/scripts/capture_deltas.py {{ PI_HOST }}:{{ PI_TARGET_DIR }}/
+    ssh -tt {{ PI_USER }}@{{ PI_HOST }} "python {{ PI_TARGET_DIR }}/capture_deltas.py"
 
 # Build the SX1302 Gateway example (Host)
 [group('examples')]
