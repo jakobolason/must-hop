@@ -62,7 +62,7 @@ pub fn draw_landing(f: &mut Frame, app: &App, landing_focus: LandingFocus) {
                 .borders(Borders::ALL)
                 .title_position(ratatui::widgets::TitlePosition::Top)
                 .title(Line::from(" Ki  ").left_aligned())
-                .title(Line::from("[Note: Only 1 decimal used]").right_aligned()),
+                .title(Line::from("[Note: Only 2 decimal used]").right_aligned()),
         )
         .style(chosen_style(LandingFocus::Ki));
     f.render_widget(ki_p, chunks[1]);

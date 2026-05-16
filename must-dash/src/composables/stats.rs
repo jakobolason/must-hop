@@ -102,14 +102,15 @@ impl DashStats {
     /// Returns the most recent `max_lines` packets formatted for the history table.
     ///
     /// Columns: Packet | Error | Speed | Δ Up | Δ Down | HW Delay | GW µs | GW B | Node µs | Node B
-    pub fn get_history_lines(&self, max_lines: usize) -> Vec<Vec<String>> {
+    pub fn get_history_lines(&self, max_lines: usize, scroll: usize) -> Vec<Vec<String>> {
         let len = self.packets.len();
-        let start = len.saturating_sub(max_lines);
+        let end = len.saturating_sub(scroll);
+        let start = end.saturating_sub(max_lines);
 
         let fmt_ms = |v: f32| format!("{:.3}ms", v);
         let fmt_opt_ms = |v: Option<f32>| v.map_or("--".to_string(), fmt_ms);
 
-        self.packets[start..]
+        self.packets[start..end]
             .iter()
             .enumerate()
             .map(|(offset, p)| {

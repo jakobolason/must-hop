@@ -1,16 +1,16 @@
 use crate::app::App;
 use crate::navigator::DashFocus;
-use ratatui::widgets::{Row, Table};
+use ratatui::widgets::{Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders},
 };
 
 use crate::components::{graph::draw_dash_charts, logs::draw_dash_logs};
 
-pub fn draw_dash(f: &mut Frame, app: &App, dash_focus: &DashFocus) {
+pub fn draw_dash(f: &mut Frame, app: &App, dash_focus: &DashFocus, history_scroll: usize) {
     let (data_constraint, log_constraint) = match dash_focus {
         DashFocus::Data => (Constraint::Percentage(50), Constraint::Percentage(50)),
         DashFocus::Logs => (Constraint::Length(3), Constraint::Min(0)),
@@ -22,7 +22,7 @@ pub fn draw_dash(f: &mut Frame, app: &App, dash_focus: &DashFocus) {
         .split(f.area());
 
     draw_dash_header(f, app, main_chunks[0]);
-    draw_dash_data(f, app, main_chunks[1], dash_focus);
+    draw_dash_data(f, app, main_chunks[1], dash_focus, history_scroll);
     draw_dash_logs(f, app, main_chunks[2], dash_focus);
 }
 
@@ -57,7 +57,7 @@ fn draw_dash_header(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(header, area);
 }
 
-fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) {
+fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus, history_scroll: usize) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -76,7 +76,9 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) 
         });
 
     let entries_that_can_be_seen = left_area.height.saturating_sub(3) as usize;
-    let history_lines = app.dash_stats.get_history_lines(entries_that_can_be_seen);
+    let total_packets = app.dash_stats.packets.len();
+    let clamped_scroll = history_scroll.min(total_packets.saturating_sub(entries_that_can_be_seen));
+    let history_lines = app.dash_stats.get_history_lines(entries_that_can_be_seen, clamped_scroll);
 
     let history_items = history_lines.into_iter().map(Row::new);
 
@@ -111,6 +113,22 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) 
         .column_spacing(1);
 
     f.render_widget(history_table, left_area);
+
+    if total_packets > entries_that_can_be_seen {
+        let scroll_pos = total_packets
+            .saturating_sub(entries_that_can_be_seen)
+            .saturating_sub(clamped_scroll);
+        let mut scrollbar_state = ScrollbarState::new(total_packets)
+            .viewport_content_length(entries_that_can_be_seen)
+            .position(scroll_pos);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("↑"))
+                .end_symbol(Some("↓")),
+            left_area.inner(Margin { vertical: 1, horizontal: 0 }),
+            &mut scrollbar_state,
+        );
+    }
 
     if right_area.height > 6 && right_area.width > 2 {
         draw_dash_charts(f, app, right_area);

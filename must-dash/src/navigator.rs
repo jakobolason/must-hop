@@ -23,6 +23,7 @@ pub struct Navigator {
     pub view: NavigatorView,
     pub landing_focus: LandingFocus,
     pub dash_focus: DashFocus,
+    pub history_scroll: usize,
 
     pub shutting_down: bool,
 }
@@ -39,6 +40,7 @@ impl Navigator {
             landing_focus: LandingFocus::Kp,
             dash_focus: DashFocus::Logs,
             view: NavigatorView::Landing,
+            history_scroll: 0,
 
             shutting_down: false,
         }
@@ -81,5 +83,13 @@ impl Navigator {
             DashFocus::Data => DashFocus::Logs,
             DashFocus::Logs => DashFocus::Data,
         };
+    }
+
+    pub fn scroll_history_up(&mut self) {
+        self.history_scroll = self.history_scroll.saturating_add(1);
+    }
+
+    pub fn scroll_history_down(&mut self) {
+        self.history_scroll = self.history_scroll.saturating_sub(1);
     }
 }

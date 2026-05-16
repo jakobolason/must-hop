@@ -9,7 +9,7 @@ use crate::mpsc::Sender;
 use crate::navigator::Navigator;
 use app::{App, AppEvent};
 use crossterm::event::{self, Event as CEvent, KeyCode};
-use navigator::{LandingFocus, NavigatorView};
+use navigator::{DashFocus, LandingFocus, NavigatorView};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -130,9 +130,9 @@ fn spawn_children(
     Option<ChildProcess>,
     Option<ChildProcess>,
 ) {
-    let cast_f32_to_str = |s: &String| {
+    let cast_f32_to_str = |s: &String, mult: f32| {
         let f = s.parse::<f32>().unwrap_or(0_f32);
-        let casted = (f * 10.0) as u64;
+        let casted = (f * mult) as u64;
         format!("{casted}")
     };
     let node_child = spawn_pty_reader(
@@ -142,8 +142,8 @@ fn spawn_children(
             ("CARGO_TERM_COLOR", "always"),
             ("CLICOLOR_FORCE", "1"),
             ("DEFMT_LOG_STYLE", "always"),
-            ("KP", cast_f32_to_str(&app.env_vars.kp).as_str()),
-            ("KI", cast_f32_to_str(&app.env_vars.ki).as_str()),
+            ("KP", cast_f32_to_str(&app.env_vars.kp, 10.0).as_str()),
+            ("KI", cast_f32_to_str(&app.env_vars.ki, 100.0).as_str()),
             ("SOURCEID", &app.env_vars.source_id),
         ],
         tx.clone(),
@@ -270,6 +270,12 @@ pub async fn run_app(
                             navigator.view = NavigatorView::Landing;
                         }
                         KeyCode::Tab => navigator.toggle_dash_focus(),
+                        KeyCode::Up if navigator.dash_focus == DashFocus::Data => {
+                            navigator.scroll_history_up()
+                        }
+                        KeyCode::Down if navigator.dash_focus == DashFocus::Data => {
+                            navigator.scroll_history_down()
+                        }
                         KeyCode::Char('p') => {
                             // Stops the processes, but doesn't go back to landing. They can still
                             // press est to go back
