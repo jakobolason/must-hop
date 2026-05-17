@@ -53,20 +53,21 @@ impl Controller {
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
 
         // Conditional integration anti-windup
-        let tentative_v_s = self.apply_pi_controller(error);
-        let delta_vs = tentative_v_s - self.v_s;
-        let delta_err = error - self.prev_err;
-        let should_sum_error =
-            delta_err == 0 || delta_vs == 0 || delta_vs.signum() == delta_err.signum();
-
-        let v_s = if should_sum_error {
-            info!("ADDING TO SUM");
-            self.error_sum = (self.error_sum + error).clamp(-20_000, 20_000);
-            self.apply_pi_controller(error)
-        } else {
-            info!("NOT ADDING TO SUM");
-            tentative_v_s
-        };
+        // let tentative_v_s = self.apply_pi_controller(error);
+        // let delta_vs = tentative_v_s - self.v_s;
+        // let delta_err = error - self.prev_err;
+        // let should_sum_error =
+        //     delta_err == 0 || delta_vs == 0 || delta_vs.signum() == delta_err.signum();
+        //
+        // let v_s = if should_sum_error {
+        //     info!("ADDING TO SUM");
+        //     self.error_sum = (self.error_sum + error).clamp(-10_000, 10_000);
+        //     self.apply_pi_controller(error)
+        // } else {
+        //     info!("NOT ADDING TO SUM");
+        //     tentative_v_s
+        // };
+        let v_s = self.apply_pi_controller(error);
 
         info!(" ERROR SUM {}", self.error_sum);
 
@@ -102,7 +103,8 @@ impl Controller {
         let my_stamp = predicted_elapsed + old_gps;
 
         // Check if a t3 delta is availale for us
-        let nw_delay = if let Some((_, delta_up)) = hb.t3_deltas.iter().find(|t| t.0 == node_id) {
+        let nw_delay = if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id)
+        {
             // delta is our T3 - T2
             let delta_down = hb.gps_time_us as i64 - my_stamp as i64;
             let up_ms = *delta_up as f32 / 1000.0;
@@ -173,8 +175,9 @@ impl Controller {
         // let ki: f32 = self.ki as f32 / 10.0;
         // info!("kp: {}, ki: {}", kp, ki);
 
-        let delta_u = (self.kp * err) / 10 + (self.ki * self.error_sum) / 100;
+        let delta_u = (self.kp * (err - self.prev_err)) / 10 + (self.ki * err) / 100;
         self.v_s + delta_u
+        // (self.kp * err) / 10 + (self.ki * self.error_sum) / 100
     }
 }
 
