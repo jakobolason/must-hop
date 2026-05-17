@@ -12,7 +12,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ALT_MDLTN");
 
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let path = &out.join("source_id.rs");
+    let path = &out.join("env_vars.rs");
     let mut file = BufWriter::new(File::create(path).unwrap());
 
     let source_id_code = match env::var("SOURCEID") {
