@@ -9,7 +9,7 @@ use crate::mpsc::Sender;
 use crate::navigator::Navigator;
 use app::{App, AppEvent, ProcessDescriptor};
 use crossterm::event::{self, Event as CEvent, KeyCode};
-use navigator::{DashFocus, LandingSubView, NavigatorView};
+use navigator::{DashFocus, LandingSection, LandingSubView, NavigatorView};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
@@ -205,23 +205,48 @@ pub async fn run_app(
                                 break;
                             }
                             KeyCode::Up => {
-                                let n = app.available_probes.len();
-                                navigator.probe_list_up(n);
+                                navigator.landing_up(app.available_probes.len());
                             }
                             KeyCode::Down => {
-                                let n = app.available_probes.len();
-                                navigator.probe_list_down(n);
+                                navigator.landing_down(
+                                    app.available_probes.len(),
+                                    app.configured_nodes.len(),
+                                );
                             }
                             KeyCode::Enter => {
-                                let cursor = navigator.probe_list_cursor;
-                                if cursor < app.available_probes.len() {
-                                    app.start_configuring_probe(cursor);
-                                    navigator.probe_config_focus = app::ProbeConfigFocus::Kp;
-                                    navigator.landing_sub_view = LandingSubView::ProbeConfig;
+                                match navigator.landing_section {
+                                    LandingSection::Probes => {
+                                        let cursor = navigator.probe_list_cursor;
+                                        if cursor < app.available_probes.len() {
+                                            app.start_configuring_probe(cursor);
+                                            navigator.probe_config_focus =
+                                                app::ProbeConfigFocus::Kp;
+                                            navigator.landing_sub_view =
+                                                LandingSubView::ProbeConfig;
+                                        }
+                                    }
+                                    LandingSection::Nodes => {
+                                        let cursor = navigator.node_list_cursor;
+                                        if cursor < app.configured_nodes.len() {
+                                            app.start_editing_node(cursor);
+                                            navigator.probe_config_focus =
+                                                app::ProbeConfigFocus::Kp;
+                                            navigator.landing_sub_view =
+                                                LandingSubView::ProbeConfig;
+                                        }
+                                    }
                                 }
                             }
                             KeyCode::Char('d') | KeyCode::Char('D') => {
-                                app.pop_configured_node();
+                                use navigator::LandingSection;
+                                let idx = match navigator.landing_section {
+                                    LandingSection::Nodes => navigator.node_list_cursor,
+                                    LandingSection::Probes => {
+                                        app.configured_nodes.len().saturating_sub(1)
+                                    }
+                                };
+                                app.remove_configured_node(idx);
+                                navigator.clamp_node_cursor(app.configured_nodes.len());
                             }
                             KeyCode::Char('r') | KeyCode::Char('R') => {
                                 app.fetch_probes();
@@ -255,6 +280,7 @@ pub async fn run_app(
                         LandingSubView::ProbeConfig => match key_code {
                             KeyCode::Esc => {
                                 app.pending_node = None;
+                                app.editing_node_index = None;
                                 navigator.landing_sub_view = LandingSubView::ProbeList;
                             }
                             KeyCode::Tab | KeyCode::Down => navigator.next_config_focus(),

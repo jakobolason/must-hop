@@ -90,6 +90,8 @@ pub struct App {
     pub probe_fetch_error: Option<String>,
     pub configured_nodes: Vec<NodeConfig>,
     pub pending_node: Option<NodeConfig>,
+    /// Some(i) while editing configured_nodes[i]; None when adding a new node.
+    pub editing_node_index: Option<usize>,
     pub sources: Vec<LogSource>,
     pub dash_stats: DashStats,
 }
@@ -112,6 +114,7 @@ impl App {
             probe_fetch_error: None,
             configured_nodes: Vec::new(),
             pending_node: None,
+            editing_node_index: None,
             sources: Vec::new(),
             dash_stats: DashStats::new(),
         };
@@ -126,8 +129,14 @@ impl App {
         {
             Ok(output) => {
                 let text = String::from_utf8_lossy(&output.stdout);
-                self.available_probes = parse_probe_list(&text);
-                self.probe_fetch_error = if self.available_probes.is_empty() {
+                let mut probes = parse_probe_list(&text);
+                let used: std::collections::HashSet<usize> =
+                    self.configured_nodes.iter().map(|n| n.probe_index).collect();
+                probes.retain(|p| !used.contains(&p.index));
+                self.available_probes = probes;
+                self.probe_fetch_error = if self.available_probes.is_empty()
+                    && self.configured_nodes.is_empty()
+                {
                     Some("No probes found. Connect a probe and press R to refresh.".to_string())
                 } else {
                     None
@@ -142,6 +151,7 @@ impl App {
 
     pub fn start_configuring_probe(&mut self, list_index: usize) {
         if let Some(probe) = self.available_probes.get(list_index) {
+            self.editing_node_index = None;
             self.pending_node = Some(NodeConfig {
                 probe_index: probe.index,
                 probe_name: probe.name.clone(),
@@ -152,16 +162,44 @@ impl App {
         }
     }
 
+    pub fn start_editing_node(&mut self, node_index: usize) {
+        if let Some(node) = self.configured_nodes.get(node_index) {
+            self.editing_node_index = Some(node_index);
+            self.pending_node = Some(NodeConfig {
+                probe_index: node.probe_index,
+                probe_name: node.probe_name.clone(),
+                kp: node.kp.clone(),
+                ki: node.ki.clone(),
+                source_id: node.source_id.clone(),
+            });
+        }
+    }
+
     pub fn confirm_pending_node(&mut self) {
         if let Some(node) = self.pending_node.take() {
             self.defaults.kp = node.kp.clone();
             self.defaults.ki = node.ki.clone();
-            self.configured_nodes.push(node);
+            if let Some(i) = self.editing_node_index.take() {
+                if i < self.configured_nodes.len() {
+                    self.configured_nodes[i] = node;
+                }
+            } else {
+                let probe_idx = node.probe_index;
+                self.configured_nodes.push(node);
+                self.available_probes.retain(|p| p.index != probe_idx);
+            }
         }
     }
 
-    pub fn pop_configured_node(&mut self) {
-        self.configured_nodes.pop();
+    pub fn remove_configured_node(&mut self, node_index: usize) {
+        if node_index < self.configured_nodes.len() {
+            let node = self.configured_nodes.remove(node_index);
+            self.available_probes.push(ProbeInfo {
+                index: node.probe_index,
+                name: node.probe_name,
+            });
+            self.available_probes.sort_by_key(|p| p.index);
+        }
     }
 
     pub fn type_char_pending(&mut self, c: char, focus: ProbeConfigFocus) {
@@ -301,32 +339,10 @@ impl App {
             return;
         }
 
-        if let Ok(mut f) = File::create(&main_filename) {
-            let _ = writeln!(
-                f,
-                "delay_ms,err_ms,prev_speed,new_speed,\
-                 delta_up_ms,delta_down_ms,mean_hw_delay_ms,\
-                 gw_time_us,gw_bytes,node_time_us,node_bytes"
-            );
-            let opt_str = |v: Option<f32>| v.map_or(String::new(), |x| x.to_string());
-            for (i, p) in self.dash_stats.packets.iter().enumerate() {
-                let gw = self.dash_stats.gw_diff.get(i);
-                let nd = self.dash_stats.node_diff.get(i);
-                let _ = writeln!(
-                    f,
-                    "{},{},{},{},{},{},{},{},{},{},{}",
-                    p.delay_ms,
-                    p.err_ms,
-                    p.prev_speed,
-                    p.new_speed,
-                    opt_str(p.delta_up_ms),
-                    opt_str(p.delta_down_ms),
-                    p.mean_hw_delay_ms,
-                    gw.map_or(String::new(), |d| d.time_us.to_string()),
-                    gw.map_or(String::new(), |d| d.bytes.to_string()),
-                    nd.map_or(String::new(), |d| d.time_us.to_string()),
-                    nd.map_or(String::new(), |d| d.bytes.to_string()),
-                );
+        if let Ok(f) = File::create(&main_filename) {
+            let mut wtr = csv::Writer::from_writer(f);
+            for row in self.dash_stats.csv_rows() {
+                let _ = wtr.serialize(row);
             }
         }
 
@@ -388,6 +404,8 @@ impl App {
                     {
                         self.dash_stats.on_deltas(up, down);
                     }
+                } else if tag.contains("[STATE_SYNC]") && parts.len() >= 2 {
+                    self.dash_stats.on_state_sync(parts[1].trim());
                 } else if tag.contains("[SIZE EXPECTED]") && parts.len() >= 2 {
                     if let Ok(size) = extract::<usize>(parts[1]) {
                         log::info!("Got pre size {size}");

@@ -1,5 +1,5 @@
 use crate::app::{App, ProbeConfigFocus};
-use crate::navigator::{LandingSubView, Navigator};
+use crate::navigator::{LandingSection, LandingSubView, Navigator};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Margin},
@@ -54,12 +54,19 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
             .collect()
     };
 
+    let probes_focused = navigator.landing_section == LandingSection::Probes;
+    let nodes_focused = navigator.landing_section == LandingSection::Nodes;
+
     let probe_list = List::new(probe_items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Available Probes ")
-                .style(Style::default().fg(Color::White)),
+                .style(if probes_focused {
+                    Style::default().fg(Color::White)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                }),
         )
         .highlight_style(
             Style::default()
@@ -69,7 +76,7 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
         .highlight_symbol("► ");
 
     let mut probe_state = ListState::default();
-    if !app.available_probes.is_empty() {
+    if !app.available_probes.is_empty() && probes_focused {
         probe_state.select(Some(navigator.probe_list_cursor));
     }
     f.render_stateful_widget(probe_list, chunks[0], &mut probe_state);
@@ -100,19 +107,33 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
             .collect()
     };
 
-    let node_block_style = if app.configured_nodes.is_empty() {
+    let node_block_style = if nodes_focused {
+        Style::default().fg(Color::Cyan)
+    } else if app.configured_nodes.is_empty() {
         Style::default().fg(Color::DarkGray)
     } else {
         Style::default().fg(Color::Green)
     };
 
-    let node_list = List::new(node_items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Configured Nodes ")
-            .style(node_block_style),
-    );
-    f.render_widget(node_list, chunks[1]);
+    let node_list = List::new(node_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Configured Nodes ")
+                .style(node_block_style),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("► ");
+
+    let mut node_state = ListState::default();
+    if nodes_focused && !app.configured_nodes.is_empty() {
+        node_state.select(Some(navigator.node_list_cursor));
+    }
+    f.render_stateful_widget(node_list, chunks[1], &mut node_state);
 
     let mut help_parts = vec![
         Span::styled(
@@ -121,14 +142,14 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(": Configure probe   "),
+        Span::raw(": Configure / Edit   "),
         Span::styled(
             "D",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(": Remove last node   "),
+        Span::raw(": Remove node   "),
         Span::styled(
             "R",
             Style::default()
@@ -179,11 +200,8 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
     let title = app.pending_node.as_ref().map_or_else(
         || " Configure Node ".to_string(),
         |n| {
-            format!(
-                " Configure Node — probe [{}]: {} ",
-                n.probe_index,
-                n.name_short()
-            )
+            let verb = if app.editing_node_index.is_some() { "Edit" } else { "Configure" };
+            format!(" {} Node — probe [{}]: {} ", verb, n.probe_index, n.name_short())
         },
     );
 

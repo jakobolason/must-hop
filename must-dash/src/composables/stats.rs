@@ -1,3 +1,23 @@
+use serde::Serialize;
+
+/// Flat, serializable row written to the main CSV.  Adding a column means adding a field here
+/// and filling it in [`DashStats::csv_rows`] — the header and value order follow automatically.
+#[derive(Serialize)]
+pub struct MainCsvRow {
+    pub delay_ms: f32,
+    pub err_ms: f32,
+    pub prev_speed: f32,
+    pub new_speed: f32,
+    pub delta_up_ms: Option<f32>,
+    pub delta_down_ms: Option<f32>,
+    pub mean_hw_delay_ms: f32,
+    pub gw_time_us: Option<u64>,
+    pub gw_bytes: Option<usize>,
+    pub node_time_us: Option<u64>,
+    pub node_bytes: Option<usize>,
+    pub tau_hb_high: bool,
+}
+
 pub struct ChartData {
     /// Clock error series (was `delay` — now correctly uses err_ms)
     pub err: Vec<(f64, f64)>,
@@ -28,6 +48,8 @@ pub struct PacketEntry {
     pub mean_hw_delay_ms: f32,
     /// Raw hardware-delay samples collected since the previous SYNC
     pub hw_samples: Vec<f32>,
+    /// tau_hb mode at transmit time: true = High, false = Low
+    pub tau_hb_high: bool,
 }
 
 /// Accumulated state for the packet that is currently being built.
@@ -36,6 +58,7 @@ pub struct PacketEntry {
 struct PendingPacket {
     delta_up_ms: Option<f32>,
     delta_down_ms: Option<f32>,
+    tau_hb_high: bool,
 }
 
 /// Time and byte-size diff between TAU_SLICE and TAU_SLICE_POST.
@@ -56,7 +79,6 @@ pub struct DashStats {
     pub gw_diff: Vec<SliceDiff>,
     /// One diff per node TAU_SLICE_POST
     pub node_diff: Vec<SliceDiff>,
-
     // --- private scratchpad, not for display ---
     pending: PendingPacket,
     last_hw_idx: usize,
@@ -147,6 +169,7 @@ impl DashStats {
                     gw_b,
                     node_us,
                     node_b,
+                    if p.tau_hb_high { "Hi" } else { "Lo" }.to_string(),
                 ]
             })
             .collect()
@@ -283,9 +306,34 @@ impl DashStats {
         }
     }
 
+    pub fn csv_rows(&self) -> impl Iterator<Item = MainCsvRow> + '_ {
+        self.packets.iter().enumerate().map(|(i, p)| {
+            let gw = self.gw_diff.get(i);
+            let nd = self.node_diff.get(i);
+            MainCsvRow {
+                delay_ms: p.delay_ms,
+                err_ms: p.err_ms,
+                prev_speed: p.prev_speed,
+                new_speed: p.new_speed,
+                delta_up_ms: p.delta_up_ms,
+                delta_down_ms: p.delta_down_ms,
+                mean_hw_delay_ms: p.mean_hw_delay_ms,
+                gw_time_us: gw.map(|d| d.time_us),
+                gw_bytes: gw.map(|d| d.bytes),
+                node_time_us: nd.map(|d| d.time_us),
+                node_bytes: nd.map(|d| d.bytes),
+                tau_hb_high: p.tau_hb_high,
+            }
+        })
+    }
+
     pub fn on_deltas(&mut self, up_ms: f32, down_ms: f32) {
         self.pending.delta_up_ms = Some(up_ms);
         self.pending.delta_down_ms = Some(down_ms);
+    }
+
+    pub fn on_state_sync(&mut self, mode: &str) {
+        self.pending.tau_hb_high = mode == "High";
     }
 
     pub fn on_sync(&mut self, delay_ms: f32, err_ms: f32, prev_speed: f32, new_speed: f32) {
@@ -308,6 +356,7 @@ impl DashStats {
             delta_down_ms: pending.delta_down_ms,
             mean_hw_delay_ms: mean_hw,
             hw_samples,
+            tau_hb_high: pending.tau_hb_high,
         });
     }
 

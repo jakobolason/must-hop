@@ -12,6 +12,13 @@ pub enum LandingSubView {
     ProbeConfig,
 }
 
+/// Which section of the probe-list view has keyboard focus.
+#[derive(PartialEq, Clone, Copy)]
+pub enum LandingSection {
+    Probes,
+    Nodes,
+}
+
 #[derive(PartialEq)]
 pub enum DashFocus {
     Data,
@@ -21,8 +28,12 @@ pub enum DashFocus {
 pub struct Navigator {
     pub view: NavigatorView,
     pub landing_sub_view: LandingSubView,
+    /// Which section (probes / configured nodes) has focus
+    pub landing_section: LandingSection,
     /// Cursor position in the available-probes list
     pub probe_list_cursor: usize,
+    /// Cursor position in the configured-nodes list
+    pub node_list_cursor: usize,
     /// Which field is active in the ProbeConfig form
     pub probe_config_focus: ProbeConfigFocus,
     pub dash_focus: DashFocus,
@@ -42,7 +53,9 @@ impl Navigator {
         Self {
             view: NavigatorView::Landing,
             landing_sub_view: LandingSubView::ProbeList,
+            landing_section: LandingSection::Probes,
             probe_list_cursor: 0,
+            node_list_cursor: 0,
             probe_config_focus: ProbeConfigFocus::Kp,
             dash_focus: DashFocus::Logs,
             history_scroll: 0,
@@ -51,15 +64,51 @@ impl Navigator {
         }
     }
 
-    pub fn probe_list_up(&mut self, probe_count: usize) {
-        if probe_count > 0 {
-            self.probe_list_cursor = self.probe_list_cursor.saturating_sub(1);
+    /// Move up in the landing view; crosses the section boundary Nodes → Probes.
+    pub fn landing_up(&mut self, probe_count: usize) {
+        match self.landing_section {
+            LandingSection::Probes => {
+                if probe_count > 0 {
+                    self.probe_list_cursor = self.probe_list_cursor.saturating_sub(1);
+                }
+            }
+            LandingSection::Nodes => {
+                if self.node_list_cursor == 0 {
+                    self.landing_section = LandingSection::Probes;
+                } else {
+                    self.node_list_cursor -= 1;
+                }
+            }
         }
     }
 
-    pub fn probe_list_down(&mut self, probe_count: usize) {
-        if probe_count > 0 {
-            self.probe_list_cursor = (self.probe_list_cursor + 1).min(probe_count - 1);
+    /// Move down in the landing view; crosses the section boundary Probes → Nodes.
+    pub fn landing_down(&mut self, probe_count: usize, node_count: usize) {
+        match self.landing_section {
+            LandingSection::Probes => {
+                if probe_count > 0
+                    && self.probe_list_cursor + 1 < probe_count
+                {
+                    self.probe_list_cursor += 1;
+                } else if node_count > 0 {
+                    self.landing_section = LandingSection::Nodes;
+                    self.node_list_cursor = 0;
+                }
+            }
+            LandingSection::Nodes => {
+                if node_count > 0 {
+                    self.node_list_cursor = (self.node_list_cursor + 1).min(node_count - 1);
+                }
+            }
+        }
+    }
+
+    pub fn clamp_node_cursor(&mut self, node_count: usize) {
+        if node_count == 0 {
+            self.landing_section = LandingSection::Probes;
+            self.node_list_cursor = 0;
+        } else {
+            self.node_list_cursor = self.node_list_cursor.min(node_count - 1);
         }
     }
 

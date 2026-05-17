@@ -19,3 +19,5 @@ log = "0.4.29"
 simplelog = "0.12.2"
 chrono = "0.4.44"
 dotenv = "0.15.0"
+csv = "1.4.0"
+serde = { version = "1.0.228", features = ["derive"] }
