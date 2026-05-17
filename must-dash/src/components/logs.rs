@@ -16,8 +16,16 @@ pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFoc
 
     let n = app.sources.len();
     let delay_pct = 5u16;
-    let source_pct = (100u16 - delay_pct) / n as u16;
-    let leftover = (100u16 - delay_pct) % n as u16;
+    let source_pct = if n != 0 {
+        (100u16 - delay_pct) / n as u16
+    } else {
+        0
+    };
+    let leftover = if n != 0 {
+        (100u16 - delay_pct) % n as u16
+    } else {
+        0
+    };
 
     let mut constraints: Vec<Constraint> = (0..n)
         .map(|i| Constraint::Percentage(source_pct + if i == 0 { leftover } else { 0 }))
@@ -42,7 +50,10 @@ pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFoc
                 .style(log_title_style),
         );
 
-        let scroll = source.logs.len().saturating_sub(chunks[i].height as usize - 2);
+        let scroll = source
+            .logs
+            .len()
+            .saturating_sub(chunks[i].height as usize - 2);
         f.render_widget(panel.scroll((scroll as u16, 0)), chunks[i]);
     }
 
