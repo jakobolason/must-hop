@@ -122,12 +122,19 @@ fn spawn_pty_reader(
     child
 }
 
-fn spawn_log_processes(descriptors: &[ProcessDescriptor], tx: Sender<AppEvent>) -> Vec<ChildProcess> {
+fn spawn_log_processes(
+    descriptors: &[ProcessDescriptor],
+    tx: Sender<AppEvent>,
+) -> Vec<ChildProcess> {
     descriptors
         .iter()
         .map(|d| {
             let args: Vec<&str> = d.args.iter().map(String::as_str).collect();
-            let envs: Vec<(&str, &str)> = d.envs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            let envs: Vec<(&str, &str)> = d
+                .envs
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
             let source_id = d.source_id.clone();
             spawn_pty_reader(
                 &d.command,
@@ -187,7 +194,11 @@ pub async fn run_app(
                         LandingSubView::ProbeList => match key_code {
                             KeyCode::Esc => {
                                 shutdown_processes(
-                                    log_children.drain(..).map(Some).chain([delay_child.take()]).collect(),
+                                    log_children
+                                        .drain(..)
+                                        .map(Some)
+                                        .chain([delay_child.take()])
+                                        .collect(),
                                 )
                                 .await;
                                 quit_fn(&mut app, &mut navigator, terminal);
@@ -205,8 +216,7 @@ pub async fn run_app(
                                 let cursor = navigator.probe_list_cursor;
                                 if cursor < app.available_probes.len() {
                                     app.start_configuring_probe(cursor);
-                                    navigator.probe_config_focus =
-                                        app::ProbeConfigFocus::Kp;
+                                    navigator.probe_config_focus = app::ProbeConfigFocus::Kp;
                                     navigator.landing_sub_view = LandingSubView::ProbeConfig;
                                 }
                             }
@@ -226,7 +236,10 @@ pub async fn run_app(
                                     app.init_sources(&descriptors);
                                     log_children = spawn_log_processes(&descriptors, tx.clone());
                                     delay_child = Some(spawn_pty_reader(
-                                        "just", &["run-delay"], &[], tx.clone(),
+                                        "just",
+                                        &["run-delay"],
+                                        &[],
+                                        tx.clone(),
                                         |delay_ms, _| AppEvent::HardwareLog { delay_ms },
                                     ));
                                 }
@@ -234,6 +247,7 @@ pub async fn run_app(
                             KeyCode::Char('w') | KeyCode::Char('W') => {
                                 if app.has_data() {
                                     app.save_data();
+                                    app.reset_data();
                                 }
                             }
                             _ => {}
@@ -269,7 +283,11 @@ pub async fn run_app(
                         }
                         KeyCode::Esc => {
                             shutdown_processes(
-                                log_children.drain(..).map(Some).chain([delay_child.take()]).collect(),
+                                log_children
+                                    .drain(..)
+                                    .map(Some)
+                                    .chain([delay_child.take()])
+                                    .collect(),
                             )
                             .await;
                             navigator.view = NavigatorView::Landing;
@@ -281,20 +299,28 @@ pub async fn run_app(
                         KeyCode::Down if navigator.dash_focus == DashFocus::Data => {
                             navigator.scroll_history_down()
                         }
+                        KeyCode::Left => navigator.scroll_graph_back(app.dash_stats.packets.len()),
+                        KeyCode::Right => navigator.scroll_graph_forward(),
                         KeyCode::Char('p') => {
                             // Stops the processes, but doesn't go back to landing. They can still
                             // press esc to go back
                             shutdown_processes(
-                                log_children.drain(..).map(Some).chain([delay_child.take()]).collect(),
+                                log_children
+                                    .drain(..)
+                                    .map(Some)
+                                    .chain([delay_child.take()])
+                                    .collect(),
                             )
                             .await;
                         }
                         _ => {}
                     },
                 },
-                AppEvent::ProcessLog { source, text, overwrite } => {
-                    app.add_log(&source, text, overwrite)
-                }
+                AppEvent::ProcessLog {
+                    source,
+                    text,
+                    overwrite,
+                } => app.add_log(&source, text, overwrite),
                 AppEvent::HardwareLog { delay_ms } => app.add_hw_delay(delay_ms),
                 AppEvent::Tick => {}
             }
@@ -302,7 +328,14 @@ pub async fn run_app(
     }
 
     // Graceful Shutdown (Only attempt to kill if they were spawned)
-    shutdown_processes(log_children.into_iter().map(Some).chain([delay_child]).collect()).await;
+    shutdown_processes(
+        log_children
+            .into_iter()
+            .map(Some)
+            .chain([delay_child])
+            .collect(),
+    )
+    .await;
 
     Ok(())
 }

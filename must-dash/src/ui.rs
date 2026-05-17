@@ -15,7 +15,7 @@ use crate::pages::{dashboard::draw_dash, landing::draw_landing};
 pub fn draw(f: &mut Frame, app: &App, navigator: &Navigator) {
     match navigator.view {
         NavigatorView::Landing => draw_landing(f, app, navigator),
-        NavigatorView::Dashboard => draw_dash(f, app, &navigator.dash_focus, navigator.history_scroll),
+        NavigatorView::Dashboard => draw_dash(f, app, &navigator.dash_focus, navigator.history_scroll, navigator.graph_scroll),
     }
 
     if navigator.shutting_down {

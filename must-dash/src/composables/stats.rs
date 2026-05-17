@@ -4,6 +4,9 @@ pub struct ChartData {
     pub up: Vec<(f64, f64)>,
     pub down: Vec<(f64, f64)>,
     pub hw: Vec<(f64, f64)>,
+    /// Hardware-delay samples collected since the last SYNC (not yet finalized into a packet).
+    /// Placed one interval to the right of the last completed packet.  Empty when scrolled back.
+    pub hw_live: Vec<(f64, f64)>,
     pub x_bounds: [f64; 2],
     pub y_bounds: [f64; 2],
 }
@@ -23,6 +26,8 @@ pub struct PacketEntry {
     pub delta_down_ms: Option<f32>,
     /// Mean of all hardware-delay samples collected since the previous SYNC
     pub mean_hw_delay_ms: f32,
+    /// Raw hardware-delay samples collected since the previous SYNC
+    pub hw_samples: Vec<f32>,
 }
 
 /// Accumulated state for the packet that is currently being built.
@@ -148,38 +153,103 @@ impl DashStats {
     }
 
     /// Prepares data for the chart.  Uses `err_ms` (clock error) as the primary series.
-    pub fn get_chart_data(&self, max_x_points: usize) -> ChartData {
+    ///
+    /// All visible packets are stretched evenly across the full chart width `[0, num_points-1]`
+    /// so the graph always fills the widget.  `scroll` shifts the visible window back in time
+    /// (0 = most recent packets).
+    ///
+    /// HW delay samples for each packet are spread linearly between that packet's x position
+    /// and the previous packet's, so they sit visually within the heartbeat interval.
+    pub fn get_chart_data(&self, max_x_points: usize, scroll: usize) -> ChartData {
         let num_points = max_x_points.max(1);
-        let hw_ratio = 10.0_f64;
 
-        let start = self.packets.len().saturating_sub(num_points);
-        let slice = &self.packets[start..];
+        let end = self.packets.len().saturating_sub(scroll);
+        let start = end.saturating_sub(num_points);
+        let slice = &self.packets[start..end];
+
+        // Map index i (0..n) → x in [0, num_points-1], stretching data to fill the chart.
+        let stretch = |i: usize, n: usize| -> f64 {
+            if n <= 1 {
+                0.0
+            } else {
+                i as f64 * (num_points - 1) as f64 / (n - 1) as f64
+            }
+        };
+
+        let n = slice.len();
 
         let err: Vec<(f64, f64)> = slice
             .iter()
             .enumerate()
-            .map(|(i, p)| (i as f64, p.err_ms as f64))
+            .map(|(i, p)| (stretch(i, n), p.err_ms as f64))
             .collect();
 
         let up: Vec<(f64, f64)> = slice
             .iter()
             .enumerate()
-            .map(|(i, p)| (i as f64, p.delta_up_ms.unwrap_or(0.0) as f64))
+            .map(|(i, p)| (stretch(i, n), p.delta_up_ms.unwrap_or(0.0) as f64))
             .collect();
 
         let down: Vec<(f64, f64)> = slice
             .iter()
             .enumerate()
-            .map(|(i, p)| (i as f64, p.delta_down_ms.unwrap_or(0.0) as f64))
+            .map(|(i, p)| (stretch(i, n), p.delta_down_ms.unwrap_or(0.0) as f64))
             .collect();
 
-        let max_hw_points = (num_points as f64 * hw_ratio) as usize;
-        let hw_start = self.hardware_delay.len().saturating_sub(max_hw_points);
-        let hw: Vec<(f64, f64)> = self.hardware_delay[hw_start..]
+        // Spread each packet's hw samples linearly across (x_prev, x_current].
+        let hw: Vec<(f64, f64)> = slice
             .iter()
             .enumerate()
-            .map(|(i, &v)| (i as f64 / hw_ratio, v as f64))
+            .flat_map(|(i, p)| {
+                let x_right = stretch(i, n);
+                let x_left = if i == 0 { 0.0 } else { stretch(i - 1, n) };
+                let sn = p.hw_samples.len();
+                p.hw_samples.iter().enumerate().map(move |(j, &v)| {
+                    let x = if sn <= 1 {
+                        x_right
+                    } else {
+                        x_left + (x_right - x_left) * j as f64 / (sn - 1) as f64
+                    };
+                    (x, v as f64)
+                })
+            })
             .collect();
+
+        // Width of one inter-packet interval in chart units (used for the live zone).
+        let interval = if n > 1 {
+            (num_points - 1) as f64 / (n - 1) as f64
+        } else {
+            (num_points as f64).max(1.0)
+        };
+
+        // Pending hw samples (since last SYNC, not yet in any PacketEntry).
+        // Only shown when not scrolled back — they represent the live "right edge."
+        let hw_live: Vec<(f64, f64)> = if scroll == 0 {
+            let pending = &self.hardware_delay[self.last_hw_idx..];
+            let x_anchor = if n == 0 { 0.0 } else { stretch(n - 1, n) };
+            let x_live_end = x_anchor + interval;
+            let pn = pending.len();
+            pending
+                .iter()
+                .enumerate()
+                .map(|(j, &v)| {
+                    let x = if pn <= 1 {
+                        x_anchor
+                    } else {
+                        x_anchor + (x_live_end - x_anchor) * j as f64 / (pn - 1) as f64
+                    };
+                    (x, v as f64)
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        let x_max = if hw_live.is_empty() {
+            (num_points - 1) as f64
+        } else {
+            (num_points - 1) as f64 + interval
+        };
 
         // Y-axis bounds across all series
         let (min_val, max_val) = err
@@ -187,6 +257,7 @@ impl DashStats {
             .chain(up.iter())
             .chain(down.iter())
             .chain(hw.iter())
+            .chain(hw_live.iter())
             .map(|&(_, y)| y)
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), y| {
                 (mn.min(y), mx.max(y))
@@ -206,7 +277,8 @@ impl DashStats {
             up,
             down,
             hw,
-            x_bounds: [0.0, num_points.saturating_sub(1) as f64],
+            hw_live,
+            x_bounds: [0.0, x_max],
             y_bounds,
         }
     }
@@ -218,11 +290,11 @@ impl DashStats {
 
     pub fn on_sync(&mut self, delay_ms: f32, err_ms: f32, prev_speed: f32, new_speed: f32) {
         // Consume all hardware-delay samples collected since last sync
-        let hw_slice = &self.hardware_delay[self.last_hw_idx..];
-        let mean_hw = if hw_slice.is_empty() {
+        let hw_samples: Vec<f32> = self.hardware_delay[self.last_hw_idx..].to_vec();
+        let mean_hw = if hw_samples.is_empty() {
             0.0
         } else {
-            hw_slice.iter().sum::<f32>() / hw_slice.len() as f32
+            hw_samples.iter().sum::<f32>() / hw_samples.len() as f32
         };
         self.last_hw_idx = self.hardware_delay.len();
 
@@ -235,6 +307,7 @@ impl DashStats {
             delta_up_ms: pending.delta_up_ms,
             delta_down_ms: pending.delta_down_ms,
             mean_hw_delay_ms: mean_hw,
+            hw_samples,
         });
     }
 

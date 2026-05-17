@@ -27,6 +27,7 @@ pub struct Navigator {
     pub probe_config_focus: ProbeConfigFocus,
     pub dash_focus: DashFocus,
     pub history_scroll: usize,
+    pub graph_scroll: usize,
     pub shutting_down: bool,
 }
 
@@ -45,6 +46,7 @@ impl Navigator {
             probe_config_focus: ProbeConfigFocus::Kp,
             dash_focus: DashFocus::Logs,
             history_scroll: 0,
+            graph_scroll: 0,
             shutting_down: false,
         }
     }
@@ -92,5 +94,14 @@ impl Navigator {
 
     pub fn scroll_history_down(&mut self) {
         self.history_scroll = self.history_scroll.saturating_sub(1);
+    }
+
+    pub fn scroll_graph_back(&mut self, total_packets: usize) {
+        let max_scroll = total_packets.saturating_sub(1);
+        self.graph_scroll = (self.graph_scroll + 1).min(max_scroll);
+    }
+
+    pub fn scroll_graph_forward(&mut self) {
+        self.graph_scroll = self.graph_scroll.saturating_sub(1);
     }
 }

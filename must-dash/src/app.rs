@@ -296,7 +296,7 @@ impl App {
             log::error!("Error in dir creation: {:?}", e);
             return;
         }
-        if let Err(e) = fs::create_dir(&hw_prefix) {
+        if let Err(e) = fs::create_dir_all(&hw_prefix) {
             log::error!("Error in dir creation: {:?}", e);
             return;
         }

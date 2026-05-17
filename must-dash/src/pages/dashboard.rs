@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::components::{graph::draw_dash_charts, logs::draw_dash_logs};
 
-pub fn draw_dash(f: &mut Frame, app: &App, dash_focus: &DashFocus, history_scroll: usize) {
+pub fn draw_dash(f: &mut Frame, app: &App, dash_focus: &DashFocus, history_scroll: usize, graph_scroll: usize) {
     let (data_constraint, log_constraint) = match dash_focus {
         DashFocus::Data => (Constraint::Percentage(50), Constraint::Percentage(50)),
         DashFocus::Logs => (Constraint::Length(3), Constraint::Min(0)),
@@ -22,7 +22,7 @@ pub fn draw_dash(f: &mut Frame, app: &App, dash_focus: &DashFocus, history_scrol
         .split(f.area());
 
     draw_dash_header(f, app, main_chunks[0]);
-    draw_dash_data(f, app, main_chunks[1], dash_focus, history_scroll);
+    draw_dash_data(f, app, main_chunks[1], dash_focus, history_scroll, graph_scroll);
     draw_dash_logs(f, app, main_chunks[2], dash_focus);
 }
 
@@ -57,7 +57,7 @@ fn draw_dash_header(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(header, area);
 }
 
-fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus, history_scroll: usize) {
+fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus, history_scroll: usize, graph_scroll: usize) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -131,6 +131,6 @@ fn draw_dash_data(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus, 
     }
 
     if right_area.height > 6 && right_area.width > 2 {
-        draw_dash_charts(f, app, right_area);
+        draw_dash_charts(f, app, right_area, graph_scroll);
     }
 }
