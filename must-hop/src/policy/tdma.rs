@@ -24,7 +24,7 @@ use controller::Controller;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
-type VecT3 = Vec<(u8, i32), 5>;
+type VecFB = Vec<(u8, i32), 5>;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SlotAllocation {
@@ -35,7 +35,7 @@ pub(crate) struct SlotAllocation {
     tau_hb: u8,
     pub(crate) gps_time_us: u64,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    pub(crate) t3_deltas: VecT3,
+    pub(crate) feedback_vec: VecFB,
 }
 
 /// Only used for tests
@@ -47,7 +47,7 @@ impl SlotAllocation {
             known_slots: 0,
             tau_hb: 10,
             gps_time_us: 0,
-            t3_deltas: Vec::new(),
+            feedback_vec: Vec::new(),
         }
     }
 }
@@ -88,7 +88,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
                 time_sync,
                 last_hb_instant: None,
                 hbt_pkt: None,
-                t3_deltas: Vec::new(),
+                feedback_vec: Vec::new(),
                 controller,
                 err_threshold: ERR_THRESHOLD,
                 sync_counter: 0,
@@ -237,10 +237,10 @@ pub(crate) struct TimeManager<const SIZE: usize> {
     last_hb_instant: Option<Instant>,
     hbt_pkt: Option<MHPacket<SIZE>>,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    t3_deltas: VecT3,
+    feedback_vec: VecFB,
     /// Handles error correction
     controller: Controller,
-    /// The same type as from t3_deltas
+    /// The same type as from feedback_vec
     err_threshold: u32,
     /// Sync counter, if a node is out of sync, it adds one to this.
     sync_counter: u8,
@@ -384,7 +384,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         } else {
             // If a follower's error is above threshold, increase out of sync counter
             if let Some((_, prev_err)) = alloc
-                .t3_deltas
+                .feedback_vec
                 .iter()
                 .find(|t| t.0 == self.slot_manager.node_id)
                 && prev_err.unsigned_abs() > self.time_manager.err_threshold
@@ -404,10 +404,15 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             (pkt.source_id, t3)
         };
         // Leader calculates t3s, and follower returns calculated error
-        match self.time_manager.t3_deltas.iter().position(|t| t.0 == src) {
-            Some(idx) => self.time_manager.t3_deltas[idx] = (src, val),
+        match self
+            .time_manager
+            .feedback_vec
+            .iter()
+            .position(|t| t.0 == src)
+        {
+            Some(idx) => self.time_manager.feedback_vec[idx] = (src, val),
             None => {
-                if self.time_manager.t3_deltas.push((src, val)).is_err() {
+                if self.time_manager.feedback_vec.push((src, val)).is_err() {
                     error!("T3 deltas is full!")
                 }
             }
@@ -451,7 +456,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     fn approximate_packet_size<const LEN: usize>(
         &self,
         my_tx_slot: u8,
-        t3_deltas: VecT3,
+        feedback_vec: VecFB,
         tx_queue: &Vec<MHPacket<SIZE>, LEN>,
     ) -> usize {
         let dummy_allocation = SlotAllocation {
@@ -459,7 +464,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_frames(),
             gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
-            t3_deltas,
+            feedback_vec,
         };
         let alloc_size = serialize_with_flavor(&dummy_allocation, Size::default()).unwrap();
 
@@ -544,7 +549,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         &self,
         mut hbt: MHPacket<SIZE>,
         my_tx_slot: u8,
-        t3_deltas: VecT3,
+        feedback_vec: VecFB,
         adjusted_timestamp: u64,
     ) -> MHPacket<SIZE> {
         let allocation = SlotAllocation {
@@ -552,7 +557,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_frames(),
             gps_time_us: adjusted_timestamp,
-            t3_deltas,
+            feedback_vec,
         };
         let mut buf = [0u8; SIZE];
         if let Ok(serialized_slice) = to_slice(&allocation, &mut buf) {
@@ -623,8 +628,8 @@ where
                     if let Some(hbt_pkt) = self.time_manager.hbt_pkt.take()
                         && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
                     {
-                        let extracted_deltas: VecT3 =
-                            core::mem::take(&mut self.time_manager.t3_deltas);
+                        let extracted_deltas: VecFB =
+                            core::mem::take(&mut self.time_manager.feedback_vec);
                         let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
                             self.approximate_packet_size(
                                 my_tx_slot,
@@ -674,7 +679,7 @@ where
             if !tx_queue.is_full()
                 && let Some(pkt) = self.time_manager.hbt_pkt.take()
             {
-                let extracted_deltas: VecT3 = core::mem::take(&mut self.time_manager.t3_deltas);
+                let extracted_deltas: VecFB = core::mem::take(&mut self.time_manager.feedback_vec);
                 let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
                     self.approximate_packet_size(my_tx_slot, extracted_deltas.clone(), tx_queue),
                 ));
