@@ -10,6 +10,8 @@ use crate::composables::stats::DashStats;
 
 const KI_DEFAULT: &str = "0.4";
 const KP_DEFAULT: &str = "0.5";
+const SF_DEFAULT: &str = "7";
+const BW_DEFAULT: &str = "125";
 
 pub enum AppEvent {
     Input(KeyCode),
@@ -65,6 +67,8 @@ pub struct NodeConfig {
     pub kp: String,
     pub ki: String,
     pub source_id: String,
+    pub sf: String,
+    pub bw: String,
 }
 
 /// Which field is active in the ProbeConfig form. Defined here so both
@@ -75,13 +79,17 @@ pub enum ProbeConfigFocus {
     Kp,
     Ki,
     SourceId,
+    Sf,
+    Bw,
     Confirm,
 }
 
-/// KP/KI defaults that persist across sessions, loaded from .env.
+/// Defaults that persist across sessions, loaded from .env.
 pub struct Defaults {
     pub kp: String,
     pub ki: String,
+    pub sf: String,
+    pub bw: String,
 }
 
 pub struct App {
@@ -107,9 +115,11 @@ impl App {
         let _ = dotenv();
         let kp = env::var("KP").unwrap_or_else(|_| KP_DEFAULT.to_string());
         let ki = env::var("KI").unwrap_or_else(|_| KI_DEFAULT.to_string());
+        let sf = env::var("SF").unwrap_or_else(|_| SF_DEFAULT.to_string());
+        let bw = env::var("BW").unwrap_or_else(|_| BW_DEFAULT.to_string());
 
         let mut app = Self {
-            defaults: Defaults { kp, ki },
+            defaults: Defaults { kp, ki, sf, bw },
             available_probes: Vec::new(),
             probe_fetch_error: None,
             configured_nodes: Vec::new(),
@@ -160,6 +170,8 @@ impl App {
                 kp: self.defaults.kp.clone(),
                 ki: self.defaults.ki.clone(),
                 source_id: String::new(),
+                sf: self.defaults.sf.clone(),
+                bw: self.defaults.bw.clone(),
             });
         }
     }
@@ -173,6 +185,8 @@ impl App {
                 kp: node.kp.clone(),
                 ki: node.ki.clone(),
                 source_id: node.source_id.clone(),
+                sf: node.sf.clone(),
+                bw: node.bw.clone(),
             });
         }
     }
@@ -181,6 +195,8 @@ impl App {
         if let Some(node) = self.pending_node.take() {
             self.defaults.kp = node.kp.clone();
             self.defaults.ki = node.ki.clone();
+            self.defaults.sf = node.sf.clone();
+            self.defaults.bw = node.bw.clone();
             if let Some(i) = self.editing_node_index.take() {
                 if i < self.configured_nodes.len() {
                     self.configured_nodes[i] = node;
@@ -210,6 +226,8 @@ impl App {
                 ProbeConfigFocus::Kp => node.kp.push(c),
                 ProbeConfigFocus::Ki => node.ki.push(c),
                 ProbeConfigFocus::SourceId => node.source_id.push(c),
+                ProbeConfigFocus::Sf => node.sf.push(c),
+                ProbeConfigFocus::Bw => node.bw.push(c),
                 ProbeConfigFocus::Confirm => {}
             }
         }
@@ -226,6 +244,12 @@ impl App {
                 }
                 ProbeConfigFocus::SourceId => {
                     node.source_id.pop();
+                }
+                ProbeConfigFocus::Sf => {
+                    node.sf.pop();
+                }
+                ProbeConfigFocus::Bw => {
+                    node.bw.pop();
                 }
                 ProbeConfigFocus::Confirm => {}
             }
@@ -260,12 +284,26 @@ impl App {
             ]
         };
 
+        // Gateway mirrors the first node's SF/BW so they communicate on the same channel.
+        let first = self.configured_nodes.first();
+        let gw_sf = first
+            .map(|n| n.sf.as_str())
+            .unwrap_or(&self.defaults.sf)
+            .to_string();
+        let gw_bw = first
+            .map(|n| n.bw.as_str())
+            .unwrap_or(&self.defaults.bw)
+            .to_string();
+        let mut gw_envs = color_envs();
+        gw_envs.extend([("SF".to_string(), gw_sf), ("BW".to_string(), gw_bw)]);
+        log::info!("GW ENVS: {:?}", gw_envs);
+
         let mut descs = vec![ProcessDescriptor {
             source_id: "gw".to_string(),
             role: LogRole::Gateway,
             command: "just".to_string(),
             args: vec!["run-gw".to_string()],
-            envs: color_envs(),
+            envs: gw_envs,
         }];
 
         for node in &self.configured_nodes {
@@ -274,6 +312,8 @@ impl App {
                 ("KP".to_string(), cast_f32(&node.kp, 10.0)),
                 ("KI".to_string(), cast_f32(&node.ki, 100.0)),
                 ("SOURCEID".to_string(), node.source_id.clone()),
+                ("SF".to_string(), node.sf.clone()),
+                ("BW".to_string(), node.bw.clone()),
             ]);
             descs.push(ProcessDescriptor {
                 source_id: format!("node-{}", node.source_id),
@@ -295,27 +335,43 @@ impl App {
             String::new()
         };
 
-        let mut kp_found = false;
-        let mut ki_found = false;
+        let mut found = std::collections::HashMap::new();
         let mut new_content = String::new();
 
         for line in content.lines() {
-            if line.starts_with("KP=") {
-                new_content.push_str(&format!("KP={}\n", self.defaults.kp));
-                kp_found = true;
-            } else if line.starts_with("KI=") {
-                new_content.push_str(&format!("KI={}\n", self.defaults.ki));
-                ki_found = true;
-            } else {
-                new_content.push_str(line);
-                new_content.push('\n');
+            let key = line.split('=').next().unwrap_or("");
+            match key {
+                "KP" => {
+                    new_content.push_str(&format!("KP={}\n", self.defaults.kp));
+                    found.insert("KP", true);
+                }
+                "KI" => {
+                    new_content.push_str(&format!("KI={}\n", self.defaults.ki));
+                    found.insert("KI", true);
+                }
+                "SF" => {
+                    new_content.push_str(&format!("SF={}\n", self.defaults.sf));
+                    found.insert("SF", true);
+                }
+                "BW" => {
+                    new_content.push_str(&format!("BW={}\n", self.defaults.bw));
+                    found.insert("BW", true);
+                }
+                _ => {
+                    new_content.push_str(line);
+                    new_content.push('\n');
+                }
             }
         }
-        if !kp_found {
-            new_content.push_str(&format!("KP={}\n", self.defaults.kp));
-        }
-        if !ki_found {
-            new_content.push_str(&format!("KI={}\n", self.defaults.ki));
+        for (key, val) in [
+            ("KP", &self.defaults.kp),
+            ("KI", &self.defaults.ki),
+            ("SF", &self.defaults.sf),
+            ("BW", &self.defaults.bw),
+        ] {
+            if !found.contains_key(key) {
+                new_content.push_str(&format!("{key}={val}\n"));
+            }
         }
 
         if let Err(e) = fs::write(path, new_content) {
@@ -325,13 +381,19 @@ impl App {
 
     pub fn save_data(&self) {
         let timestamp = Local::now().format("%d-%m:%H.%M").to_string();
+        let first = self.configured_nodes.first();
+        let sf = first.map(|n| n.sf.as_str()).unwrap_or(&self.defaults.sf);
+        let bw = first.map(|n| n.bw.as_str()).unwrap_or(&self.defaults.bw);
+        let n_nodes = self.configured_nodes.len();
+        let kp = first.map(|n| n.kp.as_str()).unwrap_or(&self.defaults.kp);
+        let ki = first.map(|n| n.ki.as_str()).unwrap_or(&self.defaults.ki);
+        let meta = format!("SF{sf}_BW{bw}_KP{kp}_KI{ki}_{n_nodes}nodes");
 
-        // TODO: Save some metadata about the data, like SF, nr. of nodes
         let prefix = "./analysis/data";
         let main_prefix = format!("{prefix}/main");
         let hw_prefix = format!("{prefix}/full_hw");
-        let main_filename = format!("{main_prefix}/main_stats_{timestamp}.csv");
-        let hw_filename = format!("{hw_prefix}/hw_stats_{timestamp}.csv");
+        let main_filename = format!("{main_prefix}/main_stats_{timestamp}_{meta}.csv");
+        let hw_filename = format!("{hw_prefix}/hw_stats_{timestamp}_{meta}.csv");
 
         if let Err(e) = fs::create_dir_all(&main_prefix) {
             log::error!("Error in dir creation: {:?}", e);

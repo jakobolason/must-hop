@@ -101,7 +101,7 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
                         format!("[probe {}] ", n.probe_index),
                         Style::default().fg(Color::DarkGray),
                     ),
-                    Span::raw(format!("KP={} KI={}", n.kp, n.ki)),
+                    Span::raw(format!("KP={} KI={}  SF={} BW={}kHz", n.kp, n.ki, n.sf, n.bw)),
                 ]))
             })
             .collect()
@@ -194,7 +194,7 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
 }
 
 fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
-    let area = centered_rect(50, 65, f.area());
+    let area = centered_rect(55, 88, f.area());
     f.render_widget(Clear, area);
 
     let title = app.pending_node.as_ref().map_or_else(
@@ -212,7 +212,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
     f.render_widget(outer, area);
 
     let inner = area.inner(Margin {
-        vertical: 2,
+        vertical: 1,
         horizontal: 3,
     });
     let chunks = Layout::default()
@@ -221,6 +221,8 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
             Constraint::Length(3), // KP
             Constraint::Length(3), // KI
             Constraint::Length(3), // Source ID
+            Constraint::Length(3), // SF
+            Constraint::Length(3), // BW
             Constraint::Length(1), // spacer
             Constraint::Length(3), // Confirm button
             Constraint::Min(0),    // rest
@@ -274,6 +276,30 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
         .style(style_for(ProbeConfigFocus::SourceId));
     f.render_widget(sid, chunks[2]);
 
+    // SF field
+    let sf_val = node.map_or("", |n| n.sf.as_str());
+    let sf = Paragraph::new(sf_val)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Line::from(" Spreading Factor ").left_aligned())
+                .title(Line::from("[5–12]").right_aligned()),
+        )
+        .style(style_for(ProbeConfigFocus::Sf));
+    f.render_widget(sf, chunks[3]);
+
+    // BW field
+    let bw_val = node.map_or("", |n| n.bw.as_str());
+    let bw = Paragraph::new(bw_val)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Line::from(" Bandwidth (kHz) ").left_aligned())
+                .title(Line::from("[125 / 250 / 500]").right_aligned()),
+        )
+        .style(style_for(ProbeConfigFocus::Bw));
+    f.render_widget(bw, chunks[4]);
+
     // Confirm button
     let confirm_label = if focus == ProbeConfigFocus::Confirm {
         "[ CONFIRM ]"
@@ -288,7 +314,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
         )
         .style(style_for(ProbeConfigFocus::Confirm))
         .alignment(Alignment::Center);
-    f.render_widget(confirm, chunks[4]);
+    f.render_widget(confirm, chunks[6]);
 
     // Help line
     let help = Paragraph::new(
@@ -296,7 +322,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
     )
     .style(Style::default().fg(Color::DarkGray))
     .alignment(Alignment::Center);
-    f.render_widget(help, chunks[6]);
+    f.render_widget(help, chunks[8]);
 }
 
 impl crate::app::NodeConfig {

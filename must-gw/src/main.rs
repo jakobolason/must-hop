@@ -3,23 +3,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use log::error;
 use loragw::{Bandwidth, Spreading};
 use must_gw::{create_concentrator, node};
-use must_hop::{
-    mesh_router::MeshRouter,
-    network_manager::NetworkManager,
-    policy::tdma::TdmaMac,
-};
+use must_hop::{mesh_router::MeshRouter, network_manager::NetworkManager, policy::tdma::TdmaMac};
 use rppal::gpio::Gpio;
 use std::io::Write;
 use tokio::time::Instant;
 
 async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let spreading = match std::env::var("SF").as_deref() {
-        Ok("7") => Spreading::SF7,
-        Ok("8") => Spreading::SF8,
-        Ok("9") => Spreading::SF9,
-        Ok("10") => Spreading::SF10,
-        Ok("11") => Spreading::SF11,
-        Ok("12") => Spreading::SF12,
+    let spreading_env = std::env::var("SF").unwrap_or("None".to_string());
+    log::info!("SPREADING ENV: {}", spreading_env);
+    let spreading = match spreading_env.as_str() {
+        "7" => Spreading::SF7,
+        "8" => Spreading::SF8,
+        "9" => Spreading::SF9,
+        "10" => Spreading::SF10,
+        "11" => Spreading::SF11,
+        "12" => Spreading::SF12,
         _ => Spreading::SF7,
     };
     let bandwidth = match std::env::var("BW").as_deref() {
@@ -38,7 +36,11 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         }
     };
 
-    let pkt_params = node::PacketParams { spreading, bandwidth, ..node::PacketParams::default() };
+    let pkt_params = node::PacketParams {
+        spreading,
+        bandwidth,
+        ..node::PacketParams::default()
+    };
     let node = node::GWNode::new(conc, pkt_params);
 
     let gw_source_id = 1;

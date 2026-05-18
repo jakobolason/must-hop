@@ -213,30 +213,24 @@ pub async fn run_app(
                                     app.configured_nodes.len(),
                                 );
                             }
-                            KeyCode::Enter => {
-                                match navigator.landing_section {
-                                    LandingSection::Probes => {
-                                        let cursor = navigator.probe_list_cursor;
-                                        if cursor < app.available_probes.len() {
-                                            app.start_configuring_probe(cursor);
-                                            navigator.probe_config_focus =
-                                                app::ProbeConfigFocus::Kp;
-                                            navigator.landing_sub_view =
-                                                LandingSubView::ProbeConfig;
-                                        }
-                                    }
-                                    LandingSection::Nodes => {
-                                        let cursor = navigator.node_list_cursor;
-                                        if cursor < app.configured_nodes.len() {
-                                            app.start_editing_node(cursor);
-                                            navigator.probe_config_focus =
-                                                app::ProbeConfigFocus::Kp;
-                                            navigator.landing_sub_view =
-                                                LandingSubView::ProbeConfig;
-                                        }
+                            KeyCode::Enter => match navigator.landing_section {
+                                LandingSection::Probes => {
+                                    let cursor = navigator.probe_list_cursor;
+                                    if cursor < app.available_probes.len() {
+                                        app.start_configuring_probe(cursor);
+                                        navigator.probe_config_focus = app::ProbeConfigFocus::Kp;
+                                        navigator.landing_sub_view = LandingSubView::ProbeConfig;
                                     }
                                 }
-                            }
+                                LandingSection::Nodes => {
+                                    let cursor = navigator.node_list_cursor;
+                                    if cursor < app.configured_nodes.len() {
+                                        app.start_editing_node(cursor);
+                                        navigator.probe_config_focus = app::ProbeConfigFocus::Kp;
+                                        navigator.landing_sub_view = LandingSubView::ProbeConfig;
+                                    }
+                                }
+                            },
                             KeyCode::Char('d') | KeyCode::Char('D') => {
                                 use navigator::LandingSection;
                                 let idx = match navigator.landing_section {
@@ -258,6 +252,7 @@ pub async fn run_app(
                                     app.save_to_env_file();
                                     navigator.view = NavigatorView::Dashboard;
                                     let descriptors = app.build_descriptors();
+                                    log::info!("Built descriptors!");
                                     app.init_sources(&descriptors);
                                     log_children = spawn_log_processes(&descriptors, tx.clone());
                                     delay_child = Some(spawn_pty_reader(

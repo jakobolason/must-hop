@@ -116,7 +116,9 @@ impl Navigator {
         self.probe_config_focus = match self.probe_config_focus {
             ProbeConfigFocus::Kp => ProbeConfigFocus::Ki,
             ProbeConfigFocus::Ki => ProbeConfigFocus::SourceId,
-            ProbeConfigFocus::SourceId => ProbeConfigFocus::Confirm,
+            ProbeConfigFocus::SourceId => ProbeConfigFocus::Sf,
+            ProbeConfigFocus::Sf => ProbeConfigFocus::Bw,
+            ProbeConfigFocus::Bw => ProbeConfigFocus::Confirm,
             ProbeConfigFocus::Confirm => ProbeConfigFocus::Kp,
         };
     }
@@ -126,7 +128,9 @@ impl Navigator {
             ProbeConfigFocus::Kp => ProbeConfigFocus::Confirm,
             ProbeConfigFocus::Ki => ProbeConfigFocus::Kp,
             ProbeConfigFocus::SourceId => ProbeConfigFocus::Ki,
-            ProbeConfigFocus::Confirm => ProbeConfigFocus::SourceId,
+            ProbeConfigFocus::Sf => ProbeConfigFocus::SourceId,
+            ProbeConfigFocus::Bw => ProbeConfigFocus::Sf,
+            ProbeConfigFocus::Confirm => ProbeConfigFocus::Bw,
         };
     }
 
