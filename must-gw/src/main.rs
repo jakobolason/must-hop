@@ -12,6 +12,8 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     let spreading_env = std::env::var("SF").unwrap_or("None".to_string());
     log::info!("SPREADING ENV: {}", spreading_env);
     let spreading = match spreading_env.as_str() {
+        "5" => Spreading::SF5,
+        "6" => Spreading::SF6,
         "7" => Spreading::SF7,
         "8" => Spreading::SF8,
         "9" => Spreading::SF9,
