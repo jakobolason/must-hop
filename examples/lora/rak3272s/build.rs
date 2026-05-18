@@ -10,6 +10,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=KP");
     println!("cargo:rerun-if-env-changed=KI");
     println!("cargo:rerun-if-env-changed=ALT_MDLTN");
+    println!("cargo:rerun-if-env-changed=SF");
+    println!("cargo:rerun-if-env-changed=BW");
 
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let path = &out.join("env_vars.rs");
@@ -43,6 +45,46 @@ fn main() {
         }
         Err(_) => "None".to_string(),
     };
+
+    let (sf_code, sf_num) = match env::var("SF") {
+        Ok(val) => {
+            let num: u8 = val.parse().expect("SF must be a valid integer (5-12)");
+            let variant = match num {
+                5 => "Some(SpreadingFactor::_5)",
+                6 => "Some(SpreadingFactor::_6)",
+                7 => "Some(SpreadingFactor::_7)",
+                8 => "Some(SpreadingFactor::_8)",
+                9 => "Some(SpreadingFactor::_9)",
+                10 => "Some(SpreadingFactor::_10)",
+                11 => "Some(SpreadingFactor::_11)",
+                12 => "Some(SpreadingFactor::_12)",
+                _ => panic!("SF must be between 5 and 12"),
+            };
+            (variant.to_string(), num)
+        }
+        Err(_) => ("None".to_string(), 7u8),
+    };
+
+    let (bw_code, bw_khz) = match env::var("BW") {
+        Ok(val) => {
+            let (variant, khz): (&str, u32) = match val.as_str() {
+                "7" => ("Some(Bandwidth::_7KHz)", 7),
+                "10" => ("Some(Bandwidth::_10KHz)", 10),
+                "15" => ("Some(Bandwidth::_15KHz)", 15),
+                "20" => ("Some(Bandwidth::_20KHz)", 20),
+                "31" => ("Some(Bandwidth::_31KHz)", 31),
+                "41" => ("Some(Bandwidth::_41KHz)", 41),
+                "62" => ("Some(Bandwidth::_62KHz)", 62),
+                "125" => ("Some(Bandwidth::_125KHz)", 125),
+                "250" => ("Some(Bandwidth::_250KHz)", 250),
+                "500" => ("Some(Bandwidth::_500KHz)", 500),
+                _ => panic!("BW must be one of: 7, 10, 15, 20, 31, 41, 62, 125, 250, 500 (kHz)"),
+            };
+            (variant.to_string(), khz)
+        }
+        Err(_) => ("None".to_string(), 125u32),
+    };
+
     write!(
         &mut file,
         "{}",
@@ -52,8 +94,12 @@ fn main() {
             const SOURCEID: Option<u8> = {};\n\
             const KP: Option<i64> = {};\n\
             const KI: Option<i64> = {};\n\
-            const ALT_MDLTN: Option<bool> = {};\n",
-            source_id_code, kp_code, ki_code, alt_mdltn
+            const ALT_MDLTN: Option<bool> = {};\n\
+            const SF: Option<SpreadingFactor> = {};\n\
+            const SF_NUM: u8 = {};\n\
+            const BW: Option<Bandwidth> = {};\n\
+            const BW_KHZ: u32 = {};\n",
+            source_id_code, kp_code, ki_code, alt_mdltn, sf_code, sf_num, bw_code, bw_khz
         )
     )
     .unwrap();

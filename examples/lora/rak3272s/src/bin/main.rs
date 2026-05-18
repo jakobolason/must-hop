@@ -37,7 +37,10 @@ use lora_phy::{
 use must_hop::{
     mesh_router, network_manager,
     node::lora::{LoraNode, RadioPackParams, RatioModParams},
-    policy::{ra::RandomAccessMac, tdma::TdmaMac},
+    policy::{
+        ra::{NodePolicy, RandomAccessMac},
+        tdma::TdmaMac,
+    },
 };
 use {defmt_rtt as _, panic_probe as _};
 
@@ -160,9 +163,10 @@ pub async fn lora_task(
     channel: channel::Receiver<'static, ThreadModeRawMutex, SensorData, 3>,
     debug_pin: Output<'static>,
 ) {
-    let sf = SpreadingFactor::_7;
-    let bw = Bandwidth::_125KHz;
+    let sf = SF.unwrap_or(SpreadingFactor::_7);
+    let bw = BW.unwrap_or(Bandwidth::_125KHz);
     let cr = CodingRate::_4_8;
+    info!("radio params: SF={} BW={}kHz", SF_NUM, BW_KHZ);
     let mp = RatioModParams {
         sf,
         bw,
@@ -201,7 +205,7 @@ pub async fn lora_task(
             return;
         }
     };
-    // let mac = RandomAccessMac::new();
+    // let mac = RandomAccessMac::new(NodePolicy);
 
     let ki = KI.unwrap_or(DEFAULT_KI);
     let kp = KP.unwrap_or(DEFAULT_KP);
