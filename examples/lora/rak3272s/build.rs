@@ -1,9 +1,28 @@
 use std::{
     env,
+    fmt::{Debug, Display},
     fs::File,
     io::{BufWriter, Write},
     path::PathBuf,
+    str::FromStr,
 };
+
+fn parse_env_var<T>(name: &str) -> String
+where
+    T: Display,
+    T: FromStr,
+    <T as FromStr>::Err: Debug,
+{
+    match env::var(name) {
+        Ok(val) => {
+            let num = val
+                .parse::<T>()
+                .unwrap_or_else(|_| panic!("{name} must be valid {}!", std::any::type_name::<T>()));
+            format!("Some({})", num)
+        }
+        Err(_) => "None".to_string(),
+    }
+}
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SOURCEID");
@@ -17,49 +36,18 @@ fn main() {
     let path = &out.join("env_vars.rs");
     let mut file = BufWriter::new(File::create(path).unwrap());
 
-    let source_id_code = match env::var("SOURCEID") {
-        Ok(val) => {
-            let num: u8 = val.parse().expect("SOURCEID must be valid u8!");
-            format!("Some({})", num)
-        }
-        Err(_) => "None".to_string(),
-    };
-    let kp_code = match env::var("KP") {
-        Ok(val) => {
-            let num: i64 = val.parse().expect("KP must be valid i64!");
-            format!("Some({})", num)
-        }
-        Err(_) => "None".to_string(),
-    };
-    let ki_code = match env::var("KI") {
-        Ok(val) => {
-            let num: i64 = val.parse().expect("KI must be valid i64!");
-            format!("Some({})", num)
-        }
-        Err(_) => "None".to_string(),
-    };
-    let alt_mdltn = match env::var("ALT_MDLTN") {
-        Ok(val) => {
-            let val: bool = val.parse().expect("ALT_MDLTN must be valid bool!");
-            format!("Some({})", val)
-        }
-        Err(_) => "None".to_string(),
-    };
+    let source_id_code: String = parse_env_var::<u8>("SOURCEID");
+    let kp_code: String = parse_env_var::<i64>("KP");
+    let ki_code: String = parse_env_var::<i64>("KI");
+    let alt_mdltn: String = parse_env_var::<bool>("ALT_MDLTN");
 
     let (sf_code, sf_num) = match env::var("SF") {
         Ok(val) => {
             let num: u8 = val.parse().expect("SF must be a valid integer (5-12)");
-            let variant = match num {
-                5 => "Some(SpreadingFactor::_5)",
-                6 => "Some(SpreadingFactor::_6)",
-                7 => "Some(SpreadingFactor::_7)",
-                8 => "Some(SpreadingFactor::_8)",
-                9 => "Some(SpreadingFactor::_9)",
-                10 => "Some(SpreadingFactor::_10)",
-                11 => "Some(SpreadingFactor::_11)",
-                12 => "Some(SpreadingFactor::_12)",
-                _ => panic!("SF must be between 5 and 12"),
-            };
+            if !(5..=12).contains(&num) {
+                panic!("SF must be between 5 and 12");
+            }
+            let variant = format!("Some(SpreadingFactor::_{num})");
             (variant.to_string(), num)
         }
         Err(_) => ("None".to_string(), 7u8),
@@ -67,22 +55,16 @@ fn main() {
 
     let (bw_code, bw_khz) = match env::var("BW") {
         Ok(val) => {
-            let (variant, khz): (&str, u32) = match val.as_str() {
-                "7" => ("Some(Bandwidth::_7KHz)", 7),
-                "10" => ("Some(Bandwidth::_10KHz)", 10),
-                "15" => ("Some(Bandwidth::_15KHz)", 15),
-                "20" => ("Some(Bandwidth::_20KHz)", 20),
-                "31" => ("Some(Bandwidth::_31KHz)", 31),
-                "41" => ("Some(Bandwidth::_41KHz)", 41),
-                "62" => ("Some(Bandwidth::_62KHz)", 62),
-                "125" => ("Some(Bandwidth::_125KHz)", 125),
-                "250" => ("Some(Bandwidth::_250KHz)", 250),
-                "500" => ("Some(Bandwidth::_500KHz)", 500),
-                _ => panic!("BW must be one of: 7, 10, 15, 20, 31, 41, 62, 125, 250, 500 (kHz)"),
-            };
+            let khz = val.parse::<i32>().expect("BW must be a valid integer");
+            let options = vec![7, 10, 15, 20, 31, 41, 62, 125, 250, 500];
+            if !options.contains(&khz) {
+                panic!("BW must be one of: 7, 10, 15, 20, 31, 41, 62, 125, 250, 500 (kHz)")
+            }
+            let variant = format!("Some(Bandwidth::_{khz}KHz)");
+
             (variant.to_string(), khz)
         }
-        Err(_) => ("None".to_string(), 125u32),
+        Err(_) => ("None".to_string(), 125i32),
     };
 
     write!(
