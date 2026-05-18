@@ -230,7 +230,7 @@ pub(crate) struct SlotManager {
     leader_id: Option<u8>,
 }
 
-const ERR_THRESHOLD: u32 = 30_000;
+const ERR_THRESHOLD: u32 = 20_000;
 // If received 10 synced messages, then go up into high tau mode
 const IN_SYNC_THRESHOLD: u8 = 7;
 // How long it takes, before a node goes back into full listening mode
@@ -536,6 +536,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 if self.time_manager.out_of_sync {
                     self.time_manager.sync_counter = 0;
                     info!("STILL OUT OF SYNC");
+
                     // Reset it, so this is tested again in the next run
                     // NOTE: Only reset here, not in sync_epoch
                     self.time_manager.out_of_sync = false;

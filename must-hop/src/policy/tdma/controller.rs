@@ -16,6 +16,7 @@ pub(crate) struct Controller {
     kp: i64,
     pub prev_err: i64,
     prev_delay: i64,
+    leader_skip_frames: u8,
 }
 impl Controller {
     pub(crate) fn new(v_s: i64, kp: i64, ki: i64) -> Self {
@@ -51,6 +52,8 @@ impl Controller {
         // Now calculate the error the controller can use
         let (time_sync, error, delay) =
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
+        info!("LEADER IS IN {}", hb.tau_hb);
+        self.leader_skip_frames = hb.tau_hb;
 
         // Conditional integration anti-windup
         // let tentative_v_s = self.apply_pi_controller(error);
@@ -172,8 +175,11 @@ impl Controller {
         // let kp: f32 = self.kp as f32 / 10.0;
         // let ki: f32 = self.ki as f32 / 10.0;
         // info!("kp: {}, ki: {}", kp, ki);
+        let kp_term = (self.kp * (err - self.prev_err)) / (10_i64 * self.leader_skip_frames as i64);
 
-        let delta_u = (self.kp * (err - self.prev_err)) / 10 + (self.ki * err) / 100;
+        let ki_term = (self.ki * err) / (100_i64 * self.leader_skip_frames as i64);
+        info!("Kp term: {}, Ki term: {}", kp_term, ki_term);
+        let delta_u = kp_term + ki_term;
         self.v_s + delta_u
         // (self.kp * err) / 10 + (self.ki * self.error_sum) / 100
     }
