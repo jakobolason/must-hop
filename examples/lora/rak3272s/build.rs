@@ -55,8 +55,8 @@ fn main() {
 
     let (bw_code, bw_khz) = match env::var("BW") {
         Ok(val) => {
-            let khz = val.parse::<i32>().expect("BW must be a valid integer");
-            let options = vec![7, 10, 15, 20, 31, 41, 62, 125, 250, 500];
+            let khz = val.parse::<u32>().expect("BW must be a valid integer");
+            let options: Vec<u32> = vec![7, 10, 15, 20, 31, 41, 62, 125, 250, 500];
             if !options.contains(&khz) {
                 panic!("BW must be one of: 7, 10, 15, 20, 31, 41, 62, 125, 250, 500 (kHz)")
             }
@@ -64,7 +64,7 @@ fn main() {
 
             (variant.to_string(), khz)
         }
-        Err(_) => ("None".to_string(), 125i32),
+        Err(_) => ("None".to_string(), 125u32),
     };
 
     write!(
