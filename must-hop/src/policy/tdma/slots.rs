@@ -64,19 +64,26 @@ impl SlotMask {
     pub const fn new() -> Self {
         Self { mask: 0 }
     }
+    fn over_capacity(&self, size: u8) -> bool {
+        let bit_capacity = u8::BITS as u8;
+        size >= bit_capacity
+    }
     /// To set a slot inside mask, does not accept slots higher than 7
     pub fn claim(&mut self, slot: u8) {
         // Do not allow over the bit limit of self.mask(u8 -> 8bits)
-        let bit_capacity = u8::BITS as u8;
-        if slot >= bit_capacity {
+        if self.over_capacity(slot) {
             return;
         }
         // shift 1 over to slot pos, and or with mask
         self.mask |= 1 << slot;
     }
 
-    /// Check given slot is occupied
+    /// Check given slot is occupied. Returns false for slots beyond mask capacity —
+    /// those slots are never assigned, so the node correctly sleeps during them.
     pub fn is_taken(&self, slot: u8) -> bool {
+        if self.over_capacity(slot) {
+            return false;
+        }
         (self.mask & (1 << slot)) != 0
     }
 
@@ -90,10 +97,12 @@ impl SlotMask {
         let combined_mask = SlotMask {
             mask: self.mask | another_mask,
         };
-        let start_offset = node_id % max_slots;
+        // Never assign a slot we can't record in the mask
+        let assignable = max_slots.min(u8::BITS as u8);
+        let start_offset = node_id % assignable;
 
-        (0..max_slots).find_map(|i| {
-            let slot = (start_offset + i) % max_slots;
+        (0..assignable).find_map(|i| {
+            let slot = (start_offset + i) % assignable;
             debug!("looking in slot {}", slot);
             if !combined_mask.is_taken(slot) {
                 Some(slot)
