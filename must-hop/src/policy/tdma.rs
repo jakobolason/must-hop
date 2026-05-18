@@ -354,10 +354,14 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             None => return,
         };
         // Resync node to heartbeat's announced slot, if hb came closer to gw than me
-        let (src, val) = if self.slot_manager.node_id != GATEWAY_ID
-            && pkt.hop_to_gw < self.slot_manager.gw_hops
-        {
-            self.time_manager.last_hb_instant = Some(Instant::now());
+        let should_use_pkt = match self.slot_manager.leader_id {
+            Some(lid) => lid == pkt.source_id,
+            None => {
+                self.slot_manager.node_id != GATEWAY_ID && pkt.hop_to_gw < self.slot_manager.gw_hops
+            }
+        };
+        let (src, val) = if should_use_pkt {
+            // self.time_manager.last_hb_instant = Some(Instant::now());
             // Controller updates internal drift, and returns adjusted stamps
             self.time_manager.time_sync = Some(
                 self.time_manager.controller.run_transferfunction(
