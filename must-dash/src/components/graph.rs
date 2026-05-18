@@ -8,11 +8,16 @@ use ratatui::{
     widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
+/// Maximum number of heartbeats (packets) visible at one time in the graph.
+/// Once more packets than this have been collected the scrollbar appears and
+/// older data can be browsed by scrolling left.
+const MAX_VISIBLE_HBS: usize = 50;
+
 pub fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect, graph_scroll: usize) {
-    // The chart boundary box takes 2 chars horizontally.
-    let plot_width = area.width.saturating_sub(2) as usize;
-    let chart_data = app.dash_stats.get_chart_data(plot_width, graph_scroll);
     let total_packets = app.dash_stats.packets.len();
+    let max_valid_scroll = total_packets.saturating_sub(MAX_VISIBLE_HBS);
+    let clamped_graph_scroll = graph_scroll.min(max_valid_scroll);
+    let chart_data = app.dash_stats.get_chart_data(MAX_VISIBLE_HBS, clamped_graph_scroll);
 
     let zero_ref_line = [(0.0, 0.0), (chart_data.x_bounds[1], 0.0)];
 
@@ -69,13 +74,13 @@ pub fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect, graph_scroll: usiz
 
     f.render_widget(chart, area);
 
-    if total_packets > plot_width {
+    if total_packets > MAX_VISIBLE_HBS {
         // scroll=0 means rightmost (newest); scrollbar position is inverted so the
         // thumb sits at the right when viewing live data and moves left as you scroll back.
-        let max_scroll = total_packets.saturating_sub(1);
-        let thumb_pos = max_scroll.saturating_sub(graph_scroll);
-        let mut scrollbar_state = ScrollbarState::new(max_scroll)
-            .viewport_content_length(plot_width)
+        // Use clamped_graph_scroll so the thumb never misrepresents an over-scrolled position.
+        let thumb_pos = max_valid_scroll.saturating_sub(clamped_graph_scroll);
+        let mut scrollbar_state = ScrollbarState::new(total_packets)
+            .viewport_content_length(MAX_VISIBLE_HBS)
             .position(thumb_pos);
         f.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::HorizontalBottom)

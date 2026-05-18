@@ -130,17 +130,19 @@ impl App {
             Ok(output) => {
                 let text = String::from_utf8_lossy(&output.stdout);
                 let mut probes = parse_probe_list(&text);
-                let used: std::collections::HashSet<usize> =
-                    self.configured_nodes.iter().map(|n| n.probe_index).collect();
+                let used: std::collections::HashSet<usize> = self
+                    .configured_nodes
+                    .iter()
+                    .map(|n| n.probe_index)
+                    .collect();
                 probes.retain(|p| !used.contains(&p.index));
                 self.available_probes = probes;
-                self.probe_fetch_error = if self.available_probes.is_empty()
-                    && self.configured_nodes.is_empty()
-                {
-                    Some("No probes found. Connect a probe and press R to refresh.".to_string())
-                } else {
-                    None
-                };
+                self.probe_fetch_error =
+                    if self.available_probes.is_empty() && self.configured_nodes.is_empty() {
+                        Some("No probes found. Connect a probe and press R to refresh.".to_string())
+                    } else {
+                        None
+                    };
             }
             Err(e) => {
                 self.available_probes.clear();
@@ -324,6 +326,7 @@ impl App {
     pub fn save_data(&self) {
         let timestamp = Local::now().format("%d-%m:%H.%M").to_string();
 
+        // TODO: Save some metadata about the data, like SF, nr. of nodes
         let prefix = "./analysis/data";
         let main_prefix = format!("{prefix}/main");
         let hw_prefix = format!("{prefix}/full_hw");
