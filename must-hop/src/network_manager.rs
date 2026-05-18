@@ -281,6 +281,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 // Are we closer to GW?
                 self.gw_hops < pkt.hop_to_gw
             } else {
+                // FIXME: This does not mean anything anymore, when we use DevEUI
                 // Are we in between source and destination?
                 (min(pkt.source_id, pkt.destination_id) <= self.source_id)
                     && (self.source_id <= max(pkt.destination_id, pkt.source_id))
@@ -428,7 +429,7 @@ mod tests {
         let mut manager = setup_manager();
         let payload = Vec::from_slice(&[1, 2, 3]).unwrap();
 
-        // 1. Queue a new packet bound for node 2
+        // Queue a new packet bound for node 2
         manager
             .queue_new_payload(payload, 2)
             .expect("Should queue payload");
@@ -436,7 +437,7 @@ mod tests {
         // It should now be in the pending list awaiting an ACK
         assert_eq!(manager.get_pending_count(), 1);
 
-        // 2. Simulate receiving an ACK from node 2
+        // Simulate receiving an ACK from node 2
         let ack_pkt = MHPacket {
             destination_id: 2, // Back to us
             packet_type: PacketType::Ack,
@@ -447,7 +448,7 @@ mod tests {
             hop_to_gw: 5,
         };
 
-        // 3. Process the ACK
+        // Process the ACK
         let result = manager
             .receive_packet(ack_pkt)
             .expect("Should process packet");
@@ -462,10 +463,10 @@ mod tests {
     #[test]
     fn test_forwarding_logic() {
         let mut manager = setup_manager();
-        // Simulate that we are 2 hops away from the gateway (GW is ID 1 usually, but let's say GW=0)
+        // Simulate that we are 2 hops away from the gateway (GW is ID 1)
         manager.gw_hops = 2;
 
-        // Simulate a packet coming from node 3, bound for the GW (let's assume ID 1 is GW for your logic)
+        // Simulate a packet coming from node 3, bound for the GW
         let incoming_pkt = MHPacket {
             destination_id: 1, // GW Bound
             packet_type: PacketType::Data,
