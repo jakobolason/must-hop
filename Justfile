@@ -4,6 +4,8 @@ set dotenv-load
 PI_HOST := env_var_or_default("HOST_URL", "localhost")
 PI_USER := env_var_or_default("PI_USER", "pi")
 PI_TARGET_DIR := "/home/" + PI_USER + "/must-hop"
+GW_SF := env_var_or_default("SF", "7")
+GW_BW := env_var_or_default("BW", "125")
 
 # Build must-hop and must-gw
 [group('Host builds')]
@@ -83,7 +85,7 @@ remote-run id:
     cd examples/lora/rak3272s && \
     CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
     --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN --probe 1366:0101" \
-    SOURCEID={{ id }} cargo run --release --bin main
+    SOURCEID={{ id }} SF={{ GW_SF }} BW={{ GW_BW }} cargo run --release --bin main
 
 # Attach to a remote probe-rs server
 [group('probe-rs')]
@@ -131,7 +133,7 @@ deploy-gw-pi: build-gw-pi
 run-gw: deploy-gw-pi
     @echo "Running GW on pi"
     ssh -tt {{ PI_USER }}@{{ PI_HOST }} 'chmod +x {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw \
-      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
+      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always SF={{ GW_SF }} BW={{ GW_BW }} \
        chrt -f 90 {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 [group('Dashboard')]
