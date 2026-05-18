@@ -93,11 +93,11 @@ const INTERCEPT: u64 = 1478;
 const SLOPE: u64 = 4;
 
 impl GWNode {
-    pub fn new(concentrator: Concentrator<Running>) -> Self {
+    pub fn new(concentrator: Concentrator<Running>, pkt_params: PacketParams) -> Self {
         Self {
             radio: concentrator,
             fetched_packets: VecDeque::new(),
-            pkt_params: PacketParams::default(),
+            pkt_params,
         }
     }
     fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<(TxPacket, usize), Error> {

@@ -648,28 +648,22 @@ impl TryFrom<TxPacketLoRa> for llg::lgw_pkt_tx_s {
         payload_buf[..packet.payload.len()].copy_from_slice(&packet.payload);
 
         let (tx_mode, count_us) = match packet.mode {
-            _ => (0, 0), // TODO: Need more here?
+            TxMode::Immediate => (0, 0),
+            TxMode::Timestamp(d) => (1, d.as_micros() as u32),
+            TxMode::PPS(d) => (2, d.as_micros() as u32),
         };
-        let rf_chain = 0; // TODO: CHeck config?
-        let bandwidth = 0x04; // Check config?
-        let datarate = 7; // TODO: Check config?
-        let coderate = 1; // Check config?
 
         Ok(llg::lgw_pkt_tx_s {
             freq_hz: packet.freq,
             freq_offset: 0,
             tx_mode,
             count_us,
-            rf_chain,
+            rf_chain: packet.radio as u8,
             rf_power: packet.power,
-
-            // Modulation is hardcoded to LoRa (usually 0x10 in Semtech libs)
-            // modulation: llg::MOD_LORA as u8,
-            modulation: 0x10 as u8,
-
-            bandwidth,
-            datarate,
-            coderate,
+            modulation: 0x10u8,
+            bandwidth: packet.bandwidth as u8,
+            datarate: packet.spreading as u32,
+            coderate: packet.coderate as u8,
             invert_pol: packet.invert_polarity,
 
             // f_dev is Frequency Deviation, which is ONLY used for FSK modulation

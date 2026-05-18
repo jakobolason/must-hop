@@ -1,44 +1,45 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::error;
+use loragw::{Bandwidth, Spreading};
 use must_gw::{create_concentrator, node};
 use must_hop::{
     mesh_router::MeshRouter,
     network_manager::NetworkManager,
-    policy::{ra::RandomAccessMac, tdma::TdmaMac},
+    policy::tdma::TdmaMac,
 };
 use rppal::gpio::Gpio;
 use std::io::Write;
 use tokio::time::Instant;
 
 async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    log::info!("Now try and use loragw:");
+    let spreading = match std::env::var("SF").as_deref() {
+        Ok("7") => Spreading::SF7,
+        Ok("8") => Spreading::SF8,
+        Ok("9") => Spreading::SF9,
+        Ok("10") => Spreading::SF10,
+        Ok("11") => Spreading::SF11,
+        Ok("12") => Spreading::SF12,
+        _ => Spreading::SF7,
+    };
+    let bandwidth = match std::env::var("BW").as_deref() {
+        Ok("125") => Bandwidth::BW125kHz,
+        Ok("250") => Bandwidth::BW250kHz,
+        Ok("500") => Bandwidth::BW500kHz,
+        _ => Bandwidth::BW125kHz,
+    };
+    log::info!("radio params: SF={:?} BW={:?}", spreading, bandwidth);
 
-    let conc = match create_concentrator() {
+    let conc = match create_concentrator(spreading, bandwidth) {
         Ok(conc) => conc,
         Err(e) => {
             log::error!("Error creating concentrator: {:?}", e);
-            // We return the error here instead of just returning empty
             return Err(e.into());
         }
     };
 
-    log::info!("check receive status");
-    // match conc.receive_status() {
-    //     Ok(status) => log::info!("Receive status: {:?}", status),
-    //     Err(e) => log::error!("Error checking receive status: {:?}", e),
-    // }
-    // let tty_path = "/dev/serial0";
-    // let gps_family = "ubx8";
-
-    // match conc.enable_gps(tty_path, gps_family) {
-    //     Ok(_) => log::info!("GPS enabled successfully on {}!", tty_path),
-    //     Err(e) => {
-    //         log::error!("Error enabling gps: {:?}", e)
-    //     }
-    // }
-    log::info!("now try receive!");
-    let node = node::GWNode::new(conc);
+    let pkt_params = node::PacketParams { spreading, bandwidth, ..node::PacketParams::default() };
+    let node = node::GWNode::new(conc, pkt_params);
 
     let gw_source_id = 1;
     let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
