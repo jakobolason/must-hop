@@ -142,12 +142,10 @@ fn draw_dash_data(
             .saturating_sub(entries_that_can_be_seen)
             .saturating_sub(clamped_scroll);
         let mut scrollbar_state = ScrollbarState::new(total_packets)
-            .viewport_content_length(entries_that_can_be_seen)
+            // .viewport_content_length(entries_that_can_be_seen)
             .position(scroll_pos);
         f.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(Some("↑"))
-                .end_symbol(Some("↓")),
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
             left_area.inner(Margin {
                 vertical: 1,
                 horizontal: 0,
