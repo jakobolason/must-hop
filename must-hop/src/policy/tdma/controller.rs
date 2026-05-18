@@ -1,5 +1,5 @@
 use crate::RxPacket;
-use crate::policy::tdma::SlotAllocation;
+use crate::policy::tdma::SyncBeacon;
 
 #[cfg(not(feature = "in_std"))]
 use defmt::info;
@@ -12,7 +12,6 @@ use embassy_time::Instant;
 pub(crate) struct Controller {
     /// speed of clock drift, used to try and mitigate clock drift at nodes with no HSE
     pub v_s: i64,
-    error_sum: i64,
     ki: i64,
     kp: i64,
     pub prev_err: i64,
@@ -27,6 +26,7 @@ impl Controller {
             ..Default::default()
         }
     }
+
     /// v_s is current error, so this maps the error to drift ppb
     pub(crate) fn calc_drift_duration(&self, duration: u64) -> i64 {
         (duration as i64 * self.v_s) / 1_000_000_000
@@ -35,7 +35,7 @@ impl Controller {
     /// Controller figures out the error and corregates according to the recorded error
     pub(crate) fn run_transferfunction(
         &mut self,
-        hb: &SlotAllocation,
+        hb: &SyncBeacon,
         rx_pkt: RxPacket,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
@@ -69,8 +69,6 @@ impl Controller {
         // };
         let v_s = self.apply_pi_controller(error);
 
-        info!(" ERROR SUM {}", self.error_sum);
-
         // Debug info:
         info!(
             "[SYNC]|{}|{}|{}|{}|",
@@ -90,7 +88,7 @@ impl Controller {
     /// the timestamp
     fn calc_error(
         &self,
-        hb: &SlotAllocation,
+        hb: &SyncBeacon,
         rx_pkt: RxPacket,
         old_gps: u64,
         last_stamp: Instant,
@@ -184,15 +182,15 @@ impl Controller {
 #[cfg(test)]
 mod controller_tests {
     use super::*;
-    use crate::policy::tdma::SlotAllocation;
+    use crate::policy::tdma::SyncBeacon;
     use embassy_time::{Duration, Instant};
 
     fn make_controller(v_s: i64, kp: i64, ki: i64) -> Controller {
         Controller::new(v_s, kp, ki)
     }
 
-    fn make_alloc(time: u64) -> SlotAllocation {
-        let mut alloc = SlotAllocation::new();
+    fn make_alloc(time: u64) -> SyncBeacon {
+        let mut alloc = SyncBeacon::new();
         alloc.gps_time_us = time;
         alloc
     }
@@ -240,10 +238,9 @@ mod controller_tests {
         let alloc = make_alloc(123_456_789);
         let rx = make_rx_pkt(now);
 
-        let result = c.run_transferfunction(&alloc, rx, None, 1);
-
         // Should return the GPS time from the heartbeat as the initial epoch
-        let (gps_us, _instant) = result.expect("Expected an initial time_sync to be returned");
+        let (gps_us, _instant) = c.run_transferfunction(&alloc, rx, None, 1);
+
         assert_eq!(
             gps_us, 123_456_789,
             "GPS time should match heartbeat's announcement"
