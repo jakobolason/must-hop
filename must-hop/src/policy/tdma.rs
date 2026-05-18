@@ -24,23 +24,24 @@ use controller::Controller;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
-type VecFB = Vec<(u8, i32), 5>;
+type VecFB = Vec<(u8, i32), 7>;
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct SlotAllocation {
+pub(crate) struct SyncBeacon {
     my_slot: u8,
     /// Bit mask for known slots, meaning only 8 nodes can be known at a time
     known_slots: u8,
     // The tau_hb duration in secs, should be converted back to a Duration on followers
     tau_hb: u8,
     pub(crate) gps_time_us: u64,
-    /// A list of (node_id, T3 - T2 delta in ms) for PTP
+    /// A list of (node_id, T3 - T2 delta in ms) for PTP (leader)
+    /// follower returns it's error value to it's leader for sync control
     pub(crate) feedback_vec: VecFB,
 }
 
 /// Only used for tests
 #[allow(dead_code)]
-impl SlotAllocation {
+impl SyncBeacon {
     pub(super) fn new() -> Self {
         Self {
             my_slot: 1,
@@ -135,9 +136,12 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn set_tx_slot(self, tx_slot: u8) -> Self {
+        let mut copied_sm = self.slot_manager.known_slots_mask.clone();
+        copied_sm.claim(tx_slot);
         Self {
             slot_manager: SlotManager {
                 my_tx_slot: Some(tx_slot),
+                known_slots_mask: copied_sm,
                 ..self.slot_manager
             },
             ..self
@@ -311,9 +315,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             * (self.slot_manager.slots_per_frame as u64);
         let time_in_frame = current_time_us % frame_duration_us;
 
-        // Add half of slot duration to achieve 'round to nearest' int division
+        // Round to nearest slot, wrapping within the frame to avoid returning slots_per_frame
         let slot_dur = self.slot_manager.slot_duration.as_micros();
-        ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
+        ((time_in_frame + (slot_dur / 2)) % frame_duration_us / slot_dur) as u8
     }
     fn reset_sync(&mut self) {
         self.time_manager.time_sync = None;
@@ -325,6 +329,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         self.slot_manager.known_slots_mask = SlotMask::default();
         self.slot_manager.tau_hb = TauHbMode::Low;
         self.slot_manager.hb_countdown = 0;
+        self.time_manager.controller.prev_err = 0;
     }
 
     fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
@@ -337,7 +342,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     && pkt.source_id != self.slot_manager.node_id
             })
             .find_map(|pkt| {
-                from_bytes::<SlotAllocation>(&pkt.payload)
+                from_bytes::<SyncBeacon>(&pkt.payload)
                     .ok()
                     .map(|alloc| (pkt, alloc))
             });
@@ -459,7 +464,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         feedback_vec: VecFB,
         tx_queue: &Vec<MHPacket<SIZE>, LEN>,
     ) -> usize {
-        let dummy_allocation = SlotAllocation {
+        let dummy_allocation = SyncBeacon {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_frames(),
@@ -552,7 +557,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         feedback_vec: VecFB,
         adjusted_timestamp: u64,
     ) -> MHPacket<SIZE> {
-        let allocation = SlotAllocation {
+        let allocation = SyncBeacon {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_frames(),
@@ -638,6 +643,10 @@ where
                             ),
                         ));
                         self.update_tau_hb();
+                        info!(
+                            "[STATE_SYNC]|{:?}|{}|",
+                            self.slot_manager.tau_hb, self.time_manager.sync_counter
+                        );
                         let upd_pkt = self.update_heartbeat(
                             hbt_pkt,
                             my_tx_slot,
@@ -684,6 +693,10 @@ where
                     self.approximate_packet_size(my_tx_slot, extracted_deltas.clone(), tx_queue),
                 ));
                 self.update_tau_hb();
+                info!(
+                    "[STATE_SYNC]|{:?}|{}|",
+                    self.slot_manager.tau_hb, self.time_manager.sync_counter
+                );
                 let upd_pkt =
                     self.update_heartbeat(pkt, my_tx_slot, extracted_deltas, adjusted_timestamp);
                 if let Err(pkt) = tx_queue.push(upd_pkt) {
@@ -692,7 +705,7 @@ where
                 }
             } else {
                 // Update so we eventually send a hb out
-                self.slot_manager.hb_countdown -= 1;
+                self.slot_manager.hb_countdown = self.slot_manager.hb_countdown.saturating_sub(1);
             }
             if !tx_queue.is_empty() {
                 let tx_result = node.transmit(tx_queue).await;
