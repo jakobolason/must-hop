@@ -106,7 +106,7 @@ where
     }
 }
 
-const OUTPUT_POWER: i32 = 1;
+const OUTPUT_POWER: i32 = 7;
 
 impl<RK, DLY, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN>
     for LoraNode<'_, RK, DLY, SIZE, LEN>
