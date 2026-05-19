@@ -117,13 +117,13 @@ where
         };
         // trace!("Got packets to send or receiving");
         let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;
+        self.mac_policy.set_gw_hops(self.manager.get_gw_hops());
 
         for pkt in to_forward {
-            if pkt.packet_type == PacketType::HeartBeat {
-                self.mac_policy.tx_heartbeat(pkt);
-                self.mac_policy.set_gw_hops(self.manager.get_gw_hops());
-                continue;
-            }
+            // if pkt.packet_type == PacketType::HeartBeat {
+            //     self.mac_policy.tx_heartbeat(pkt);
+            //     continue;
+            // }
             // trace!("Pusing to tx queue:  {}", self.tx_queue.len());
             // If buffer is full, break adding packets to it.
             if self.tx_queue.push(pkt).is_err() {

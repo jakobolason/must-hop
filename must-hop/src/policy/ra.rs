@@ -1,5 +1,5 @@
-use crate::node::MHNode;
 use crate::policy::MacPolicy;
+use crate::{PacketType, node::MHNode};
 
 use super::MHPacket;
 
@@ -50,6 +50,9 @@ impl NodeRole for GatewayPolicy {
 pub struct RandomAccessMac<const SIZE: usize, NR: NodeRole> {
     hbt_pkt: Option<MHPacket<SIZE>>,
     node_role: NR,
+    gw_hops: u8,
+    recent_seen_hb: [(u8, u16); 5],
+    cursor: usize,
 }
 
 impl<const SIZE: usize, NR: NodeRole> RandomAccessMac<SIZE, NR> {
@@ -57,7 +60,29 @@ impl<const SIZE: usize, NR: NodeRole> RandomAccessMac<SIZE, NR> {
         Self {
             hbt_pkt: None,
             node_role,
+            gw_hops: 255,
+            recent_seen_hb: [(0, 0); 5],
+            cursor: 0,
         }
+    }
+
+    fn handle_hb(&mut self, pkt: &MHPacket<SIZE>) -> Option<MHPacket<SIZE>> {
+        let id = (pkt.source_id, pkt.packet_id);
+
+        // If we haven't flooded this specific heartbeat yet
+        if !self.recent_seen_hb.contains(&id) {
+            self.recent_seen_hb[self.cursor] = id;
+            self.cursor = (self.cursor + 1) % 5;
+
+            // Only forward if we are logically between source and edge
+            if pkt.hop_count < self.gw_hops {
+                let mut fwd_pkt = pkt.clone();
+                fwd_pkt.hop_count += 1;
+                // Push it to the queue to be sent on the next tick
+                return Some(fwd_pkt);
+            }
+        }
+        None
     }
 }
 
@@ -72,7 +97,9 @@ impl<Node, const SIZE: usize, const LEN: usize, NR: NodeRole> MacPolicy<Node, SI
 where
     Node: MHNode<SIZE, LEN>,
 {
-    fn set_gw_hops(&mut self, _gw_hops: u8) {}
+    fn set_gw_hops(&mut self, gw_hops: u8) {
+        self.gw_hops = gw_hops
+    }
 
     fn should_tx_heartbeat(&mut self) -> bool {
         self.node_role.check_heartbeat()
@@ -102,7 +129,17 @@ where
             .await
         {
             Ok(conn) => match node.receive(conn, rx_buffer).await {
-                Ok((pkts, _rx_hw_timestamp)) => Ok(Some(pkts)),
+                Ok((mut pkts, _rx_hw_timestamp)) => {
+                    // check for a heartbeat which shuold be sent on
+                    if let Some(fwd_pkt) = pkts
+                        .iter()
+                        .filter(|p| p.packet_type == PacketType::HeartBeat)
+                        .find_map(|p| self.handle_hb(p))
+                    {
+                        let _ = pkts.push(fwd_pkt);
+                    }
+                    Ok(Some(pkts))
+                }
                 Err(e) => Err(e),
             },
             Err(_e) => {

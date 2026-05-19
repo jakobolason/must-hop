@@ -250,7 +250,9 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             // Add to recent seen, to compare later
             self.recent_seen.push((pkt.source_id, pkt.packet_id));
             // Fire and forget
-            return Ok(Some((pkt, PayloadType::HeartBeat)));
+            // return Ok(Some((pkt, PayloadType::HeartBeat)));
+            // This is handled by the MAC scheme
+            return Ok(None);
         }
         // Check if it is one of our packets
         if self.check_pend_ack(&pkt) {
@@ -387,7 +389,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         //     self.next_packet_id
         // );
         // If we are calling this, then we are a GW
-        self.gw_hops = 0;
+        // self.gw_hops = 0;
         Ok(MHPacket {
             destination_id: 0, // broadcast id
             packet_type: PacketType::HeartBeat,

@@ -77,23 +77,16 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             slot_manager: SlotManager {
                 slot_duration,
                 tau_hb: TauHbMode::Low,
-                hb_countdown: 0,
                 slots_per_frame: slots_per_frame.into(),
-                my_tx_slot: None,
-                known_slots_mask: SlotMask::default(),
-                node_id: 0,
                 gw_hops: 255,
                 leader_id: None,
+                ..Default::default()
             },
             time_manager: TimeManager {
                 time_sync,
-                last_hb_instant: None,
-                hbt_pkt: None,
-                feedback_vec: Vec::new(),
                 controller,
                 err_threshold: ERR_THRESHOLD,
-                sync_counter: 0,
-                out_of_sync: true,
+                ..Default::default()
             },
             counter: 0,
 
@@ -192,10 +185,13 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+struct FollowerFeedback {}
+
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 enum TauHbMode {
     High,
+    #[default]
     Low,
 }
 
@@ -215,6 +211,7 @@ impl TauHbMode {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct SlotManager {
     slot_duration: Duration,
     slots_per_frame: u8,
@@ -230,11 +227,13 @@ pub(crate) struct SlotManager {
     leader_id: Option<u8>,
 }
 
-const ERR_THRESHOLD: u32 = 20_000;
+const ERR_THRESHOLD: u32 = 30_000;
 // If received 10 synced messages, then go up into high tau mode
-const IN_SYNC_THRESHOLD: u8 = 7;
+const IN_SYNC_THRESHOLD: u8 = 5;
 // How long it takes, before a node goes back into full listening mode
 const HB_TIMEOUT: Duration = Duration::from_secs(120);
+
+#[derive(Default)]
 pub(crate) struct TimeManager<const SIZE: usize> {
     /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,
@@ -250,6 +249,11 @@ pub(crate) struct TimeManager<const SIZE: usize> {
     sync_counter: u8,
     /// If a single node is out of sync, we set this to go into low tau
     out_of_sync: bool,
+    /// We should only go up in sync_counter, if there actually was a node who said it was in sync
+    in_sync: bool,
+    /// Set when we receive a HB from our leader whose known_slots includes our own slot.
+    /// Only then do we consider ourselves "heard" and advance the sync counter.
+    heard_by_leader: bool,
 }
 
 pub struct Builder;
@@ -353,6 +357,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             Some(tple) => tple,
             None => return,
         };
+
         // Resync node to heartbeat's announced slot, if hb came closer to gw than me
         let should_use_pkt = match self.slot_manager.leader_id {
             Some(lid) => lid == pkt.source_id,
@@ -373,7 +378,15 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                         .unwrap_or(self.slot_manager.node_id),
                 ),
             );
-            // TODO:
+
+            // Mark ourselves as heard when the leader's allocation already knows our slot,
+            // so followers only advance toward High mode once they're confirmed visible.
+            if let Some(my_slot) = self.slot_manager.my_tx_slot
+                && alloc.known_slots & (1 << my_slot) != 0
+            {
+                self.time_manager.heard_by_leader = true;
+            }
+            // TODO: timeout missing
             // denote this as a leader node. This should only be set once (with a timeout
             // perhaps) such that 2 equal leader nodes don't make this follower node unstable
             let leader_id = match self.slot_manager.leader_id {
@@ -396,10 +409,13 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 .feedback_vec
                 .iter()
                 .find(|t| t.0 == self.slot_manager.node_id)
-                && prev_err.unsigned_abs() > self.time_manager.err_threshold
             {
-                info!("Node out of sync ...{}", prev_err);
-                self.time_manager.out_of_sync = true;
+                if prev_err.unsigned_abs() > self.time_manager.err_threshold {
+                    info!("Node out of sync ...{}", prev_err);
+                    self.time_manager.out_of_sync = true;
+                } else {
+                    self.time_manager.in_sync = true;
+                }
             }
 
             // if we are GW, then we want to update out t3 deltas on this node
@@ -440,6 +456,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 self.slot_manager.node_id,
             ) {
                 Some(free_slot) => {
+                    info!("Found my slot to be {}", free_slot);
                     self.slot_manager.my_tx_slot = Some(free_slot);
                     self.slot_manager.known_slots_mask.claim(free_slot);
                 }
@@ -540,7 +557,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     // Reset it, so this is tested again in the next run
                     // NOTE: Only reset here, not in sync_epoch
                     self.time_manager.out_of_sync = false;
-                } else {
+                } else if self.time_manager.in_sync {
+                    self.time_manager.in_sync = false;
                     self.time_manager.sync_counter =
                         self.time_manager.sync_counter.saturating_add(1);
                     info!("THEY WAS IN SYNC: {}", self.time_manager.sync_counter);
@@ -558,12 +576,13 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     fn update_heartbeat(
         &self,
         mut hbt: MHPacket<SIZE>,
-        my_tx_slot: u8,
+        my_slot: u8,
         feedback_vec: VecFB,
         adjusted_timestamp: u64,
     ) -> MHPacket<SIZE> {
+        info!("Sending my slot as {}", my_slot);
         let allocation = SyncBeacon {
-            my_slot: my_tx_slot,
+            my_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_frames(),
             gps_time_us: adjusted_timestamp,
@@ -726,11 +745,11 @@ where
             if let Ok(conn) = conn
                 && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
             {
-                info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts);
+                info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts.len());
                 self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
             }
-        } else if self.slot_manager.known_slots_mask.is_taken(slot) {
+        } else if self.slot_manager.known_slots_mask.is_taken(slot) || self.slot_manager.stormed {
             // Only listen if its for a known node
             // debug!(" -- NOT MY SLOT ---   ");
             let conn = node

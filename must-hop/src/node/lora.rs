@@ -106,6 +106,8 @@ where
     }
 }
 
+// In dBm, in low power mode is clamped between [-17, 15]
+// in HighPowerPA, clamped between [-9, 22]
 const OUTPUT_POWER: i32 = 7;
 
 impl<RK, DLY, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN>

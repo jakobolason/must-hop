@@ -15,7 +15,6 @@ pub(crate) struct Controller {
     ki: i64,
     kp: i64,
     pub prev_err: i64,
-    prev_delay: i64,
     leader_skip_frames: u8,
 }
 impl Controller {
@@ -52,7 +51,7 @@ impl Controller {
         // Now calculate the error the controller can use
         let (time_sync, error, delay) =
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
-        info!("LEADER IS IN {}", hb.tau_hb);
+        // info!("LEADER IS IN {}", hb.tau_hb);
         self.leader_skip_frames = hb.tau_hb;
 
         // Conditional integration anti-windup
@@ -80,10 +79,7 @@ impl Controller {
             self.v_s,
             v_s,
         );
-        // And get the new speed for our controller
-        self.v_s = v_s;
-        self.prev_delay = delay;
-        self.prev_err = error;
+
         time_sync
     }
 
