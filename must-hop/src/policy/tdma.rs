@@ -749,7 +749,7 @@ where
                 self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
             }
-        } else if self.slot_manager.known_slots_mask.is_taken(slot) || self.slot_manager.stormed {
+        } else if self.slot_manager.known_slots_mask.is_taken(slot) {
             // Only listen if its for a known node
             // debug!(" -- NOT MY SLOT ---   ");
             let conn = node
