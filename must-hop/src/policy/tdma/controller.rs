@@ -79,6 +79,8 @@ impl Controller {
             self.v_s,
             v_s,
         );
+        self.v_s = v_s;
+        self.prev_err = error;
 
         time_sync
     }
