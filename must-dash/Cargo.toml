@@ -21,3 +21,4 @@ chrono = "0.4.44"
 dotenv = "0.15.0"
 csv = "1.4.0"
 serde = { version = "1.0.228", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }

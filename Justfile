@@ -140,6 +140,16 @@ run-gw: deploy-gw-pi
 dash:
     cargo run --release -p must-dash
 
+# Run headless experiment: just headless --sf 9 --bw 125 --duration 600 1 2
+[group('Dashboard')]
+headless *args:
+    cargo run --release -p must-dash --bin headless -- {{ args }}
+
+# Sweep SF/BW matrix — edit analysis/scripts/run_experiments.py first
+[group('Analysis')]
+run-experiments:
+    cd analysis/scripts && uv run ./run_experiments.py
+
 [group('Analysis')]
 analyze-drift data_file="example.csv":
     @echo "Running analysis on {{ data_file }} .."

@@ -29,8 +29,8 @@ pub fn init_logger() {
     );
 }
 
-type ChildProcess = Box<dyn portable_pty::Child + Send + Sync>;
-fn spawn_pty_reader(
+pub type ChildProcess = Box<dyn portable_pty::Child + Send + Sync>;
+pub fn spawn_pty_reader(
     program: &str,
     args: &[&str],
     envs: &[(&str, &str)],
@@ -122,7 +122,7 @@ fn spawn_pty_reader(
     child
 }
 
-fn spawn_log_processes(
+pub fn spawn_log_processes(
     descriptors: &[ProcessDescriptor],
     tx: Sender<AppEvent>,
 ) -> Vec<ChildProcess> {
@@ -172,7 +172,7 @@ pub async fn run_app(
         }
     });
 
-    let mut app = App::new();
+    let mut app = App::new(true);
     let mut navigator = Navigator::new();
 
     let mut log_children: Vec<ChildProcess> = Vec::new();
@@ -246,29 +246,27 @@ pub async fn run_app(
                                 app.fetch_probes();
                                 navigator.probe_list_cursor = 0;
                             }
-                            KeyCode::Char('s') | KeyCode::Char('S') => {
-                                if !app.configured_nodes.is_empty() {
-                                    app.reset_data();
-                                    app.save_to_env_file();
-                                    navigator.view = NavigatorView::Dashboard;
-                                    let descriptors = app.build_descriptors();
-                                    log::info!("Built descriptors!");
-                                    app.init_sources(&descriptors);
-                                    log_children = spawn_log_processes(&descriptors, tx.clone());
-                                    delay_child = Some(spawn_pty_reader(
-                                        "just",
-                                        &["run-delay"],
-                                        &[],
-                                        tx.clone(),
-                                        |delay_ms, _| AppEvent::HardwareLog { delay_ms },
-                                    ));
-                                }
+                            KeyCode::Char('s') | KeyCode::Char('S')
+                                if !app.configured_nodes.is_empty() =>
+                            {
+                                app.reset_data();
+                                app.save_to_env_file();
+                                navigator.view = NavigatorView::Dashboard;
+                                let descriptors = app.build_descriptors();
+                                log::info!("Built descriptors!");
+                                app.init_sources(&descriptors);
+                                log_children = spawn_log_processes(&descriptors, tx.clone());
+                                delay_child = Some(spawn_pty_reader(
+                                    "just",
+                                    &["run-delay"],
+                                    &[],
+                                    tx.clone(),
+                                    |delay_ms, _| AppEvent::HardwareLog { delay_ms },
+                                ));
                             }
-                            KeyCode::Char('w') | KeyCode::Char('W') => {
-                                if app.has_data() {
-                                    app.save_data();
-                                    app.reset_data();
-                                }
+                            KeyCode::Char('w') | KeyCode::Char('W') if app.has_data() => {
+                                app.save_data();
+                                app.reset_data();
                             }
                             _ => {}
                         },
@@ -367,19 +365,17 @@ pub async fn run_app(
     Ok(())
 }
 
-async fn shutdown_processes(children: Vec<Option<ChildProcess>>) {
-    for child_opt in children {
-        if let Some(mut child) = child_opt {
-            if let Some(pid) = child.process_id() {
-                let _ = signal::kill(Pid::from_raw(-(pid as i32)), Signal::SIGINT);
-            }
-            let _ = tokio::time::timeout(
-                Duration::from_secs(1),
-                tokio::task::spawn_blocking(move || {
-                    let _ = child.wait();
-                }),
-            )
-            .await;
+pub async fn shutdown_processes(children: Vec<Option<ChildProcess>>) {
+    for mut child in children.into_iter().flatten() {
+        if let Some(pid) = child.process_id() {
+            let _ = signal::kill(Pid::from_raw(-(pid as i32)), Signal::SIGINT);
         }
+        let _ = tokio::time::timeout(
+            Duration::from_secs(1),
+            tokio::task::spawn_blocking(move || {
+                let _ = child.wait();
+            }),
+        )
+        .await;
     }
 }

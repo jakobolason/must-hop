@@ -13,6 +13,10 @@ command = [
   "in_std",
   "-p",
   "must-dash",
+  "-p",
+  "must-dash",
+  "--bin",
+  "headless",
 ]
 need_stdout = false
 

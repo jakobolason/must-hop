@@ -85,6 +85,7 @@ pub enum ProbeConfigFocus {
 }
 
 /// Defaults that persist across sessions, loaded from .env.
+#[derive(Clone)]
 pub struct Defaults {
     pub kp: String,
     pub ki: String,
@@ -106,12 +107,12 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
-        Self::new()
+        Self::new(true)
     }
 }
 
 impl App {
-    pub fn new() -> Self {
+    pub fn new(fetch_probes: bool) -> Self {
         let _ = dotenv();
         let kp = env::var("KP").unwrap_or_else(|_| KP_DEFAULT.to_string());
         let ki = env::var("KI").unwrap_or_else(|_| KI_DEFAULT.to_string());
@@ -128,7 +129,9 @@ impl App {
             sources: Vec::new(),
             dash_stats: DashStats::new(),
         };
-        app.fetch_probes();
+        if fetch_probes {
+            app.fetch_probes();
+        }
         app
     }
 
