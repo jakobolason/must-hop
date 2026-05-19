@@ -39,6 +39,7 @@ pub struct Navigator {
     pub dash_focus: DashFocus,
     pub history_scroll: usize,
     pub graph_scroll: usize,
+    pub logs_scroll: usize,
     pub shutting_down: bool,
 }
 
@@ -60,8 +61,16 @@ impl Navigator {
             dash_focus: DashFocus::Logs,
             history_scroll: 0,
             graph_scroll: 0,
+            logs_scroll: 0,
             shutting_down: false,
         }
+    }
+
+    pub fn reset_scrolls(&mut self) {
+        self.history_scroll = 0;
+        self.graph_scroll = 0;
+        self.logs_scroll = 0;
+        self.shutting_down = true;
     }
 
     /// Move up in the landing view; crosses the section boundary Nodes → Probes.
@@ -86,9 +95,7 @@ impl Navigator {
     pub fn landing_down(&mut self, probe_count: usize, node_count: usize) {
         match self.landing_section {
             LandingSection::Probes => {
-                if probe_count > 0
-                    && self.probe_list_cursor + 1 < probe_count
-                {
+                if probe_count > 0 && self.probe_list_cursor + 1 < probe_count {
                     self.probe_list_cursor += 1;
                 } else if node_count > 0 {
                     self.landing_section = LandingSection::Nodes;
@@ -156,5 +163,13 @@ impl Navigator {
 
     pub fn scroll_graph_forward(&mut self) {
         self.graph_scroll = self.graph_scroll.saturating_sub(1);
+    }
+
+    pub fn scroll_logs_up(&mut self) {
+        self.logs_scroll = self.logs_scroll.saturating_add(1);
+    }
+
+    pub fn scroll_logs_down(&mut self) {
+        self.logs_scroll = self.logs_scroll.saturating_sub(1);
     }
 }

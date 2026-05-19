@@ -2,12 +2,18 @@ use crate::{app::App, navigator::DashFocus};
 use ansi_to_tui::IntoText;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
-pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) {
+pub fn draw_dash_logs(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    dash_focus: &DashFocus,
+    logs_scroll: usize,
+) {
     let log_title_style = if *dash_focus == DashFocus::Logs {
         Style::default().fg(Color::White)
     } else {
@@ -50,11 +56,27 @@ pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFoc
                 .style(log_title_style),
         );
 
-        let scroll = source
-            .logs
-            .len()
-            .saturating_sub(chunks[i].height as usize - 2);
-        f.render_widget(panel.scroll((scroll as u16, 0)), chunks[i]);
+        let visible_lines = chunks[i].height as usize - 2;
+        let total_lines = source.logs.len();
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+        let clamped = logs_scroll.min(max_scroll);
+        // scroll=0 → bottom (newest); higher → further back
+        let scroll_row = max_scroll.saturating_sub(clamped);
+
+        f.render_widget(panel.scroll((scroll_row as u16, 0)), chunks[i]);
+
+        if total_lines > visible_lines {
+            let thumb_pos = max_scroll.saturating_sub(clamped);
+            let mut scrollbar_state = ScrollbarState::new(max_scroll + 1).position(thumb_pos);
+            f.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                chunks[i].inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
+                &mut scrollbar_state,
+            );
+        }
     }
 
     // Delay panel is always last, driven by DashStats rather than a log buffer
@@ -74,10 +96,23 @@ pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFoc
             .title(" hw delay ")
             .style(log_title_style),
     );
-    let delay_scroll = app
-        .dash_stats
-        .hardware_delay
-        .len()
-        .saturating_sub(chunks[n].height as usize - 2);
-    f.render_widget(delay_panel.scroll((delay_scroll as u16, 0)), chunks[n]);
+    let visible_lines = chunks[n].height as usize - 2;
+    let total_lines = app.dash_stats.hardware_delay.len();
+    let max_scroll = total_lines.saturating_sub(visible_lines);
+    let clamped = logs_scroll.min(max_scroll);
+    let scroll_row = max_scroll.saturating_sub(clamped);
+    f.render_widget(delay_panel.scroll((scroll_row as u16, 0)), chunks[n]);
+
+    if total_lines > visible_lines {
+        let thumb_pos = max_scroll.saturating_sub(clamped);
+        let mut scrollbar_state = ScrollbarState::new(max_scroll + 1).position(thumb_pos);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            chunks[n].inner(Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
+            &mut scrollbar_state,
+        );
+    }
 }

@@ -179,7 +179,7 @@ pub async fn run_app(
     let mut delay_child: Option<ChildProcess> = None;
 
     let quit_fn = |app: &mut App, ngtr: &mut Navigator, terminal: &mut Terminal<_>| {
-        ngtr.shutting_down = true;
+        ngtr.reset_scrolls();
         app.reset_data();
         let _ = terminal.draw(|f| ui::draw(f, app, ngtr));
     };
@@ -319,6 +319,12 @@ pub async fn run_app(
                         }
                         KeyCode::Down if navigator.dash_focus == DashFocus::Data => {
                             navigator.scroll_history_down()
+                        }
+                        KeyCode::Up if navigator.dash_focus == DashFocus::Logs => {
+                            navigator.scroll_logs_up()
+                        }
+                        KeyCode::Down if navigator.dash_focus == DashFocus::Logs => {
+                            navigator.scroll_logs_down()
                         }
                         KeyCode::Left => navigator.scroll_graph_back(app.dash_stats.packets.len()),
                         KeyCode::Right => navigator.scroll_graph_forward(),

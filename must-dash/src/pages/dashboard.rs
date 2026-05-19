@@ -16,6 +16,7 @@ pub fn draw_dash(
     dash_focus: &DashFocus,
     history_scroll: usize,
     graph_scroll: usize,
+    logs_scroll: usize,
 ) {
     let (data_constraint, log_constraint) = match dash_focus {
         DashFocus::Data => (Constraint::Percentage(50), Constraint::Percentage(50)),
@@ -36,7 +37,7 @@ pub fn draw_dash(
         history_scroll,
         graph_scroll,
     );
-    draw_dash_logs(f, app, main_chunks[2], dash_focus);
+    draw_dash_logs(f, app, main_chunks[2], dash_focus, logs_scroll);
 }
 
 fn draw_dash_header(f: &mut Frame, app: &App, area: Rect) {
