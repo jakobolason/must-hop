@@ -96,7 +96,7 @@ where
 
         bb_mod.time_on_air_us(
             Some(self.tx_pkt_params.preamble_length as u8),
-            self.tx_pkt_params.implicit_header,
+            !self.tx_pkt_params.implicit_header,
             bytes,
         )
     }
@@ -131,6 +131,7 @@ where
             }
         };
 
+        let before = Instant::now();
         self.lora
             .prepare_for_tx(
                 &self.mdltn_params,
@@ -141,10 +142,15 @@ where
             .await?;
         let now_sending = Instant::now();
         self.lora.tx().await?;
+        let after_sending = Instant::now();
         trace!(
             "[TAU_SLICE_POST] |{}|{}|",
             now_sending.as_micros(),
             used_slice.len()
+        );
+        trace!(
+            "ToA for node: {}",
+            after_sending.as_millis() - before.as_millis()
         );
         // NOTE: This might create a delay between transmitting something and being able to receive
         // again

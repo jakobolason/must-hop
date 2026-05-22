@@ -118,7 +118,7 @@ impl GWNode {
         ))
     }
 
-    /// Calculates the ms of ToA given a specific payload lengt and uses it's previous transmit
+    /// Calculates the ms of ToA in microseconds given a specific payload lengt and uses it's previous transmit
     /// parameters
     fn calc_toa(&self, payload_len: u8) -> u32 {
         // Using the formula to calculate time-on-air
@@ -127,7 +127,11 @@ impl GWNode {
             self.pkt_params.bandwidth.into(),
             self.pkt_params.coderate.into(),
         );
-        bb_mod.time_on_air_us(None, true, payload_len)
+        bb_mod.time_on_air_us(
+            self.pkt_params.preamble.map(|p| p as u8).or(Some(8)),
+            !self.pkt_params.implicit_header,
+            payload_len,
+        )
     }
     fn avg_slice_delay(&self, payload_len: usize) -> u64 {
         INTERCEPT + SLOPE * payload_len as u64
@@ -248,6 +252,8 @@ impl MHNode<SIZE, LEN> for GWNode {
         }
     }
 
+    /// Calculates the transmission delay associated with this radio. Also the LoRa ToA is
+    /// calculated in mciroseconds.
     fn calc_tx_delay(&self, payload_len: usize) -> u64 {
         self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len)
     }

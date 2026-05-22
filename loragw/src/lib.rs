@@ -146,6 +146,7 @@ impl<'a> Concentrator<Builder<'a>> {
         self.state.channel_conf = confs;
         self
     }
+
     pub fn add_config_channel(mut self, chain: u8, conf: ChannelConf) -> Self {
         log::info!("chain: {}, conf: {:?}", chain, conf);
         self.state.channel_conf.push((chain, conf));
