@@ -118,7 +118,8 @@ impl Controller {
                 down_ms,
                 nw_delay as f32 / 1000.0
             );
-            nw_delay
+            // nw_delay
+            (*delta_up / 2) as i64
             // }
         } else {
             0
@@ -128,7 +129,7 @@ impl Controller {
         // let avg_delay = (self.prev_delay + nw_delay) / 2;
 
         // Use the network delay to make up for transmission time, etc.
-        let current_true_time = hb.gps_time_us as i64 - nw_delay;
+        let current_true_time = hb.gps_time_us as i64 + nw_delay;
 
         // Now update drift
         let gw_diff = current_true_time - old_gps as i64;
@@ -138,7 +139,7 @@ impl Controller {
         // Only re-sync if the error is substantially large
         let time_sync = if err.abs() > 70_000 {
             // re-sync means the last error was not enough to put the controller onto the correct speed,
-            // to not fuck up the controller, just adjust the stamp appropriately?
+            // to not fuck up the controller, adjust the stamp such that it doesn't get too out of sync
             let adjustment = if err > 0 { -50_000 } else { 50_000 };
             (
                 ((current_true_time + adjustment) as u64),

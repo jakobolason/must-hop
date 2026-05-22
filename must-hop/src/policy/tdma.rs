@@ -419,6 +419,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     pkt.source_id
                 }
             };
+            if leader_id == pkt.source_id {
+                self.time_manager.last_hb_instant = Some(Instant::now());
+            }
 
             // If this is leader, then we check if the tau_hb matches theirs
             // if leader_id == pkt.source_id && alloc.tau_hb != self.slot_manager.tau_hb.as_secs() {
@@ -496,6 +499,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 0
             }
         };
+        info!("GIVEN TOA: {}", toa);
         info!("[TAU_SLICE]|{}|", Instant::now().as_micros());
         // FIXME: Remember setting this
         let measured_spi_delay = 0;
@@ -799,6 +803,7 @@ where
         }
         #[cfg(feature = "debug")]
         if let Some(pin) = self.debug_pin.as_mut() {
+            Timer::after(Duration::from_millis(1)).await;
             let _ = pin.set_low();
         }
         Ok(Some(received_packets))
