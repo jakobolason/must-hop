@@ -70,6 +70,12 @@ impl Controller {
         //     tentative_v_s
         // };
         let v_s = self.apply_pi_controller(error);
+        // Saturate the change of speed
+        let v_s = if (v_s - self.v_s).abs() > 2_000_000 {
+            self.v_s + v_s.signum() * 2_000_000
+        } else {
+            v_s
+        };
 
         // Debug info:
         info!(

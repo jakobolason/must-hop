@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Experiment runner for must-hop.
 Builds the headless binary once, then sweeps through (SF, BW) combinations.
@@ -13,10 +12,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Configuration — edit this section for each experiment session
-# ---------------------------------------------------------------------------
-
 EXPERIMENTS = [
     {"sf": 7,  "bw": 125},
     {"sf": 8,  "bw": 125},
@@ -26,11 +21,11 @@ EXPERIMENTS = [
     {"sf": 12, "bw": 125},
 ]
 
-# Node source IDs (must match your physical setup)
-NODES = ["1", "2"]
+# Node source IDs 
+NODES = ["7"]
 
-KP = "0.5"
-KI = "0.4"
+KP = "50"
+KI = "40"
 
 # Seconds per experiment run (~10 min default)
 DURATION = 600
@@ -38,9 +33,6 @@ DURATION = 600
 # Seconds to wait between runs for radio settling
 INTER_RUN_DELAY = 30
 
-# ---------------------------------------------------------------------------
-# Paths — usually no need to change
-# ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).parent.parent.parent.resolve()
 HEADLESS_BIN = REPO_ROOT / "target" / "release" / "headless"
@@ -57,7 +49,7 @@ def build_headless() -> None:
     print("[runner] Build OK.\n")
 
 
-def run_experiment(sf: int, bw: int, nodes: list[str], duration: int) -> dict:
+def run_experiment(sf: int, bw: int, nodes: list[str], duration: int) -> dict[str, any]:
     print(f"[runner] SF={sf} BW={bw} nodes={nodes} duration={duration}s")
 
     start = datetime.now()
@@ -126,7 +118,7 @@ def main() -> None:
     print("=== All experiments complete ===")
     print(f"Manifest: {manifest_path}")
     for r in results:
-        flag = "✓" if r["exit_code"] == 0 else "✗"
+        flag = "success" if r["exit_code"] == 0 else "failed"
         print(f"  {flag}  SF={r['sf']} BW={r['bw']}  ({r['elapsed_s']:.0f}s)")
 
 
