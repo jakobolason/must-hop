@@ -117,6 +117,9 @@ impl GWNode {
             used_slice.len(),
         ))
     }
+
+    /// Calculates the ms of ToA given a specific payload lengt and uses it's previous transmit
+    /// parameters
     fn calc_toa(&self, payload_len: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(
@@ -142,15 +145,14 @@ impl MHNode<SIZE, LEN> for GWNode {
             embassy_time::Timer::after(Duration::from_millis(5)).await;
         }
         self.radio.transmit(tx_pkt)?;
-        // Because the SX1302 is independent of the process running this program, this returns
-        // before its done transmitting, and just returns after it's done sending the bytes to the radio
         let after = Instant::now();
         trace!(
             "[TAU_SLICE_POST] | {} | {} |",
             after.as_micros(),
             payload_size
         );
-
+        let toa = self.calc_toa(payload_size as u8);
+        embassy_time::Timer::after(Duration::from_micros(toa as u64)).await;
         Ok(())
     }
 
@@ -225,6 +227,7 @@ impl MHNode<SIZE, LEN> for GWNode {
     ) -> Result<Self::Connection, Self::Error> {
         let start_time = Instant::now();
         // let timeout = Duration::from_secs(1);
+        // TODO: Make this a select? So either select the loop { radio.receive } or timeout
         loop {
             if let Some(pkt) = self.fetched_packets.pop_front() {
                 *rec_buf = Some(pkt);
@@ -244,6 +247,7 @@ impl MHNode<SIZE, LEN> for GWNode {
             Timer::after(Duration::from_millis(5)).await;
         }
     }
+
     fn calc_tx_delay(&self, payload_len: usize) -> u64 {
         self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len)
     }

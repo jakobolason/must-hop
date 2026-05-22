@@ -70,6 +70,7 @@ pub fn create_concentrator(
         .set_rx_rfs(radios)
         .set_config_channels(channels)
         .set_config_tx_gains(&tx_gains)
+        .filter_self_echo()
         .connect()?
         .start()
 }

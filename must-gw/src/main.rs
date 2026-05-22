@@ -62,6 +62,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
             embassy_time::Instant::now(),
         ))
         .set_tau_hb(tau_hb)
+        .node_is_leader()
         .build();
 
     // let mac = RandomAccessMac::new(GatewayPolicy::new(tau_hb));
