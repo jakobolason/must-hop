@@ -6,6 +6,8 @@ use must_dash::{
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+type Nodes = Vec<(String, String)>;
+
 #[derive(Parser)]
 #[command(about = "Headless experiment runner — same log processing as must-dash, no TUI")]
 struct Args {
@@ -30,8 +32,14 @@ struct Args {
     duration: u64,
 
     /// Node source IDs
-    #[arg(required = true)]
-    nodes: Vec<String>,
+    #[arg(required = true, value_parser = parse_node)]
+    nodes: Nodes,
+}
+
+fn parse_node(s: &str) -> Result<(String, String), String> {
+    s.split_once(':')
+        .map(|(id, probe)| (id.to_owned(), probe.to_owned()))
+        .ok_or_else(|| format!("Expected node_id:probe_id, got {s:?}"))
 }
 
 #[tokio::main]
@@ -45,10 +53,11 @@ async fn main() {
     );
 
     let mut app = must_dash::app::App::new(false);
-    for (i, id) in args.nodes.iter().enumerate() {
+    for (i, (id, probe_id)) in args.nodes.iter().enumerate() {
         app.configured_nodes.push(NodeConfig {
             probe_index: i,
             probe_name: format!("probe-{id}"),
+            probe_id: probe_id.clone(),
             kp: args.kp.clone(),
             ki: args.ki.clone(),
             source_id: id.clone(),

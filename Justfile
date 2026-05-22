@@ -6,7 +6,7 @@ PI_USER := env_var_or_default("PI_USER", "pi")
 PI_TARGET_DIR := "/home/" + PI_USER + "/must-hop"
 GW_SF := env_var_or_default("SF", "7")
 GW_BW := env_var_or_default("BW", "125")
-
+PROBE := env_var_or_default("PROBE", "1366:0101")
 # Build must-hop and must-gw
 [group('Host builds')]
 build:
@@ -84,7 +84,7 @@ remote-run id:
     @echo "Flashing remotely to Pi..."
     cd examples/lora/rak3272s && \
     CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
-    --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN --probe 1366:0101" \
+    --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN --probe {{ PROBE }}" \
     SOURCEID={{ id }} SF={{ GW_SF }} BW={{ GW_BW }} cargo run --release --bin main
 
 # Attach to a remote probe-rs server

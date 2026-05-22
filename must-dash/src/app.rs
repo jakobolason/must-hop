@@ -59,11 +59,13 @@ pub struct ProcessDescriptor {
 pub struct ProbeInfo {
     pub index: usize,
     pub name: String,
+    pub probe_id: String,
 }
 
 pub struct NodeConfig {
     pub probe_index: usize,
     pub probe_name: String,
+    pub probe_id: String,
     pub kp: String,
     pub ki: String,
     pub source_id: String,
@@ -170,6 +172,7 @@ impl App {
             self.pending_node = Some(NodeConfig {
                 probe_index: probe.index,
                 probe_name: probe.name.clone(),
+                probe_id: probe.probe_id.clone(),
                 kp: self.defaults.kp.clone(),
                 ki: self.defaults.ki.clone(),
                 source_id: String::new(),
@@ -185,6 +188,7 @@ impl App {
             self.pending_node = Some(NodeConfig {
                 probe_index: node.probe_index,
                 probe_name: node.probe_name.clone(),
+                probe_id: node.probe_id.clone(),
                 kp: node.kp.clone(),
                 ki: node.ki.clone(),
                 source_id: node.source_id.clone(),
@@ -218,6 +222,7 @@ impl App {
             self.available_probes.push(ProbeInfo {
                 index: node.probe_index,
                 name: node.probe_name,
+                probe_id: node.probe_id,
             });
             self.available_probes.sort_by_key(|p| p.index);
         }
@@ -317,6 +322,7 @@ impl App {
                 ("SOURCEID".to_string(), node.source_id.clone()),
                 ("SF".to_string(), node.sf.clone()),
                 ("BW".to_string(), node.bw.clone()),
+                ("PROBE".to_string(), node.probe_id.clone()),
             ]);
             descs.push(ProcessDescriptor {
                 source_id: format!("node-{}", node.source_id),
@@ -527,7 +533,15 @@ fn parse_probe_list(output: &str) -> Vec<ProbeInfo> {
             let end = line.find(']')?;
             let index: usize = line[1..end].parse().ok()?;
             let name = line[end + 2..].trim().to_string();
-            Some(ProbeInfo { index, name })
+            // This is for a J-link debugger, might not work for others
+            let start_id = line.find("--")?;
+            let end_id = line.find('(')?;
+            let probe_id = line[start_id + 2..end_id - 1].trim().to_string();
+            Some(ProbeInfo {
+                index,
+                name,
+                probe_id,
+            })
         })
         .collect()
 }
