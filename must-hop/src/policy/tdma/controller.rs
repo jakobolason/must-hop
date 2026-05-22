@@ -36,7 +36,7 @@ impl Controller {
     pub(crate) fn run_transferfunction(
         &mut self,
         hb: &SyncBeacon,
-        rx_pkt: RxPacket,
+        rx_pkt: &RxPacket,
         time_sync: Option<(u64, Instant)>,
         node_id: u8,
     ) -> (u64, Instant) {
@@ -90,13 +90,12 @@ impl Controller {
     fn calc_error(
         &self,
         hb: &SyncBeacon,
-        rx_pkt: RxPacket,
+        rx_pkt: &RxPacket,
         old_gps: u64,
         last_stamp: Instant,
         node_id: u8,
     ) -> ((u64, Instant), i64, i64) {
         // Calculate skews
-        // let my_stamp = self.current_gps_time((old_gps, last_stamp));
         let my_diff = (rx_pkt.rx_done_instant - last_stamp).as_micros();
         let predicted_elapsed = (my_diff as i64 + self.calc_drift_duration(my_diff)) as u64;
         let my_stamp = predicted_elapsed + old_gps;
@@ -108,19 +107,19 @@ impl Controller {
             let delta_down = hb.gps_time_us as i64 - my_stamp as i64;
             let up_ms = *delta_up as f32 / 1000.0;
             let down_ms = delta_down as f32 / 1000.0;
-            if delta_down.abs() > 20_000 || delta_up.abs() > 30_000 {
-                info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
-                0
-            } else {
-                let nw_delay = (delta_down + *delta_up as i64) / 2;
-                info!(
-                    "[DELTAS]|{}|{}|{}|",
-                    up_ms,
-                    down_ms,
-                    nw_delay as f32 / 1000.0
-                );
-                nw_delay
-            }
+            // if delta_down.abs() > 20_000 || delta_up.abs() > 30_000 {
+            //     info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
+            //     0
+            // } else {
+            let nw_delay = (delta_down + *delta_up as i64) / 2;
+            info!(
+                "[DELTAS]|{}|{}|{}|",
+                up_ms,
+                down_ms,
+                nw_delay as f32 / 1000.0
+            );
+            nw_delay
+            // }
         } else {
             0
         };
@@ -134,18 +133,7 @@ impl Controller {
         // Now update drift
         let gw_diff = current_true_time - old_gps as i64;
 
-        let phase_err = gw_diff - predicted_elapsed as i64;
-        // let freq_err = {
-        //     if predicted_elapsed > ((tau_hb_us * 7) / 6) {
-        //         // > 1.16*tau_hb_us
-        //         0
-        //     } else {
-        //         tau_hb_us as i64 - predicted_elapsed as i64
-        //     }
-        // };
-
-        // let err = freq_err + phase_err;
-        let err = phase_err;
+        let err = gw_diff - predicted_elapsed as i64;
 
         // Only re-sync if the error is substantially large
         let time_sync = if err.abs() > 70_000 {
@@ -243,7 +231,7 @@ mod controller_tests {
         let rx = make_rx_pkt(now);
 
         // Should return the GPS time from the heartbeat as the initial epoch
-        let (gps_us, _instant) = c.run_transferfunction(&alloc, rx, None, 1);
+        let (gps_us, _instant) = c.run_transferfunction(&alloc, &rx, None, 1);
 
         assert_eq!(
             gps_us, 123_456_789,
@@ -261,7 +249,7 @@ mod controller_tests {
         let alloc = make_alloc(0);
         let rx = make_rx_pkt(now);
 
-        c.run_transferfunction(&alloc, rx, None, 1);
+        c.run_transferfunction(&alloc, &rx, None, 1);
 
         assert_eq!(
             c.v_s, initial_v_s,
@@ -286,7 +274,7 @@ mod controller_tests {
         let rx = make_rx_pkt(rx_instant);
         let prior_sync = Some((gps_base, base_instant));
 
-        c.run_transferfunction(&alloc, rx, prior_sync, 1);
+        c.run_transferfunction(&alloc, &rx, prior_sync, 1);
 
         assert_eq!(
             c.v_s, initial_v_s,

@@ -21,6 +21,7 @@ mod slots;
 
 use controller::Controller;
 
+use core::time::Duration as CoreDuration;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
@@ -97,6 +98,8 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Use this to give a previously known approximate speed of the chip, to decrease the time to
+    /// stability of this node.
     pub fn set_controller(self, v_s: i64, kp: i64, ki: i64) -> Self {
         let controller = Controller::new(v_s, kp, ki);
         Self {
@@ -108,6 +111,8 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Set the time stamp this node should use, instead of getting it from a leader. Mostly use
+    /// this if you are GW
     pub fn set_time_sync(self, time_sync: (u64, Instant)) -> Self {
         Self {
             time_manager: TimeManager {
@@ -118,6 +123,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Set the node id this should have, to be used for finding the slot
     pub fn set_node_id(self, node_id: u8) -> Self {
         Self {
             slot_manager: SlotManager {
@@ -128,8 +134,10 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Use this to set a specific tx slot this node should use, regardless of what it might receive
+    /// from others. Mostly use this if you are a GW
     pub fn set_tx_slot(self, tx_slot: u8) -> Self {
-        let mut copied_sm = self.slot_manager.known_slots_mask.clone();
+        let mut copied_sm = self.slot_manager.known_slots_mask;
         copied_sm.claim(tx_slot);
         Self {
             slot_manager: SlotManager {
@@ -141,6 +149,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Set the time period before sending a heartbeat (IN THE HIGH FREQUENCY SETTING)
     pub fn set_tau_hb(self, tau_hb: u8) -> Self {
         let tau_hb = TauHbMode::from_secs(tau_hb);
         Self {
@@ -152,6 +161,20 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Use this to ensure that this node does nat wait to listen for a leader, before beginning to
+    /// transmit.
+    pub fn node_is_leader(self) -> Self {
+        Self {
+            time_manager: TimeManager {
+                heard_by_leader: true,
+                ..self.time_manager
+            },
+            ..self
+        }
+    }
+
+    /// Debug mode: If this is set, the node will pull the pin high when a slot begins, which allows
+    /// one to track the time synchronization of the system.
     #[cfg(feature = "debug")]
     pub fn set_debug_pin(self, pin: P) -> Self {
         Self {
@@ -184,8 +207,6 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
         )
     }
 }
-
-struct FollowerFeedback {}
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
@@ -336,7 +357,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         self.time_manager.controller.prev_err = 0;
     }
 
-    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
+    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: &RxPacket) {
         // Look for a heartbeat and get allocation from byte slices
         let received_hb = pkts
             .iter()
@@ -381,7 +402,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
             // Mark ourselves as heard when the leader's allocation already knows our slot,
             // so followers only advance toward High mode once they're confirmed visible.
-            if let Some(my_slot) = self.slot_manager.my_tx_slot
+            if !self.time_manager.heard_by_leader
+                && let Some(my_slot) = self.slot_manager.my_tx_slot
                 && alloc.known_slots & (1 << my_slot) != 0
             {
                 self.time_manager.heard_by_leader = true;
@@ -397,6 +419,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     pkt.source_id
                 }
             };
+
             // If this is leader, then we check if the tau_hb matches theirs
             // if leader_id == pkt.source_id && alloc.tau_hb != self.slot_manager.tau_hb.as_secs() {
             //     self.slot_manager.tau_hb = TauHbMode::from_secs(alloc.tau_hb);
@@ -595,6 +618,72 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         }
         hbt
     }
+
+    async fn rx<Node, const LEN: usize>(
+        &mut self,
+        node: &mut Node,
+        rx_buffer: &mut Node::ReceiveBuffer,
+        with_timeout: Option<CoreDuration>,
+    ) -> Option<(Vec<MHPacket<SIZE>, LEN>, RxPacket)>
+    where
+        Node: MHNode<SIZE, LEN>,
+    {
+        let conn = node.listen(rx_buffer, with_timeout).await;
+        if let Ok(conn) = conn
+            && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
+        {
+            self.sync_epoch(&pkts, &rx_pkt);
+            Some((pkts, rx_pkt))
+        } else {
+            // Check to see if we haven't heard from *leader* in some time
+            if let Some(inst) = self.time_manager.last_hb_instant
+                && Instant::now() > inst + HB_TIMEOUT
+            {
+                // NOTE: This does not fire for the GW, because last_hb_instant should always be None
+                info!("Have not heard from leader before timeout, returning to listening moode");
+                self.reset_sync();
+            }
+            None
+        }
+    }
+    async fn tx<Node, const LEN: usize>(
+        &mut self,
+        node: &mut Node,
+        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        my_tx_slot: u8,
+    ) -> Result<(), Node::Error>
+    where
+        Node: MHNode<SIZE, LEN>,
+    {
+        if !tx_queue.is_full()
+            && let Some(pkt) = self.time_manager.hbt_pkt.take()
+        {
+            let extracted_deltas: VecFB = core::mem::take(&mut self.time_manager.feedback_vec);
+            let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
+                self.approximate_packet_size(my_tx_slot, extracted_deltas.clone(), tx_queue),
+            ));
+            self.update_tau_hb();
+            info!(
+                "[STATE_SYNC]|{:?}|{}|",
+                self.slot_manager.tau_hb, self.time_manager.sync_counter
+            );
+            let upd_pkt =
+                self.update_heartbeat(pkt, my_tx_slot, extracted_deltas, adjusted_timestamp);
+            if let Err(pkt) = tx_queue.push(upd_pkt) {
+                error!("Queue is full even though we just checked??");
+                self.time_manager.hbt_pkt = Some(pkt);
+            }
+        } else {
+            // Update so we eventually send a hb out
+            self.slot_manager.hb_countdown = self.slot_manager.hb_countdown.saturating_sub(1);
+        }
+        if !tx_queue.is_empty() {
+            let tx_result = node.transmit(tx_queue).await;
+            tx_queue.clear();
+            tx_result?;
+        }
+        Ok(())
+    }
 }
 
 impl<Node, const SIZE: usize, const LEN: usize, P> MacPolicy<Node, SIZE, LEN>
@@ -644,48 +733,24 @@ where
         // TODO: Go back into this, if not heard a heartbeat in some time
         let Some(timestamps) = self.time_manager.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
-            let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_secs(10)))
-                .await;
-            match conn {
-                Ok(conn) => {
-                    let (rec, rx_pkt) = node.receive(conn, rx_buffer).await?;
-                    // Check for being heartbeat
-                    self.sync_epoch(&rec, rx_pkt);
-                    // TODO: Wait 200ms, then transmit HB yourself
-                    Timer::after(Duration::from_millis(200)).await;
-                    if let Some(hbt_pkt) = self.time_manager.hbt_pkt.take()
-                        && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
-                    {
-                        let extracted_deltas: VecFB =
-                            core::mem::take(&mut self.time_manager.feedback_vec);
-                        let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
-                            self.approximate_packet_size(
-                                my_tx_slot,
-                                extracted_deltas.clone(),
-                                tx_queue,
-                            ),
-                        ));
-                        self.update_tau_hb();
-                        info!(
-                            "[STATE_SYNC]|{:?}|{}|",
-                            self.slot_manager.tau_hb, self.time_manager.sync_counter
-                        );
-                        let upd_pkt = self.update_heartbeat(
-                            hbt_pkt,
-                            my_tx_slot,
-                            extracted_deltas,
-                            adjusted_timestamp,
-                        );
-                        node.transmit(&[upd_pkt]).await?;
-                    }
+            if let Some((pkts, _rx_pkt)) = self
+                .rx(node, rx_buffer, Some(CoreDuration::from_secs(10)))
+                .await
+            {
+                // Check for being heartbeat
+                // self.sync_epoch(&pkts, &rx_pkt);
+                // TODO: Wait 200ms, then transmit HB yourself
+                Timer::after(Duration::from_millis(200)).await;
 
-                    return Ok(Some(rec));
+                if self.time_manager.hbt_pkt.is_some()
+                    && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
+                {
+                    self.tx(node, tx_queue, my_tx_slot).await?;
                 }
-                Err(e) => {
-                    info!("Error in getting conn: {:?}", e);
-                    return Ok(None);
-                }
+
+                return Ok(Some(pkts));
+            } else {
+                return Ok(None);
             }
         };
 
@@ -704,74 +769,32 @@ where
 
         if let Some(my_tx_slot) = self.slot_manager.my_tx_slot
             && slot == my_tx_slot
+            && self.time_manager.heard_by_leader
         {
             // debug!(" !!!  MY SLOT !!! ");
             // NOTE: Introduce a 100ms delay here, to ensure nodes are listening in your slot
             Timer::after(Duration::from_millis(100)).await;
 
-            if !tx_queue.is_full()
-                && let Some(pkt) = self.time_manager.hbt_pkt.take()
-            {
-                let extracted_deltas: VecFB = core::mem::take(&mut self.time_manager.feedback_vec);
-                let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
-                    self.approximate_packet_size(my_tx_slot, extracted_deltas.clone(), tx_queue),
-                ));
-                self.update_tau_hb();
-                info!(
-                    "[STATE_SYNC]|{:?}|{}|",
-                    self.slot_manager.tau_hb, self.time_manager.sync_counter
-                );
-                let upd_pkt =
-                    self.update_heartbeat(pkt, my_tx_slot, extracted_deltas, adjusted_timestamp);
-                if let Err(pkt) = tx_queue.push(upd_pkt) {
-                    error!("Queue is full even though we just checked??");
-                    self.time_manager.hbt_pkt = Some(pkt);
-                }
-            } else {
-                // Update so we eventually send a hb out
-                self.slot_manager.hb_countdown = self.slot_manager.hb_countdown.saturating_sub(1);
-            }
-            if !tx_queue.is_empty() {
-                let tx_result = node.transmit(tx_queue).await;
-                tx_queue.clear();
-                tx_result?;
-            }
+            self.tx(node, tx_queue, my_tx_slot).await?;
 
             // TODO: Wait 100ms, then listen for 200ms for new nodes on network
+            // TODO: Shuoldn't this only be done after heartbeats?
             Timer::after(Duration::from_millis(100)).await;
-            let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_millis(200)))
-                .await;
-            if let Ok(conn) = conn
-                && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
+            if let Some((pkts, _rx_pkt)) = self
+                .rx(node, rx_buffer, Some(CoreDuration::from_millis(200)))
+                .await
             {
                 info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts.len());
-                self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
             }
         } else if self.slot_manager.known_slots_mask.is_taken(slot) {
             // Only listen if its for a known node
             // debug!(" -- NOT MY SLOT ---   ");
-            let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_millis(500)))
-                .await;
-            if let Ok(conn) = conn
-                && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
+            if let Some((pkts, _rx_pkt)) = self
+                .rx(node, rx_buffer, Some(CoreDuration::from_millis(500)))
+                .await
             {
-                self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
-            } else {
-                // Check to see if we haven't heard from *leader* in some time
-                if let Some(inst) = self.time_manager.last_hb_instant
-                    && Instant::now() > inst + HB_TIMEOUT
-                {
-                    info!(
-                        "Have not heard from leader before timeout, returning to listening moode"
-                    );
-                    // then we go into listening mode
-                    // self.time_manager.time_sync = None;
-                    self.reset_sync();
-                }
             }
         }
         #[cfg(feature = "debug")]
