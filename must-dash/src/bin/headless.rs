@@ -1,6 +1,8 @@
 use clap::Parser;
-use must_dash::app::{AppEvent, NodeConfig};
-use must_dash::{init_logger, shutdown_processes, spawn_log_processes, spawn_pty_reader};
+use must_dash::app::NodeConfig;
+use must_dash::{
+    app::AppEvent, init_logger, shutdown_processes, spawn_log_processes, spawn_pty_reader,
+};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -61,7 +63,6 @@ async fn main() {
     let descriptors = app.build_descriptors();
     app.init_sources(&descriptors);
     let mut log_children = spawn_log_processes(&descriptors, tx.clone());
-
     let delay_child = Some(spawn_pty_reader(
         "just",
         &["run-delay"],
@@ -74,10 +75,16 @@ async fn main() {
 
     loop {
         match tokio::time::timeout_at(deadline, rx.recv()).await {
-            Ok(Some(AppEvent::ProcessLog { source, text, overwrite })) => {
+            Ok(Some(AppEvent::ProcessLog {
+                source,
+                text,
+                overwrite,
+            })) => {
+                println!("{source} => {text}");
                 app.add_log(&source, text, overwrite);
             }
             Ok(Some(AppEvent::HardwareLog { delay_ms })) => {
+                println!("hw delay: {delay_ms}");
                 app.add_hw_delay(delay_ms);
             }
             Ok(Some(_)) => {}

@@ -12,10 +12,10 @@ use crossterm::event::{self, Event as CEvent, KeyCode};
 use navigator::{DashFocus, LandingSection, LandingSubView, NavigatorView};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, Receiver};
 
 pub fn init_logger() {
     let _ = simplelog::WriteLogger::init(
@@ -151,32 +151,39 @@ pub fn spawn_log_processes(
         .collect()
 }
 
+pub fn initialize(interactive: bool) -> (App, Sender<AppEvent>, Receiver<AppEvent>) {
+    let (tx, rx) = mpsc::channel(100);
+    init_logger();
+
+    if interactive {
+        let tx_input = tx.clone();
+        tokio::spawn(async move {
+            loop {
+                if crossterm::event::poll(Duration::from_millis(250)).unwrap()
+                    && let CEvent::Key(key) = event::read().unwrap()
+                    && tx_input.send(AppEvent::Input(key.code)).await.is_err()
+                {
+                    break;
+                }
+                if tx_input.send(AppEvent::Tick).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    let app = App::new(interactive);
+
+    (app, tx, rx)
+}
+
 pub async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (tx, mut rx) = mpsc::channel(100);
-    init_logger();
-
-    let tx_input = tx.clone();
-    tokio::spawn(async move {
-        loop {
-            if crossterm::event::poll(Duration::from_millis(250)).unwrap()
-                && let CEvent::Key(key) = event::read().unwrap()
-                && tx_input.send(AppEvent::Input(key.code)).await.is_err()
-            {
-                break;
-            }
-            if tx_input.send(AppEvent::Tick).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    let mut app = App::new(true);
     let mut navigator = Navigator::new();
 
-    let mut log_children: Vec<ChildProcess> = Vec::new();
-    let mut delay_child: Option<ChildProcess> = None;
+    let (mut app, tx, mut rx) = initialize(true);
+    let mut log_children = Vec::new();
+    let mut delay_child = None;
 
     let quit_fn = |app: &mut App, ngtr: &mut Navigator, terminal: &mut Terminal<_>| {
         ngtr.reset_scrolls();

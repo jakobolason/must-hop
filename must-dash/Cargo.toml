@@ -2,6 +2,7 @@
 name = "must-dash"
 version = "0.1.0"
 edition = "2024"
+default-run = "must-dash"
 
 [dependencies]
 ratatui = "0.30.0"
