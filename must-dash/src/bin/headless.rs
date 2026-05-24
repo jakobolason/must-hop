@@ -3,10 +3,29 @@ use must_dash::app::NodeConfig;
 use must_dash::{
     app::AppEvent, init_logger, shutdown_processes, spawn_log_processes, spawn_pty_reader,
 };
+use std::str::FromStr;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-type Nodes = Vec<(String, String)>;
+/// A `node_id:probe_id` pair passed as a positional argument.
+/// The probe serial itself may contain colons, so we split on the first one only.
+#[derive(Clone, Debug)]
+struct NodeArg {
+    node_id: String,
+    probe_id: String,
+}
+
+impl FromStr for NodeArg {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.split_once(':')
+            .map(|(id, probe)| NodeArg {
+                node_id: id.to_owned(),
+                probe_id: probe.to_owned(),
+            })
+            .ok_or_else(|| format!("Expected node_id:probe_id, got {s:?}"))
+    }
+}
 
 #[derive(Parser)]
 #[command(about = "Headless experiment runner — same log processing as must-dash, no TUI")]
@@ -31,15 +50,9 @@ struct Args {
     #[arg(long, default_value_t = 600)]
     duration: u64,
 
-    /// Node source IDs
-    #[arg(required = true, value_parser = parse_node)]
-    nodes: Nodes,
-}
-
-fn parse_node(s: &str) -> Result<(String, String), String> {
-    s.split_once(':')
-        .map(|(id, probe)| (id.to_owned(), probe.to_owned()))
-        .ok_or_else(|| format!("Expected node_id:probe_id, got {s:?}"))
+    /// Nodes in node_id:probe_id format (probe serial may contain colons)
+    #[arg(required = true)]
+    nodes: Vec<NodeArg>,
 }
 
 #[tokio::main]
@@ -53,14 +66,14 @@ async fn main() {
     );
 
     let mut app = must_dash::app::App::new(false);
-    for (i, (id, probe_id)) in args.nodes.iter().enumerate() {
+    for (i, node) in args.nodes.iter().enumerate() {
         app.configured_nodes.push(NodeConfig {
             probe_index: i,
-            probe_name: format!("probe-{id}"),
-            probe_id: probe_id.clone(),
+            probe_name: format!("probe-{}", node.node_id),
+            probe_id: node.probe_id.clone(),
             kp: args.kp.clone(),
             ki: args.ki.clone(),
-            source_id: id.clone(),
+            source_id: node.node_id.clone(),
             sf: args.sf.clone(),
             bw: args.bw.clone(),
         });
@@ -102,7 +115,13 @@ async fn main() {
     }
 
     eprintln!("[headless] Run complete — saving data...");
-    app.save_data();
+    let (main_path, hw_path) = app.save_data();
+    if let Some(p) = &main_path {
+        eprintln!("[headless:data] main_stats={p}");
+    }
+    if let Some(p) = &hw_path {
+        eprintln!("[headless:data] hw_stats={p}");
+    }
 
     shutdown_processes(
         log_children

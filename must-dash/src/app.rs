@@ -388,7 +388,10 @@ impl App {
         }
     }
 
-    pub fn save_data(&self) {
+    /// Save collected data to CSV files and return the paths that were written.
+    /// Returns `(main_stats_path, hw_stats_path)`; a value is `None` if the
+    /// file could not be created.
+    pub fn save_data(&self) -> (Option<String>, Option<String>) {
         let timestamp = Local::now().format("%d-%m:%H.%M").to_string();
         let first = self.configured_nodes.first();
         let sf = first.map(|n| n.sf.as_str()).unwrap_or(&self.defaults.sf);
@@ -406,26 +409,34 @@ impl App {
 
         if let Err(e) = fs::create_dir_all(&main_prefix) {
             log::error!("Error in dir creation: {:?}", e);
-            return;
+            return (None, None);
         }
         if let Err(e) = fs::create_dir_all(&hw_prefix) {
             log::error!("Error in dir creation: {:?}", e);
-            return;
+            return (None, None);
         }
 
-        if let Ok(f) = File::create(&main_filename) {
+        let main_out = if let Ok(f) = File::create(&main_filename) {
             let mut wtr = csv::Writer::from_writer(f);
             for row in self.dash_stats.csv_rows() {
                 let _ = wtr.serialize(row);
             }
-        }
+            Some(main_filename)
+        } else {
+            None
+        };
 
-        if let Ok(mut f) = File::create(&hw_filename) {
+        let hw_out = if let Ok(mut f) = File::create(&hw_filename) {
             let _ = writeln!(f, "hardware_delay");
             for hw in &self.dash_stats.hardware_delay {
                 let _ = writeln!(f, "{}", hw);
             }
-        }
+            Some(hw_filename)
+        } else {
+            None
+        };
+
+        (main_out, hw_out)
     }
 
     pub fn add_hw_delay(&mut self, log_str: String) {
