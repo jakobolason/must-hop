@@ -53,8 +53,8 @@ impl Default for PacketParams {
             // LoRaWAN nodes. If talking Gateway-to-Gateway, this usually stays false).
             invert_polarity: false,
             // Standard LoRa preamble length
-            // preamble: Some(8),
-            preamble: None,
+            preamble: Some(8),
+            // preamble: None,
             // Always want CRC for data integrity in Mesh networks
             omit_crc: false,
             // Explicit header mode is standard

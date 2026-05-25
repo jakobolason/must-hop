@@ -3,6 +3,7 @@
 #![no_std]
 // #![no_main]
 #![warn(clippy::todo)]
+#![deny(clippy::large_stack_frames)]
 
 pub mod node;
 pub mod tasks;
