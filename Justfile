@@ -1,12 +1,13 @@
 set shell := ["bash", "-c"]
 set dotenv-load
 
-PI_HOST := env_var_or_default("HOST_URL", "localhost")
-PI_USER := env_var_or_default("PI_USER", "pi")
+PI_HOST := env("HOST_URL", "localhost")
+PI_USER := env("PI_USER", "pi")
 PI_TARGET_DIR := "/home/" + PI_USER + "/must-hop"
-GW_SF := env_var_or_default("SF", "7")
-GW_BW := env_var_or_default("BW", "125")
-PROBE := env_var_or_default("PROBE", "1366:0101")
+GW_SF := env("SF", "7")
+GW_BW := env("BW", "125")
+PROBE := env("PROBE", "1366:0101")
+
 # Build must-hop and must-gw
 [group('Host builds')]
 build:

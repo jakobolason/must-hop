@@ -489,8 +489,6 @@ impl App {
                     {
                         self.dash_stats.on_deltas(up, down);
                     }
-                } else if tag.contains("[STATE_SYNC]") && parts.len() >= 2 {
-                    self.dash_stats.on_state_sync(parts[1].trim());
                 } else if tag.contains("[SIZE EXPECTED]") && parts.len() >= 2 {
                     if let Ok(size) = extract::<usize>(parts[1]) {
                         log::info!("Got pre size {size}");
@@ -521,6 +519,8 @@ impl App {
                         (extract::<u64>(parts[1]), extract::<usize>(parts[2]))
                 {
                     self.dash_stats.on_gw_slice_post(ts, size);
+                } else if tag.contains("[STATE_SYNC]") && parts.len() >= 2 {
+                    self.dash_stats.on_state_sync(parts[1].trim());
                 } else if tag.contains("[SIZE EXPECTED]")
                     && parts.len() >= 2
                     && let Ok(size) = extract::<usize>(parts[1])
