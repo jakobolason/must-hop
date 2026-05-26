@@ -220,7 +220,7 @@ pub async fn lora_task(
     let nm =
         network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(source_id, timeout, max_retries);
     let mut router = mesh_router::MeshRouter::new(node, nm, mac);
-    info!("Waiting for packet or sensor data to send");
+
     loop {
         let mut receiving_buffer = [00u8; MAX_RADIO_BUFFER];
 

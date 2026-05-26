@@ -287,7 +287,6 @@ where
         // Derive RX preamble from the RX SF (may differ from TX if alt modulation is set)
         let rx_sf = rx_opt.map(|r| r.sf).unwrap_or(tx_mod.sf);
         let rx_preamble = Self::min_preamble_for_sf(rx_sf, pack_params.pre_amp);
-        error!("Got preamble: {:?}", rx_preamble);
         let rx_pkt_params = lora.create_rx_packet_params(
             rx_preamble,
             pack_params.imp_hed,
