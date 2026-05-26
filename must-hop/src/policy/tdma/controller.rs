@@ -163,8 +163,6 @@ impl Controller {
         (time_sync, err, delay)
     }
 
-    /// Given a heartbeat packet from a nearer-gw node, this calculates the new timestamp and the
-    /// new skew ratio for the node to be properly synchronized.
     fn apply_pi_controller(&self, err: i64) -> i64 {
         // TODO: Switch the self.* to f32, this is just runtime overhead
         // let kp: f32 = self.kp as f32 / 10.0;
