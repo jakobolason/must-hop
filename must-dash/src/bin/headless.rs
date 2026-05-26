@@ -100,25 +100,29 @@ async fn main() {
     let mut last_hw = String::new();
 
     loop {
-        match tokio::time::timeout_at(deadline, rx.recv()).await {
-            Ok(Some(AppEvent::ProcessLog {
-                source,
-                text,
-                overwrite,
-            })) => {
-                last_process = format!("{source} => {text}");
-                print!("\r{last_hw} | {last_process}\x1B[K");
-                let _ = std::io::stdout().flush();
-                app.add_log(&source, text, overwrite);
+        tokio::select! {
+            result = tokio::time::timeout_at(deadline, rx.recv()) => {
+                match result {
+                    Ok(Some(AppEvent::ProcessLog { source, text, overwrite })) => {
+                        last_process = format!("{source} => {text}");
+                        print!("\r{last_hw} | {last_process}\x1B[K");
+                        let _ = std::io::stdout().flush();
+                        app.add_log(&source, text, overwrite);
+                    }
+                    Ok(Some(AppEvent::HardwareLog { delay_ms })) => {
+                        last_hw = format!("hw: {delay_ms}ms");
+                        print!("\r{last_hw} | {last_process}\x1B[K");
+                        let _ = std::io::stdout().flush();
+                        app.add_hw_delay(delay_ms);
+                    }
+                    Ok(Some(_)) => {}
+                    Ok(None) | Err(_) => break,
+                }
             }
-            Ok(Some(AppEvent::HardwareLog { delay_ms })) => {
-                last_hw = format!("hw: {delay_ms}ms");
-                print!("\r{last_hw} | {last_process}\x1B[K");
-                let _ = std::io::stdout().flush();
-                app.add_hw_delay(delay_ms);
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("\n[headless] Interrupted — shutting down...");
+                break;
             }
-            Ok(Some(_)) => {}
-            Ok(None) | Err(_) => break,
         }
     }
 
