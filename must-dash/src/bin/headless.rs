@@ -96,7 +96,8 @@ async fn main() {
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(args.duration);
 
-    let mut last_process = String::new();
+    let mut last_gw = String::new();
+    let mut last_node = String::new();
     let mut last_hw = String::new();
 
     loop {
@@ -104,14 +105,18 @@ async fn main() {
             result = tokio::time::timeout_at(deadline, rx.recv()) => {
                 match result {
                     Ok(Some(AppEvent::ProcessLog { source, text, overwrite })) => {
-                        last_process = format!("{source} => {text}");
-                        print!("\r{last_hw} | {last_process}\x1B[K");
+                        if source == "gw" {
+                            last_gw = format!("{source} => {text}");
+                        } else {
+                            last_node = format!("{source} => {text}");
+                        }
+                        print!("\r{last_hw} | {last_gw} | {last_node}\x1B[K");
                         let _ = std::io::stdout().flush();
                         app.add_log(&source, text, overwrite);
                     }
                     Ok(Some(AppEvent::HardwareLog { delay_ms })) => {
                         last_hw = format!("hw: {delay_ms}ms");
-                        print!("\r{last_hw} | {last_process}\x1B[K");
+                        print!("\r{last_hw} | {last_gw} | {last_node}\x1B[K");
                         let _ = std::io::stdout().flush();
                         app.add_hw_delay(delay_ms);
                     }
