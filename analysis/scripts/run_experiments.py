@@ -14,12 +14,14 @@ from datetime import datetime
 from pathlib import Path
 
 EXPERIMENTS = [
-    {"sf": 7, "bw": 125, "times": 7},
-    {"sf": 8, "bw": 125, "times": 7},
-    {"sf": 9, "bw": 125, "times": 7},
-    # {"sf": 10, "bw": 125},
-    # {"sf": 11, "bw": 125},
-    # {"sf": 12, "bw": 125},
+    # {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "times": 7},
+    # {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 7},
+    # {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 7},
+    {"sf": 5, "bw": 125, "kp": 40, "ki": 50, "times": 10},
+    {"sf": 5, "bw": 125, "kp": 13, "ki": 32, "times": 10},
+    {"sf": 5, "bw": 125, "kp": 13, "ki": 4.59, "times": 10},
+    {"sf": 5, "bw": 125, "kp": 1, "ki": 1, "times": 10},
+    {"sf": 5, "bw": 125, "kp": 100, "ki": 500, "times": 10},
 ]
 
 # Nodes: list of {"node_id": "<source id>", "probe_id": "<probe serial>"}
@@ -28,8 +30,6 @@ NODES = [
     {"node_id": "7", "probe_id": "1366:0101:000801024472"},
 ]
 
-KP = "10"
-KI = "40"
 
 # Seconds per experiment run (~10 min default)
 DURATION = 600
@@ -69,8 +69,8 @@ def _parse_data_paths(stderr: str) -> dict[str, str | None]:
 
 
 def run_experiment(
-    sf: int, bw: int, nodes: list[dict[str, str]], duration: int
-) -> dict[str, any]:
+    sf: int, bw: int, kp: int, ki: int, nodes: list[dict[str, str]], duration: int
+) -> dict[str, Any]:
     node_args = [f"{n['node_id']}:{n['probe_id']}" for n in nodes]
     print(f"[runner] SF={sf} BW={bw} nodes={node_args} duration={duration}s")
 
@@ -83,9 +83,9 @@ def run_experiment(
             "--bw",
             str(bw),
             "--kp",
-            KP,
+            str(kp),
             "--ki",
-            KI,
+            str(ki),
             "--duration",
             str(duration),
             *node_args,
@@ -110,8 +110,8 @@ def run_experiment(
         "sf": sf,
         "bw": bw,
         "nodes": [{"node_id": n["node_id"], "probe_id": n["probe_id"]} for n in nodes],
-        "kp": KP,
-        "ki": KI,
+        "kp": kp,
+        "ki": ki,
         "duration": duration,
         "started_at": start.isoformat(),
         "ended_at": end.isoformat(),
@@ -133,17 +133,15 @@ def main() -> None:
 
     results = []
 
-    expanded = [
-        exp
-        for exp in EXPERIMENTS
-        for _ in range(exp.get("times", 1))
-    ]
+    expanded = [exp for exp in EXPERIMENTS for _ in range(exp.get("times", 1))]
 
     for i, exp in enumerate(expanded):
         print(f"=== Experiment {i + 1}/{len(expanded)} ===")
         record = run_experiment(
             sf=exp["sf"],
             bw=exp["bw"],
+            kp=exp["kp"],
+            ki=exp["ki"],
             nodes=NODES,
             duration=DURATION,
         )
