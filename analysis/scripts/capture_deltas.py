@@ -1,4 +1,5 @@
 # ONLY TO BE USED ON PI
+import signal
 import sys
 import time
 from ctypes import *
@@ -41,6 +42,14 @@ except ImportError:
 
 dwf = cdll.LoadLibrary("libdwf.so")
 
+
+# Raise SystemExit on SIGTERM/SIGHUP so the finally block runs and the device
+# is properly closed even when the SSH session drops unexpectedly.
+def _shutdown(sig, frame):
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, _shutdown)
+signal.signal(signal.SIGHUP, _shutdown)
 
 hdwf = c_int()
 print("Opening Digital Discovery...")
@@ -115,9 +124,10 @@ try:
         else:
             print(f"Capture: edge not found in buffer.")
 
-except KeyboardInterrupt:
+except (KeyboardInterrupt, SystemExit):
     print("\nStopped.")
 
 # ── Cleanup ───────────────────────────────────────────────────────────────
-dwf.FDwfDeviceCloseAll()
-print("Device closed.")
+finally:
+    dwf.FDwfDeviceCloseAll()
+    print("Device closed.")

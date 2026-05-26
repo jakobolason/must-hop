@@ -99,6 +99,7 @@ async fn main() {
     let mut last_gw = String::new();
     let mut last_node = String::new();
     let mut last_hw = String::new();
+    let mut prev_lines: usize = 0;
 
     loop {
         tokio::select! {
@@ -110,13 +111,21 @@ async fn main() {
                         } else {
                             last_node = format!("{source} => {text}");
                         }
-                        print!("\r{last_hw} | {last_gw} | {last_node}\x1B[K");
+                        let status = format!("hw:   {last_hw}\ngw:   {last_gw}\nnode: {last_node}");
+                        let lines = status.lines().count();
+                        if prev_lines > 0 { print!("\x1B[{prev_lines}A\r\x1B[J"); }
+                        print!("{status}");
+                        prev_lines = lines;
                         let _ = std::io::stdout().flush();
                         app.add_log(&source, text, overwrite);
                     }
                     Ok(Some(AppEvent::HardwareLog { delay_ms })) => {
                         last_hw = format!("hw: {delay_ms}ms");
-                        print!("\r{last_hw} | {last_gw} | {last_node}\x1B[K");
+                        let status = format!("hw:   {last_hw}\ngw:   {last_gw}\nnode: {last_node}");
+                        let lines = status.lines().count();
+                        if prev_lines > 0 { print!("\x1B[{prev_lines}A\r\x1B[J"); }
+                        print!("{status}");
+                        prev_lines = lines;
                         let _ = std::io::stdout().flush();
                         app.add_hw_delay(delay_ms);
                     }
