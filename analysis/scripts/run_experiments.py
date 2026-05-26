@@ -14,9 +14,9 @@ from datetime import datetime
 from pathlib import Path
 
 EXPERIMENTS = [
-    {"sf": 7, "bw": 125},
-    {"sf": 8, "bw": 125},
-    {"sf": 9, "bw": 125},
+    {"sf": 7, "bw": 125, "times": 7},
+    {"sf": 8, "bw": 125, "times": 7},
+    {"sf": 9, "bw": 125, "times": 7},
     # {"sf": 10, "bw": 125},
     # {"sf": 11, "bw": 125},
     # {"sf": 12, "bw": 125},
@@ -133,8 +133,14 @@ def main() -> None:
 
     results = []
 
-    for i, exp in enumerate(EXPERIMENTS):
-        print(f"=== Experiment {i + 1}/{len(EXPERIMENTS)} ===")
+    expanded = [
+        exp
+        for exp in EXPERIMENTS
+        for _ in range(exp.get("times", 1))
+    ]
+
+    for i, exp in enumerate(expanded):
+        print(f"=== Experiment {i + 1}/{len(expanded)} ===")
         record = run_experiment(
             sf=exp["sf"],
             bw=exp["bw"],
@@ -148,7 +154,7 @@ def main() -> None:
             json.dumps({"run_id": run_id, "experiments": results}, indent=2)
         )
 
-        if i < len(EXPERIMENTS) - 1:
+        if i < len(expanded) - 1:
             print(f"[runner] Waiting {INTER_RUN_DELAY}s before next run...")
             time.sleep(INTER_RUN_DELAY)
 
