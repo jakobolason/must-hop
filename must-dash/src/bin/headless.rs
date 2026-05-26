@@ -3,6 +3,7 @@ use must_dash::app::NodeConfig;
 use must_dash::{
     app::AppEvent, init_logger, shutdown_processes, spawn_log_processes, spawn_pty_reader,
 };
+use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -95,6 +96,9 @@ async fn main() {
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(args.duration);
 
+    let mut last_process = String::new();
+    let mut last_hw = String::new();
+
     loop {
         match tokio::time::timeout_at(deadline, rx.recv()).await {
             Ok(Some(AppEvent::ProcessLog {
@@ -102,11 +106,15 @@ async fn main() {
                 text,
                 overwrite,
             })) => {
-                println!("{source} => {text}");
+                last_process = format!("{source} => {text}");
+                print!("\r{last_hw} | {last_process}\x1B[K");
+                let _ = std::io::stdout().flush();
                 app.add_log(&source, text, overwrite);
             }
             Ok(Some(AppEvent::HardwareLog { delay_ms })) => {
-                println!("hw delay: {delay_ms}");
+                last_hw = format!("hw: {delay_ms}ms");
+                print!("\r{last_hw} | {last_process}\x1B[K");
+                let _ = std::io::stdout().flush();
                 app.add_hw_delay(delay_ms);
             }
             Ok(Some(_)) => {}
