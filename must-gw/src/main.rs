@@ -20,13 +20,13 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         "10" => Spreading::SF10,
         "11" => Spreading::SF11,
         "12" => Spreading::SF12,
-        _ => Spreading::SF7,
+        _ => panic!("SF should be between 5 and 12!"),
     };
     let bandwidth = match std::env::var("BW").as_deref() {
         Ok("125") => Bandwidth::BW125kHz,
         Ok("250") => Bandwidth::BW250kHz,
         Ok("500") => Bandwidth::BW500kHz,
-        _ => Bandwidth::BW125kHz,
+        _ => panic!("BW can either be 125, 250 or 500kHz!"),
     };
     log::info!("radio params: SF={:?} BW={:?}", spreading, bandwidth);
 
@@ -38,9 +38,17 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         }
     };
 
+    // SF5 and SF6 require a minimum preamble of 12 symbols on SX1262 end-devices
+    // (the SX1302 HAL documents this as "aligned with end-device drivers").
+    // SF7–SF12 use the standard 8-symbol preamble.
+    let preamble = match spreading {
+        Spreading::SF5 | Spreading::SF6 => Some(12),
+        _ => Some(8),
+    };
     let pkt_params = node::PacketParams {
         spreading,
         bandwidth,
+        preamble,
         ..node::PacketParams::default()
     };
     let node = node::GWNode::new(conc, pkt_params);

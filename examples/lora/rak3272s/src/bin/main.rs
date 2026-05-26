@@ -97,7 +97,10 @@ async fn main(spawner: Spawner) {
     let iv: Stm32wlInterfaceVariant<Output<'_>> =
         Stm32wlInterfaceVariant::new(Irqs, use_high_power_pa, Some(rx_pin), Some(tx_pin), None)
             .unwrap();
-    let lora = LoRa::new(Sx126x::new(spi, iv, config), true, Delay)
+    // The SX1302 HAL hardcodes the private syncword (0x12) for SF5 and SF6,
+    // regardless of the lorawan_public board setting. We must match that here.
+    let use_public_network = SF_NUM != 5 && SF_NUM != 6;
+    let lora = LoRa::new(Sx126x::new(spi, iv, config), use_public_network, Delay)
         .await
         .unwrap();
     info!("lora setup done ...");
@@ -182,13 +185,13 @@ pub async fn lora_task(
     };
     let source_id: u8 = SOURCEID.unwrap_or(DEFAULT_SOURCEID);
 
-    // For experiment 2: Set bool such that it uses SF 9 for Rx
+    // For experiment 2: Set bool such that it uses other SF for Rx
     // (GW) <-> (A) <-> (B)
     //          A is the only one who should use this here
     let should_have_alt_mdltn_params: bool = ALT_MDLTN.unwrap_or(DEFAULT_ALT_MDLTN);
     let alt_mdltn = if should_have_alt_mdltn_params {
         Some(RatioModParams {
-            sf: SpreadingFactor::_9,
+            sf: SpreadingFactor::_7,
             bw,
             cr,
             lora_hz: LORA_FREQUENCY_IN_HZ,

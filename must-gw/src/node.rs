@@ -69,7 +69,7 @@ impl From<PacketParams> for TxPacketLoRa {
             freq: params.freq,
             mode: params.mode,
             radio: params.radio,
-            power: params.radio as i8,
+            power: params.power,
             bandwidth: params.bandwidth,
             spreading: params.spreading,
             coderate: params.coderate,

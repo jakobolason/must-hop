@@ -269,16 +269,15 @@ impl Concentrator<Running> {
                 // SAFE: We know C initialized up to `len` elements
                 let pkt = unsafe { tmp_buf[i].assume_init() };
                 let rx_pkt = RxPacket::try_from(&pkt)?;
-                if self.state.filter_self_echo {
-                    if let RxPacket::LoRa(ref lora_pkt) = rx_pkt {
-                        if let Some(ref last_tx) = self.state.last_tx_payload {
-                            if lora_pkt.payload == *last_tx {
-                                log::debug!("Filtered self-echo packet");
-                                continue;
-                            }
-                        }
-                    }
+                if self.state.filter_self_echo
+                    && let RxPacket::LoRa(ref lora_pkt) = rx_pkt
+                    && let Some(ref last_tx) = self.state.last_tx_payload
+                    && lora_pkt.payload == *last_tx
+                {
+                    log::debug!("Filtered self-echo packet");
+                    continue;
                 }
+
                 out.push(rx_pkt);
             }
             if out.is_empty() {
@@ -291,12 +290,12 @@ impl Concentrator<Running> {
         }
     }
 
-    /// Transmit `packet` over the air.
+    /// Transmit `packet` over the air with gives parameters.
     pub fn transmit(&mut self, packet: TxPacket) -> Result {
-        if self.state.filter_self_echo {
-            if let TxPacket::LoRa(ref lora_pkt) = packet {
-                self.state.last_tx_payload = Some(lora_pkt.payload.clone());
-            }
+        if self.state.filter_self_echo
+            && let TxPacket::LoRa(ref lora_pkt) = packet
+        {
+            self.state.last_tx_payload = Some(lora_pkt.payload.clone());
         }
         unsafe { hal_call!(lgw_send(&mut packet.try_into()?)) }?;
         Ok(())

@@ -245,6 +245,15 @@ where
     RK: RadioKind,
     DLY: DelayNs,
 {
+    /// SF5 and SF6 require a minimum preamble of 12 symbols on the SX1262 for reliable
+    /// preamble detection. SF7–SF12 use the standard 8-symbol preamble.
+    fn min_preamble_for_sf(sf: SpreadingFactor, requested: u16) -> u16 {
+        match sf {
+            SpreadingFactor::_5 | SpreadingFactor::_6 => requested.max(12),
+            _ => requested,
+        }
+    }
+
     /// Takes a LoRa radio, transmit parameters and optionally receive parameters. If receive
     /// parameters are not given, then tp are used for both Tx and Rx
     pub fn new(
@@ -256,8 +265,9 @@ where
         let mdltn_params =
             lora.create_modulation_params(tx_mod.sf, tx_mod.bw, tx_mod.cr, tx_mod.lora_hz)?;
 
+        let tx_preamble = Self::min_preamble_for_sf(tx_mod.sf, pack_params.pre_amp);
         let tx_pkt_params = lora.create_rx_packet_params(
-            pack_params.pre_amp,
+            tx_preamble,
             pack_params.imp_hed,
             pack_params.max_pack_len as u8,
             pack_params.crc,
@@ -274,8 +284,12 @@ where
         };
         let rx_mdltn_params = alt_mdtln_params.as_ref().unwrap_or(&mdltn_params);
 
+        // Derive RX preamble from the RX SF (may differ from TX if alt modulation is set)
+        let rx_sf = rx_opt.map(|r| r.sf).unwrap_or(tx_mod.sf);
+        let rx_preamble = Self::min_preamble_for_sf(rx_sf, pack_params.pre_amp);
+        error!("Got preamble: {:?}", rx_preamble);
         let rx_pkt_params = lora.create_rx_packet_params(
-            pack_params.pre_amp,
+            rx_preamble,
             pack_params.imp_hed,
             pack_params.max_pack_len as u8,
             pack_params.crc,
