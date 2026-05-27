@@ -113,6 +113,13 @@ impl Controller {
         {
             // delta is our T3 - T2
             let delta_down = hb.gps_time_us as i64 - my_stamp as i64;
+            // FIXME:
+            // For some reason, this can be 5secs, so filter out those readings
+            let delta_down = if delta_down > 1_000_000 {
+                0
+            } else {
+                delta_down
+            };
             let up_ms = *delta_up as f32 / 1000.0;
             let down_ms = delta_down as f32 / 1000.0;
             // if delta_down.abs() > 20_000 || delta_up.abs() > 30_000 {

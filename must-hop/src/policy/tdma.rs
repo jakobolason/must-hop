@@ -553,7 +553,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             }
         };
         // FIXME: Remember setting this
-        let measured_constant_offset = 0;
+        let measured_constant_offset = 7;
         let total_size = used_slice.len() + measured_constant_offset;
 
         info!("[SIZE EXPECTED]|{}|", total_size);

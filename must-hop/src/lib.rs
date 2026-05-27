@@ -66,6 +66,8 @@ pub struct MHPacket<const SIZE: usize> {
     pub hop_to_gw: u8,
 }
 
+/// Parameters from the receive function used
+/// in `TdmaMac` to improve the time synchronization
 #[derive(Debug, Clone)]
 pub struct RxPacket {
     // pub preamble_instant: Option<Instant>,

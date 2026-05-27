@@ -14,15 +14,15 @@ from datetime import datetime
 from pathlib import Path
 
 EXPERIMENTS = [
-    # {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "times": 7},
-    # {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 7},
-    # {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 7},
-    {"sf": 5, "bw": 125, "kp": 40, "ki": 50, "times": 10},
-    {"sf": 5, "bw": 125, "kp": 10, "ki": 50, "times": 10},
-    {"sf": 5, "bw": 125, "kp": 13, "ki": 32, "times": 10},
-    {"sf": 5, "bw": 125, "kp": 13, "ki": 4.59, "times": 10},
-    {"sf": 5, "bw": 125, "kp": 1, "ki": 1, "times": 10},
-    {"sf": 5, "bw": 125, "kp": 100, "ki": 500, "times": 10},
+    {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    # {"sf": 5, "bw": 125, "kp": 40, "ki": 50, "times": 10},
+    # {"sf": 5, "bw": 125, "kp": 10, "ki": 50, "times": 10},
+    # {"sf": 5, "bw": 125, "kp": 13, "ki": 32, "times": 10},
+    # {"sf": 5, "bw": 125, "kp": 13, "ki": 4.59, "times": 10},
+    # {"sf": 5, "bw": 125, "kp": 1, "ki": 1, "times": 10},
+    # {"sf": 5, "bw": 125, "kp": 100, "ki": 500, "times": 10},
 ]
 
 # Nodes: list of {"node_id": "<source id>", "probe_id": "<probe serial>"}
@@ -36,7 +36,7 @@ NODES = [
 DURATION = 600
 
 # Seconds to wait between runs for radio settling
-INTER_RUN_DELAY = 30
+INTER_RUN_DELAY = 300
 
 
 REPO_ROOT = Path(__file__).parent.parent.parent.resolve()

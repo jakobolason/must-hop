@@ -11,11 +11,10 @@ use heapless::Vec;
 use lora_phy::mod_params::RadioError;
 use postcard::Error as PostError;
 
-// pub const LEN: usize = 5;
-/// Does not need to be serialized, because only MHPacket will be sent
+/// Interna
 #[derive(Debug, PartialEq)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
-pub struct PendingPacket<const SIZE: usize> {
+struct PendingPacket<const SIZE: usize> {
     /// We keep the whole packet so it can be retransmitted
     packet: MHPacket<SIZE>,
     /// To know if a timeout has occurred

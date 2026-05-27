@@ -5,10 +5,12 @@ use core::future::Future;
 use core::time::Duration;
 use heapless::Vec;
 
+/// Implements the `MHNode` trait for all lora-phy compatible radios
 pub mod lora;
 
 use crate::{MHPacket, RxPacket};
-/// Any radio wanting to be a node, has to be able to transmit and receive
+/// This trait denodes the necessary radio operations a node on the network
+/// is required to do, to function properly.
 pub trait MHNode<const SIZE: usize, const LEN: usize> {
     #[cfg(not(feature = "in_std"))]
     type Error: core::fmt::Debug + defmt::Format;
