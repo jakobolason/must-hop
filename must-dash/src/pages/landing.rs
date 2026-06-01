@@ -353,6 +353,6 @@ impl crate::app::NodeConfig {
     fn name_short(&self) -> &str {
         // Show the first ~40 chars of the probe name to keep the title compact
         let s = self.probe_name.as_str();
-        if s.len() > 40 { &s[..40] } else { s }
+        s.char_indices().nth(40).map(|(i, _)| &s[..i]).unwrap_or(s)
     }
 }
