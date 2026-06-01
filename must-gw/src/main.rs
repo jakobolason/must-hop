@@ -52,6 +52,8 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         ..node::PacketParams::default()
     };
     let node = node::GWNode::new(conc, pkt_params);
+    // microsecs -> millisecs
+    let max_toa_ms = node.calc_toa(255) / 1000;
 
     let gw_source_id = 1;
     let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
@@ -70,6 +72,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
             embassy_time::Instant::now(),
         ))
         .set_tau_hb(tau_hb)
+        .set_max_toa(max_toa_ms)
         .node_is_leader()
         .build();
 

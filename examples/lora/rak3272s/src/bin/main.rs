@@ -26,6 +26,7 @@ use embassy_stm32::{
 use embassy_time::{Delay, Timer};
 use heapless::Vec;
 
+use lora_modulation::BaseBandModulationParams;
 use lora_phy::{
     LoRa,
     mod_params::RadioError,
@@ -152,13 +153,23 @@ const MAX_RADIO_BUFFER: usize = 256; // kB
 const LEN: usize = 5; // floor(256/MAX_PACK_LEN)
 
 const GW_ID: u8 = 1;
-// const KP: f32 = 0.4;
-// const KI: f32 = 0.5;
-//
-// // unit conversion mu secs error(1e-6) -> PPB output (1e-9)
-// // Not necessarily PPB here
-// const KP_PPB: i64 = (KP * 50.0) as i64;
-// const KI_PPB: i64 = (KI * 50.0) as i64;
+
+// Compute the MAX TOA MS as a const, such that it is evaluted at build time instead of runtime
+const MAX_TOA_MS: u32 = {
+    let sf = match SF {
+        Some(sf) => sf,
+        None => SpreadingFactor::_7,
+    };
+    let bw = match BW {
+        Some(bw) => bw,
+        None => Bandwidth::_125KHz,
+    };
+    BaseBandModulationParams::new(sf, bw, CodingRate::_4_8).time_on_air_us(
+        Some(8),
+        true,
+        MAX_RADIO_BUFFER as u8,
+    )
+};
 
 #[embassy_executor::task]
 pub async fn lora_task(
@@ -216,6 +227,7 @@ pub async fn lora_task(
         .set_controller(23334395, kp, ki)
         .set_debug_pin(debug_pin)
         .set_node_id(source_id)
+        .set_max_toa(MAX_TOA_MS)
         .build();
     let nm =
         network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(source_id, timeout, max_retries);

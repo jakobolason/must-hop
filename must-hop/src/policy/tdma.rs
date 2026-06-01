@@ -89,7 +89,6 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
                 err_threshold: ERR_THRESHOLD,
                 ..Default::default()
             },
-            counter: 0,
 
             #[cfg(feature = "debug")]
             debug_pin: None,
@@ -106,6 +105,16 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             time_manager: TimeManager {
                 controller,
                 ..self.time_manager
+            },
+            ..self
+        }
+    }
+
+    pub fn set_max_toa(self, max_toa_ms: u32) -> Self {
+        Self {
+            slot_manager: SlotManager {
+                max_toa_ms,
+                ..self.slot_manager
             },
             ..self
         }
@@ -188,7 +197,6 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             _state: PhantomData,
             slot_manager: self.slot_manager,
             time_manager: self.time_manager,
-            counter: self.counter,
             #[cfg(feature = "debug")]
             debug_pin: self.debug_pin,
             #[cfg(not(feature = "debug"))]
@@ -201,7 +209,8 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
     fn default() -> Self {
         TdmaMac::new(
             Duration::from_secs(1),
-            NonZeroU8::new(10).unwrap(),
+            // The SlotManager can only hold 5 nodes, so this should default to that max
+            NonZeroU8::new(5).unwrap(),
             None,
             None,
         )
@@ -239,6 +248,8 @@ pub(crate) struct SlotManager {
     my_tx_slot: Option<u8>,
     tau_hb: TauHbMode,
     hb_countdown: u8,
+    /// The maximum transmission delay, should optimally be computed at build time
+    max_toa_ms: u32,
     /// A mask to know what other node's one know
     known_slots_mask: SlotMask,
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
@@ -287,8 +298,6 @@ pub struct TdmaMac<State, P, const SIZE: usize> {
     slot_manager: SlotManager,
     time_manager: TimeManager<SIZE>,
 
-    // FIXME: Remove later
-    counter: u8,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
     #[cfg(not(feature = "debug"))]

@@ -120,7 +120,7 @@ impl GWNode {
 
     /// Calculates the ms of ToA in microseconds given a specific payload lengt and uses it's previous transmit
     /// parameters
-    fn calc_toa(&self, payload_len: u8) -> u32 {
+    pub fn calc_toa(&self, payload_len: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(
             self.pkt_params.spreading.into(),
