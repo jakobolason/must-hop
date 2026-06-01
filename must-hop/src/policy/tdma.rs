@@ -8,11 +8,7 @@ use log::{debug, error, info};
 #[cfg(feature = "debug")]
 use embedded_hal::digital::OutputPin;
 
-use core::{
-    cmp::{max, min},
-    marker::PhantomData,
-    num::NonZeroU8,
-};
+use core::{marker::PhantomData, num::NonZeroU8};
 use postcard::{from_bytes, ser_flavors::Size, serialize_with_flavor, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -117,11 +113,12 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn set_max_toa(self, max_toa_ms: u32) -> Self {
-        let max_rx_window: u32 = (self.slot_manager.slot_duration.as_millis() as u32)
-            / self.slot_manager.slots_per_frame as u32;
         // NOTE: Should user be alerted here, if this does'nt work?
-        let rx_window = max_toa_ms.max(MIN_RX_WINDOW).min(max_rx_window);
+        let rx_window = max_toa_ms
+            .max(MIN_RX_WINDOW)
+            .min(self.slot_manager.slot_duration.as_millis() as u32);
         // let rx_window = min(max(MIN_RX_WINDOW, max_toa_ms), max_rx_window);
+        info!("The window was found to be {}", rx_window);
         Self {
             slot_manager: SlotManager {
                 rx_window,
@@ -411,16 +408,12 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let (src, val) = if should_use_pkt {
             // self.time_manager.last_hb_instant = Some(Instant::now());
             // Controller updates internal drift, and returns adjusted stamps
-            self.time_manager.time_sync = Some(
-                self.time_manager.controller.run_transferfunction(
-                    &alloc,
-                    rx_pkt,
-                    self.time_manager.time_sync,
-                    self.slot_manager
-                        .my_tx_slot
-                        .unwrap_or(self.slot_manager.node_id),
-                ),
-            );
+            self.time_manager.time_sync = Some(self.time_manager.controller.run_transferfunction(
+                &alloc,
+                rx_pkt,
+                self.time_manager.time_sync,
+                self.slot_manager.node_id,
+            ));
 
             // TODO: timeout missing
             // denote this as a leader node. This should only be set once (with a timeout

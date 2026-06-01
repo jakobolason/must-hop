@@ -131,10 +131,10 @@ deploy-gw-pi: build-gw-pi
     scp target/aarch64-unknown-linux-gnu/release/must-gw {{ PI_USER }}@{{ PI_HOST }}:{{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw
 
 [group('Pi deployments')]
-run-gw: deploy-gw-pi
+run-gw *args: deploy-gw-pi
     @echo "Running GW on pi"
     ssh -tt {{ PI_USER }}@{{ PI_HOST }} 'chmod +x {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw \
-      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always SF={{ GW_SF }} BW={{ GW_BW }} \
+      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always {{ args }} \
        chrt -f 90 {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 [group('Dashboard')]

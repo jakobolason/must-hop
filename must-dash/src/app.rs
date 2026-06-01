@@ -299,9 +299,6 @@ impl App {
     }
 
     pub fn build_descriptors(&self) -> Vec<ProcessDescriptor> {
-        let cast_f32 = |s: &str, mult: f32| -> String {
-            format!("{}", (s.parse::<f32>().unwrap_or(0.0) * mult) as u64)
-        };
         let color_envs = || {
             vec![
                 ("CARGO_TERM_COLOR".to_string(), "always".to_string()),
@@ -324,20 +321,20 @@ impl App {
             .map(|n| n.tau.as_str())
             .unwrap_or(&self.defaults.tau)
             .to_string();
-        let mut gw_envs = color_envs();
-        gw_envs.extend([
-            ("SF".to_string(), gw_sf),
-            ("BW".to_string(), gw_bw),
-            ("TAU".to_string(), gw_tau),
-        ]);
-        log::info!("GW ENVS: {:?}", gw_envs);
+        log::info!("GW params: SF={gw_sf} BW={gw_bw} TAU={gw_tau}");
 
         let mut descs = vec![ProcessDescriptor {
             source_id: "gw".to_string(),
             role: LogRole::Gateway,
             command: "just".to_string(),
-            args: vec!["run-gw".to_string()],
-            envs: gw_envs,
+            args: vec![
+                "run-gw".to_string(),
+                // "--".to_string(),
+                format!("SF={gw_sf}"),
+                format!("BW={gw_bw}"),
+                format!("TAU={gw_tau}"),
+            ],
+            envs: color_envs(),
         }];
 
         for node in &self.configured_nodes {

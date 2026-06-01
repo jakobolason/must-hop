@@ -235,6 +235,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
             Constraint::Length(3), // Source ID
             Constraint::Length(3), // SF
             Constraint::Length(3), // BW
+            Constraint::Length(3), // TAU
             Constraint::Length(1), // spacer
             Constraint::Length(3), // Confirm button
             Constraint::Min(0),    // rest
@@ -322,7 +323,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
                 .title(Line::from("[10-100]").right_aligned()),
         )
         .style(style_for(ProbeConfigFocus::Tau));
-    f.render_widget(tau, chunks[4]);
+    f.render_widget(tau, chunks[5]);
 
     // Confirm button
     let confirm_label = if focus == ProbeConfigFocus::Confirm {
@@ -338,7 +339,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
         )
         .style(style_for(ProbeConfigFocus::Confirm))
         .alignment(Alignment::Center);
-    f.render_widget(confirm, chunks[6]);
+    f.render_widget(confirm, chunks[7]);
 
     // Help line
     let help = Paragraph::new(

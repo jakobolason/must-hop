@@ -28,8 +28,12 @@ embassy-futures = { version = "0", features = ["defmt"] }
 
 # lora-phy = { version = "3.0.1", features = ["lorawan-radio", "defmt-03"] }
 # lora-phy = { git = "https://github.com/lora-rs/lora-rs.git", features = [] }
-lora-phy = { path = "../../../../../repos/pr-lora-rs/lora-phy" }
+lora-phy = { path = "../../../../../repos/pr-lora-rs/lora-phy", features = [
+  "defmt-03",
+] }
 lora-modulation = { path = "../../../../../repos/pr-lora-rs/lora-modulation" }
+# lora-phy = "3.0.1"
+# lora-modulation = "0.1.5"
 
 defmt = "1.0.1"
 defmt-rtt = "1.1.0"
