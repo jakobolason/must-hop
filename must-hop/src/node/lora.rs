@@ -73,7 +73,7 @@ where
     mdltn_params: ModulationParams,
     /// Used if different parameters should be use for the Rx
     alt_mdtln_params: Option<ModulationParams>,
-    preamble_instant: Option<Instant>,
+    done_instant: Option<Instant>,
 }
 
 /// Calculated in calc_tau_spi
@@ -88,17 +88,18 @@ where
     /// Returns the (preamble, packet) ToA
     fn calc_toa(&self, bytes: u8) -> u32 {
         // Using the formula to calculate time-on-air
-        let bb_mod = BaseBandModulationParams::new(
-            self.mdltn_params.spreading_factor,
-            self.mdltn_params.bandwidth,
-            self.mdltn_params.coding_rate,
-        );
-
-        bb_mod.time_on_air_us(
-            Some(self.tx_pkt_params.preamble_length as u8),
-            !self.tx_pkt_params.implicit_header,
-            bytes,
-        )
+        // let bb_mod = BaseBandModulationParams::new(
+        //     self.mdltn_params.spreading_factor,
+        //     self.mdltn_params.bandwidth,
+        //     self.mdltn_params.coding_rate,
+        // );
+        //
+        // bb_mod.time_on_air_us(
+        //     Some(self.tx_pkt_params.preamble_length as u8),
+        //     !self.tx_pkt_params.implicit_header,
+        //     bytes,
+        // )
+        0
     }
 
     fn avg_slice_delay(&self, payload_len: u8) -> u64 {
@@ -165,7 +166,10 @@ where
         rec_buf: &[u8; TRANSMISSION_BUFFER],
     ) -> Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), RadioError> {
         // First we check if we actually got something
-        let rx_hardware_timestamp = Instant::now();
+        let rx_hardware_timestamp = match self.done_instant {
+            Some(ins) => ins,
+            None => Instant::now(),
+        };
         trace!("received pkts!");
         let (len, _rx_pkt_status) = match conn {
             Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
@@ -208,11 +212,11 @@ where
         with_timeout: Option<Duration>,
     ) -> Result<Self::Connection, RadioError> {
         self.prepare_for_rx(RxMode::Continuous).await?;
-        self.preamble_instant = None;
+        self.done_instant = None;
         // TODO: Remove this? I'm not using it anymore, don't plan to do
-        let get_preamb_instant = || {
-            if self.preamble_instant.is_none() {
-                self.preamble_instant = Some(Instant::now())
+        let get_done_instant = || {
+            if self.done_instant.is_none() {
+                self.done_instant = Some(Instant::now())
             }
         };
         match with_timeout {
@@ -220,7 +224,7 @@ where
                 match embassy_time::with_timeout(
                     embassy_time::Duration::from_micros(timeout.as_micros() as u64),
                     self.lora
-                        .rx(&self.rx_pkt_params, rec_buf, get_preamb_instant),
+                        .rx(&self.rx_pkt_params, rec_buf /*get_done_instant*/),
                 )
                 .await
                 {
@@ -230,7 +234,7 @@ where
             }
             None => Ok(self
                 .lora
-                .rx(&self.rx_pkt_params, rec_buf, get_preamb_instant)
+                .rx(&self.rx_pkt_params, rec_buf /*get_done_instant*/)
                 .await),
         }
     }
@@ -302,7 +306,7 @@ where
             rx_pkt_params,
             mdltn_params,
             alt_mdtln_params,
-            preamble_instant: None,
+            done_instant: None,
         })
     }
 

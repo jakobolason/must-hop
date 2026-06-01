@@ -119,6 +119,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     pub fn set_max_toa(self, max_toa_ms: u32) -> Self {
         let max_rx_window: u32 = self.slot_manager.slots_per_frame as u32
             / (self.slot_manager.slot_duration.as_millis() as u32);
+        // NOTE: Should user be alerted here, if this does'nt work?
         let rx_window = min(max(MIN_RX_WINDOW, max_toa_ms), max_rx_window);
         Self {
             slot_manager: SlotManager {
@@ -420,14 +421,6 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 ),
             );
 
-            // Mark ourselves as heard when the leader's allocation already knows our slot,
-            // so followers only advance toward High mode once they're confirmed visible.
-            if !self.time_manager.heard_by_leader
-                && let Some(my_slot) = self.slot_manager.my_tx_slot
-                && alloc.known_slots & (1 << my_slot) != 0
-            {
-                self.time_manager.heard_by_leader = true;
-            }
             // TODO: timeout missing
             // denote this as a leader node. This should only be set once (with a timeout
             // perhaps) such that 2 equal leader nodes don't make this follower node unstable
@@ -441,6 +434,17 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             };
             if leader_id == pkt.source_id {
                 self.time_manager.last_hb_instant = Some(Instant::now());
+
+                // Mark ourselves as heard when the leader's allocation already knows our slot,
+                // so followers only advance toward High mode once they're confirmed visible.
+                if !self.time_manager.heard_by_leader
+                    && let Some(my_slot) = self.slot_manager.my_tx_slot
+                    && alloc.known_slots & (1 << my_slot) != 0
+                {
+                    self.time_manager.heard_by_leader = true;
+                }
+
+                // pkt.hop_to_gw
             }
 
             // If this is leader, then we check if the tau_hb matches theirs
