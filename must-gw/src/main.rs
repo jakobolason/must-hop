@@ -1,49 +1,76 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::error;
+use loragw::{Bandwidth, Spreading};
 use must_gw::{create_concentrator, node};
-use must_hop::{
-    mesh_router::MeshRouter,
-    network_manager::NetworkManager,
-    policy::{ra::RandomAccessMac, tdma::TdmaMac},
-};
+use must_hop::{mesh_router::MeshRouter, network_manager::NetworkManager, policy::tdma::TdmaMac};
 use rppal::gpio::Gpio;
 use std::io::Write;
 use tokio::time::Instant;
 
 async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    log::info!("Now try and use loragw:");
+    let spreading_env = std::env::var("SF").unwrap_or("None".to_string());
+    log::info!("SPREADING ENV: {}", spreading_env);
+    let spreading = match spreading_env.as_str() {
+        "5" => Spreading::SF5,
+        "6" => Spreading::SF6,
+        "7" => Spreading::SF7,
+        "8" => Spreading::SF8,
+        "9" => Spreading::SF9,
+        "10" => Spreading::SF10,
+        "11" => Spreading::SF11,
+        "12" => Spreading::SF12,
+        _ => panic!("SF should be between 5 and 12!"),
+    };
+    let bandwidth = match std::env::var("BW").as_deref() {
+        Ok("125") => Bandwidth::BW125kHz,
+        Ok("250") => Bandwidth::BW250kHz,
+        Ok("500") => Bandwidth::BW500kHz,
+        _ => panic!("BW can either be 125, 250 or 500kHz!"),
+    };
+    let tau = match std::env::var("TAU").as_deref() {
+        Ok(val) => {
+            let val = val.parse::<u8>().unwrap();
+            if !(10..=100).contains(&val) {
+                panic!("tau should be between 10 and 100 for the controller to work properly!");
+            }
+            val
+        }
+        Err(_) => {
+            error!("No TAU found in env, defaulting to 10..");
+            10
+        }
+    };
+    log::info!("radio params: SF={:?} BW={:?}", spreading, bandwidth);
 
-    let conc = match create_concentrator() {
+    let conc = match create_concentrator(spreading, bandwidth) {
         Ok(conc) => conc,
         Err(e) => {
             log::error!("Error creating concentrator: {:?}", e);
-            // We return the error here instead of just returning empty
             return Err(e.into());
         }
     };
 
-    log::info!("check receive status");
-    // match conc.receive_status() {
-    //     Ok(status) => log::info!("Receive status: {:?}", status),
-    //     Err(e) => log::error!("Error checking receive status: {:?}", e),
-    // }
-    // let tty_path = "/dev/serial0";
-    // let gps_family = "ubx8";
-
-    // match conc.enable_gps(tty_path, gps_family) {
-    //     Ok(_) => log::info!("GPS enabled successfully on {}!", tty_path),
-    //     Err(e) => {
-    //         log::error!("Error enabling gps: {:?}", e)
-    //     }
-    // }
-    log::info!("now try receive!");
-    let node = node::GWNode::new(conc);
+    // SF5 and SF6 require a minimum preamble of 12 symbols on SX1262 end-devices
+    // (the SX1302 HAL documents this as "aligned with end-device drivers").
+    // SF7–SF12 use the standard 8-symbol preamble.
+    let preamble = match spreading {
+        Spreading::SF5 | Spreading::SF6 => Some(12),
+        _ => Some(8),
+    };
+    let pkt_params = node::PacketParams {
+        spreading,
+        bandwidth,
+        preamble,
+        ..node::PacketParams::default()
+    };
+    let node = node::GWNode::new(conc, pkt_params);
+    // microsecs -> millisecs
+    let max_toa_ms = node.calc_toa(255) / 1000;
 
     let gw_source_id = 1;
     let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
     let sync_pin = gpio.get(21).expect("Failed to get GPIO 21").into_output();
-    let tau_hb = 10;
 
     let mac = TdmaMac::default()
         .set_debug_pin(sync_pin)
@@ -56,7 +83,9 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
                 .as_micros() as u64,
             embassy_time::Instant::now(),
         ))
-        .set_tau_hb(tau_hb)
+        .set_tau_hb(tau)
+        .set_max_toa(max_toa_ms)
+        .node_is_leader()
         .build();
 
     // let mac = RandomAccessMac::new(GatewayPolicy::new(tau_hb));

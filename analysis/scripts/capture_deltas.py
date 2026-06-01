@@ -1,15 +1,14 @@
 # ONLY TO BE USED ON PI
+import signal
 import sys
 import time
 from ctypes import *
 
-# ── Capture Parameters ─────────────────────────────────────────────────────
-# Set these to match what you see in the WaveForms Logic Analyzer GUI.
 
-SAMPLE_RATE_HZ       = 3_125_000   # Rate field (e.g. 3.125 MHz)
-TIME_BASE_MS_PER_DIV = 10.0         # Base field (e.g. 1 ms/div)
+# SAMPLE_RATE_HZ       = 3_125_000   # Rate field (e.g. 3.125 MHz)
+SAMPLE_RATE_HZ       = 160_000   # Rate field (e.g. 3.125 MHz)
+TIME_BASE_MS_PER_DIV = 20.0         # Base field (e.g. 1 ms/div)
 TRIGGER_POSITION_S   = 0.0         # Position field (0 s = trigger centred in window)
-MAX_CAPTURES         = 10_000      # how many triggers to log before stopping
 
 # Which DIN pins to watch. TRIGGER_PIN fires the acquisition; the script then
 # finds the nearest rising edge on SIGNAL_PIN and reports the delta.
@@ -43,6 +42,14 @@ except ImportError:
 
 dwf = cdll.LoadLibrary("libdwf.so")
 
+
+# Raise SystemExit on SIGTERM/SIGHUP so the finally block runs and the device
+# is properly closed even when the SSH session drops unexpectedly.
+def _shutdown(sig, frame):
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, _shutdown)
+signal.signal(signal.SIGHUP, _shutdown)
 
 hdwf = c_int()
 print("Opening Digital Discovery...")
@@ -79,7 +86,7 @@ rgwData = (c_uint16 * NUM_SAMPLES)()
 status  = c_byte()
 
 try:
-    for capture_count in range(1, MAX_CAPTURES + 1):
+    while True:
         # Arm
         dwf.FDwfDigitalInConfigure(hdwf, c_int(1), c_int(1))
 
@@ -113,13 +120,14 @@ try:
             delta_ms = (idx_sig - idx_trig) / SAMPLE_RATE_HZ * 1000.0
             # with open(OUTPUT_FILE, "a") as f:
             #     f.write(f"{capture_count},{delta_ms:.4f}\n")
-            print(f"Capture {capture_count}: {delta_ms:.4f} ms")
+            print(f"Capture: {delta_ms:.4f} ms")
         else:
-            print(f"Capture {capture_count}: edge not found in buffer.")
+            print(f"Capture: edge not found in buffer.")
 
-except KeyboardInterrupt:
+except (KeyboardInterrupt, SystemExit):
     print("\nStopped.")
 
 # ── Cleanup ───────────────────────────────────────────────────────────────
-dwf.FDwfDeviceCloseAll()
-print("Device closed.")
+finally:
+    dwf.FDwfDeviceCloseAll()
+    print("Device closed.")

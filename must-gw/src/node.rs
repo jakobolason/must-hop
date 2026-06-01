@@ -53,8 +53,8 @@ impl Default for PacketParams {
             // LoRaWAN nodes. If talking Gateway-to-Gateway, this usually stays false).
             invert_polarity: false,
             // Standard LoRa preamble length
-            // preamble: Some(8),
-            preamble: None,
+            preamble: Some(8),
+            // preamble: None,
             // Always want CRC for data integrity in Mesh networks
             omit_crc: false,
             // Explicit header mode is standard
@@ -69,7 +69,7 @@ impl From<PacketParams> for TxPacketLoRa {
             freq: params.freq,
             mode: params.mode,
             radio: params.radio,
-            power: params.radio as i8,
+            power: params.power,
             bandwidth: params.bandwidth,
             spreading: params.spreading,
             coderate: params.coderate,
@@ -93,11 +93,11 @@ const INTERCEPT: u64 = 1478;
 const SLOPE: u64 = 4;
 
 impl GWNode {
-    pub fn new(concentrator: Concentrator<Running>) -> Self {
+    pub fn new(concentrator: Concentrator<Running>, pkt_params: PacketParams) -> Self {
         Self {
             radio: concentrator,
             fetched_packets: VecDeque::new(),
-            pkt_params: PacketParams::default(),
+            pkt_params,
         }
     }
     fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<(TxPacket, usize), Error> {
@@ -117,14 +117,21 @@ impl GWNode {
             used_slice.len(),
         ))
     }
-    fn calc_toa(&self, payload_len: u8) -> u32 {
+
+    /// Calculates the ms of ToA in microseconds given a specific payload lengt and uses it's previous transmit
+    /// parameters
+    pub fn calc_toa(&self, payload_len: u8) -> u32 {
         // Using the formula to calculate time-on-air
         let bb_mod = BaseBandModulationParams::new(
             self.pkt_params.spreading.into(),
             self.pkt_params.bandwidth.into(),
             self.pkt_params.coderate.into(),
         );
-        bb_mod.time_on_air_us(None, true, payload_len)
+        bb_mod.time_on_air_us(
+            self.pkt_params.preamble.map(|p| p as u8).or(Some(8)),
+            !self.pkt_params.implicit_header,
+            payload_len,
+        )
     }
     fn avg_slice_delay(&self, payload_len: usize) -> u64 {
         INTERCEPT + SLOPE * payload_len as u64
@@ -142,15 +149,14 @@ impl MHNode<SIZE, LEN> for GWNode {
             embassy_time::Timer::after(Duration::from_millis(5)).await;
         }
         self.radio.transmit(tx_pkt)?;
-        // Because the SX1302 is independent of the process running this program, this returns
-        // before its done transmitting, and just returns after it's done sending the bytes to the radio
         let after = Instant::now();
         trace!(
             "[TAU_SLICE_POST] | {} | {} |",
             after.as_micros(),
             payload_size
         );
-
+        let toa = self.calc_toa(payload_size as u8);
+        embassy_time::Timer::after(Duration::from_micros(toa as u64)).await;
         Ok(())
     }
 
@@ -225,6 +231,7 @@ impl MHNode<SIZE, LEN> for GWNode {
     ) -> Result<Self::Connection, Self::Error> {
         let start_time = Instant::now();
         // let timeout = Duration::from_secs(1);
+        // TODO: Make this a select? So either select the loop { radio.receive } or timeout
         loop {
             if let Some(pkt) = self.fetched_packets.pop_front() {
                 *rec_buf = Some(pkt);
@@ -244,6 +251,9 @@ impl MHNode<SIZE, LEN> for GWNode {
             Timer::after(Duration::from_millis(5)).await;
         }
     }
+
+    /// Calculates the transmission delay associated with this radio. Also the LoRa ToA is
+    /// calculated in mciroseconds.
     fn calc_tx_delay(&self, payload_len: usize) -> u64 {
         self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len)
     }

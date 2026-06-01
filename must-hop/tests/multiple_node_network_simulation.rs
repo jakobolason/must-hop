@@ -4,7 +4,7 @@ use must_hop::{
     MHNode, MHPacket, RxPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
-    policy::ra::{GatewayPolicy, NodePolicy, NodeRole, RandomAccessMac},
+    policy::ra::{GatewayPolicy, NodePolicy, RandomAccessMac},
 };
 use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, time::Duration};
@@ -12,8 +12,6 @@ use std::{collections::HashMap, time::Duration};
 const SIZE: usize = 40;
 const LEN: usize = 5;
 
-// We can use standard Vec here since this is just the host-side test simulation,
-// not the actual no_std firmware.
 pub struct SimulationEnv<const SIZE: usize> {
     /// Maps a Node ID to a list of Node IDs that can hear its transmissions.
     /// E.g., Node 1 -> [2, 3] means if 1 transmits, 2 and 3 receive it.

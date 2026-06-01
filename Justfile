@@ -1,9 +1,12 @@
 set shell := ["bash", "-c"]
-set dotenv-load := true
+set dotenv-load
 
-PI_HOST := env_var_or_default("HOST_URL", "localhost")
-PI_USER := env_var_or_default("PI_USER", "pi")
+PI_HOST := env("HOST_URL", "localhost")
+PI_USER := env("PI_USER", "pi")
 PI_TARGET_DIR := "/home/" + PI_USER + "/must-hop"
+GW_SF := env("SF", "7")
+GW_BW := env("BW", "125")
+PROBE := env("PROBE", "1366:0101")
 
 # Build must-hop and must-gw
 [group('Host builds')]
@@ -82,8 +85,8 @@ remote-run id:
     @echo "Flashing remotely to Pi..."
     cd examples/lora/rak3272s && \
     CARGO_TARGET_THUMBV7EM_NONE_EABI_RUNNER="probe-rs run --chip STM32WLE5CC \
-    --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN --probe 1366:0101" \
-    SOURCEID={{ id }} cargo run --release --bin main
+    --speed 1000 --connect-under-reset --host ws://"$HOST_URL":3000 --token=$PROBE_TOKEN --probe {{ PROBE }}" \
+    SOURCEID={{ id }} SF={{ GW_SF }} BW={{ GW_BW }} cargo run --release --bin main
 
 # Attach to a remote probe-rs server
 [group('probe-rs')]
@@ -95,12 +98,18 @@ remote-attach:
         --token="$PROBE_TOKEN" \
         target/thumbv7em-none-eabi/release/main
 
+[group('probe-rs')]
+probe-list:
+    probe-rs list \
+      --host ws://"$HOST_URL":3000 \
+      --token="$PROBE_TOKEN"
+
 # Run python script on Pi
 [group('Pi deployments')]
 run-delay:
-  @echo "Running capture_deltas.py on pi"
-  scp ./analysis/scripts/capture_deltas.py {{ PI_HOST }}:{{ PI_TARGET_DIR }}/
-  ssh -tt {{ PI_USER }}@{{ PI_HOST }} "python {{ PI_TARGET_DIR }}/capture_deltas.py"
+    @echo "Running capture_deltas.py on pi"
+    scp ./analysis/scripts/capture_deltas.py {{ PI_HOST }}:{{ PI_TARGET_DIR }}/
+    ssh -tt {{ PI_USER }}@{{ PI_HOST }} "python {{ PI_TARGET_DIR }}/capture_deltas.py"
 
 # Build the SX1302 Gateway example (Host)
 [group('examples')]
@@ -125,12 +134,22 @@ deploy-gw-pi: build-gw-pi
 run-gw: deploy-gw-pi
     @echo "Running GW on pi"
     ssh -tt {{ PI_USER }}@{{ PI_HOST }} 'chmod +x {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw \
-      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
+      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always SF={{ GW_SF }} BW={{ GW_BW }} \
        chrt -f 90 {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 [group('Dashboard')]
 dash:
     cargo run --release -p must-dash
+
+# Run headless experiment: just headless --sf 9 --bw 125 --duration 600 1 2
+[group('Dashboard')]
+headless *args:
+    cargo run --release -p must-dash --bin headless -- {{ args }}
+
+# Sweep SF/BW matrix — edit analysis/scripts/run_experiments.py first
+[group('Analysis')]
+run-experiments:
+    cd analysis/scripts && uv run ./run_experiments.py
 
 [group('Analysis')]
 analyze-drift data_file="example.csv":

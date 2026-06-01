@@ -75,9 +75,9 @@ impl TryFrom<Radio> for RxRFConf {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MultirateLoraChannel {
-    radio: u32,
+    pub radio: u32,
     #[serde(rename(serialize = "if", deserialize = "if"))]
-    if_: i32,
+    pub if_: i32,
 }
 
 impl TryFrom<&MultirateLoraChannel> for ChannelConf {

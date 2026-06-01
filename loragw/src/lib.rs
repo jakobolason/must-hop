@@ -38,10 +38,13 @@ pub struct Builder<'a> {
     rx_rf_conf: Vec<RxRFConf>,
     gains: &'a [TxGain],
     channel_conf: Vec<(u8, ChannelConf)>,
+    filter_self_echo: bool,
 }
 pub struct Running {
     gps_fd: Option<std::os::raw::c_int>,
     gps_buffer: Vec<u8>,
+    filter_self_echo: bool,
+    last_tx_payload: Option<Vec<u8>>,
 }
 
 /// A LoRa concentrator.
@@ -95,6 +98,12 @@ impl Concentrator<Closed> {
 }
 
 impl<'a> Concentrator<Builder<'a>> {
+    /// Filter out packets that are echoes of the concentrator's own transmissions.
+    pub fn filter_self_echo(mut self) -> Self {
+        self.state.filter_self_echo = true;
+        self
+    }
+
     /// Attempt to connect to concentrator.
     ///
     /// This function is intended to check if we the concentrator chip
@@ -137,6 +146,7 @@ impl<'a> Concentrator<Builder<'a>> {
         self.state.channel_conf = confs;
         self
     }
+
     pub fn add_config_channel(mut self, chain: u8, conf: ChannelConf) -> Self {
         log::info!("chain: {}, conf: {:?}", chain, conf);
         self.state.channel_conf.push((chain, conf));
@@ -204,6 +214,8 @@ impl<'a> Concentrator<Builder<'a>> {
             state: Running {
                 gps_fd: None,
                 gps_buffer: Vec::new(),
+                filter_self_echo: self.state.filter_self_echo,
+                last_tx_payload: None,
             },
         })
     }
@@ -238,7 +250,7 @@ impl Concentrator<Running> {
 
     /// Perform a non-blocking read of up to 16 packets from
     /// concentrator's FIFO.
-    pub fn receive(&self) -> Result<Option<Vec<RxPacket>>> {
+    pub fn receive(&mut self) -> Result<Option<Vec<RxPacket>>> {
         log::debug!("Setting up receive!");
         let mut tmp_buf: [std::mem::MaybeUninit<llg::lgw_pkt_rx_s>; 16] =
             unsafe { std::mem::MaybeUninit::uninit().assume_init() };
@@ -256,16 +268,35 @@ impl Concentrator<Running> {
             for i in 0..(len as usize) {
                 // SAFE: We know C initialized up to `len` elements
                 let pkt = unsafe { tmp_buf[i].assume_init() };
-                out.push(RxPacket::try_from(&pkt)?);
+                let rx_pkt = RxPacket::try_from(&pkt)?;
+                if self.state.filter_self_echo
+                    && let RxPacket::LoRa(ref lora_pkt) = rx_pkt
+                    && let Some(ref last_tx) = self.state.last_tx_payload
+                    && lora_pkt.payload == *last_tx
+                {
+                    log::debug!("Filtered self-echo packet");
+                    continue;
+                }
+
+                out.push(rx_pkt);
             }
-            Ok(Some(out))
+            if out.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(out))
+            }
         } else {
             Ok(None)
         }
     }
 
-    /// Transmit `packet` over the air.
-    pub fn transmit(&self, packet: TxPacket) -> Result {
+    /// Transmit `packet` over the air with gives parameters.
+    pub fn transmit(&mut self, packet: TxPacket) -> Result {
+        if self.state.filter_self_echo
+            && let TxPacket::LoRa(ref lora_pkt) = packet
+        {
+            self.state.last_tx_payload = Some(lora_pkt.payload.clone());
+        }
         unsafe { hal_call!(lgw_send(&mut packet.try_into()?)) }?;
         Ok(())
     }

@@ -11,11 +11,10 @@ use heapless::Vec;
 use lora_phy::mod_params::RadioError;
 use postcard::Error as PostError;
 
-// pub const LEN: usize = 5;
-/// Does not need to be serialized, because only MHPacket will be sent
+/// Internal pending-packet state (not serialized); used for retransmission and timeouts.
 #[derive(Debug, PartialEq)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
-pub struct PendingPacket<const SIZE: usize> {
+struct PendingPacket<const SIZE: usize> {
     /// We keep the whole packet so it can be retransmitted
     packet: MHPacket<SIZE>,
     /// To know if a timeout has occurred
@@ -250,7 +249,9 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             // Add to recent seen, to compare later
             self.recent_seen.push((pkt.source_id, pkt.packet_id));
             // Fire and forget
-            return Ok(Some((pkt, PayloadType::HeartBeat)));
+            // return Ok(Some((pkt, PayloadType::HeartBeat)));
+            // This is handled by the MAC scheme
+            return Ok(None);
         }
         // Check if it is one of our packets
         if self.check_pend_ack(&pkt) {
@@ -281,6 +282,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 // Are we closer to GW?
                 self.gw_hops < pkt.hop_to_gw
             } else {
+                // FIXME: This does not mean anything anymore, when we use DevEUI
                 // Are we in between source and destination?
                 (min(pkt.source_id, pkt.destination_id) <= self.source_id)
                     && (self.source_id <= max(pkt.destination_id, pkt.source_id))
@@ -386,7 +388,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         //     self.next_packet_id
         // );
         // If we are calling this, then we are a GW
-        self.gw_hops = 0;
+        // self.gw_hops = 0;
         Ok(MHPacket {
             destination_id: 0, // broadcast id
             packet_type: PacketType::HeartBeat,
@@ -428,7 +430,7 @@ mod tests {
         let mut manager = setup_manager();
         let payload = Vec::from_slice(&[1, 2, 3]).unwrap();
 
-        // 1. Queue a new packet bound for node 2
+        // Queue a new packet bound for node 2
         manager
             .queue_new_payload(payload, 2)
             .expect("Should queue payload");
@@ -436,7 +438,7 @@ mod tests {
         // It should now be in the pending list awaiting an ACK
         assert_eq!(manager.get_pending_count(), 1);
 
-        // 2. Simulate receiving an ACK from node 2
+        // Simulate receiving an ACK from node 2
         let ack_pkt = MHPacket {
             destination_id: 2, // Back to us
             packet_type: PacketType::Ack,
@@ -447,7 +449,7 @@ mod tests {
             hop_to_gw: 5,
         };
 
-        // 3. Process the ACK
+        // Process the ACK
         let result = manager
             .receive_packet(ack_pkt)
             .expect("Should process packet");
@@ -462,10 +464,10 @@ mod tests {
     #[test]
     fn test_forwarding_logic() {
         let mut manager = setup_manager();
-        // Simulate that we are 2 hops away from the gateway (GW is ID 1 usually, but let's say GW=0)
+        // Simulate that we are 2 hops away from the gateway (GW is ID 1)
         manager.gw_hops = 2;
 
-        // Simulate a packet coming from node 3, bound for the GW (let's assume ID 1 is GW for your logic)
+        // Simulate a packet coming from node 3, bound for the GW
         let incoming_pkt = MHPacket {
             destination_id: 1, // GW Bound
             packet_type: PacketType::Data,

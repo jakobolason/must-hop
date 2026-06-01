@@ -1,8 +1,10 @@
 [package]
 name = "must-hop"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+description = "A multi hop network orchestrator, implementing LoRa functionality with lora-rs"
+repository = "https://github.com/jakobolason/must-hop"
 
 [dependencies]
 
@@ -32,7 +34,7 @@ default = [
   "postcard/defmt",
   "postcard/use-defmt",
   "heapless/defmt",
-  "lora-phy/defmt-03",
+  # "lora-phy/defmt-03",
   "embassy-time/defmt",
   "embassy-time/defmt-timestamp-uptime",
   "embassy-sync/defmt",

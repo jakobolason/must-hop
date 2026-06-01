@@ -2,66 +2,84 @@ use crate::{app::App, navigator::DashFocus};
 use ansi_to_tui::IntoText;
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
-pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFocus) {
-    let log_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(45),
-            Constraint::Percentage(5),
-        ])
-        .split(area);
-
+pub fn draw_dash_logs(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    dash_focus: &DashFocus,
+    logs_scroll: usize,
+) {
     let log_title_style = if *dash_focus == DashFocus::Logs {
         Style::default().fg(Color::White)
     } else {
         Style::default().fg(Color::DarkGray)
     };
 
-    // --- Node Logs (Left) ---
-    let node_raw = app.node_logs.to_vec().join("\n");
-    let node_text = node_raw
-        .into_text()
-        .unwrap_or_else(|_| ratatui::text::Text::raw(&node_raw));
+    let n = app.sources.len();
+    let delay_pct = 5u16;
+    let source_pct = if n != 0 {
+        (100u16 - delay_pct) / n as u16
+    } else {
+        0
+    };
+    let leftover = if n != 0 {
+        (100u16 - delay_pct) % n as u16
+    } else {
+        0
+    };
 
-    let node_panel = Paragraph::new(node_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Node (remote-run) ")
-            .style(log_title_style),
-    );
+    let mut constraints: Vec<Constraint> = (0..n)
+        .map(|i| Constraint::Percentage(source_pct + if i == 0 { leftover } else { 0 }))
+        .collect();
+    constraints.push(Constraint::Percentage(delay_pct));
 
-    let node_scroll = app
-        .node_logs
-        .len()
-        .saturating_sub(log_chunks[0].height as usize - 2);
-    f.render_widget(node_panel.scroll((node_scroll as u16, 0)), log_chunks[0]);
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(constraints)
+        .split(area);
 
-    // --- GW Logs (Right) ---
-    let gw_raw = app.gw_logs.to_vec().join("\n");
-    let gw_text = gw_raw
-        .into_text()
-        .unwrap_or_else(|_| ratatui::text::Text::raw(&gw_raw));
+    for (i, source) in app.sources.iter().enumerate() {
+        let raw = source.logs.join("\n");
+        let text = raw
+            .into_text()
+            .unwrap_or_else(|_| ratatui::text::Text::raw(&raw));
 
-    let gw_panel = Paragraph::new(gw_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Gateway (run-gw) ")
-            .style(log_title_style),
-    );
+        let panel = Paragraph::new(text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" {} ", source.id))
+                .style(log_title_style),
+        );
 
-    let gw_scroll = app
-        .gw_logs
-        .len()
-        .saturating_sub(log_chunks[1].height as usize - 2);
-    f.render_widget(gw_panel.scroll((gw_scroll as u16, 0)), log_chunks[1]);
+        let visible_lines = chunks[i].height as usize - 2;
+        let total_lines = source.logs.len();
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+        let clamped = logs_scroll.min(max_scroll);
+        // scroll=0 → bottom (newest); higher → further back
+        let scroll_row = max_scroll.saturating_sub(clamped);
 
-    // --- Delay Logs
+        f.render_widget(panel.scroll((scroll_row as u16, 0)), chunks[i]);
+
+        if total_lines > visible_lines {
+            let thumb_pos = max_scroll.saturating_sub(clamped);
+            let mut scrollbar_state = ScrollbarState::new(max_scroll + 1).position(thumb_pos);
+            f.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                chunks[i].inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
+                &mut scrollbar_state,
+            );
+        }
+    }
+
+    // Delay panel is always last, driven by DashStats rather than a log buffer
     let delay_raw = app
         .dash_stats
         .hardware_delay
@@ -75,13 +93,26 @@ pub fn draw_dash_logs(f: &mut Frame, app: &App, area: Rect, dash_focus: &DashFoc
     let delay_panel = Paragraph::new(delay_text).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Measured delay between GW and Node")
+            .title(" hw delay ")
             .style(log_title_style),
     );
-    let delay_scroll = app
-        .dash_stats
-        .hardware_delay
-        .len()
-        .saturating_sub(log_chunks[2].height as usize - 2);
-    f.render_widget(delay_panel.scroll((delay_scroll as u16, 0)), log_chunks[2]);
+    let visible_lines = chunks[n].height as usize - 2;
+    let total_lines = app.dash_stats.hardware_delay.len();
+    let max_scroll = total_lines.saturating_sub(visible_lines);
+    let clamped = logs_scroll.min(max_scroll);
+    let scroll_row = max_scroll.saturating_sub(clamped);
+    f.render_widget(delay_panel.scroll((scroll_row as u16, 0)), chunks[n]);
+
+    if total_lines > visible_lines {
+        let thumb_pos = max_scroll.saturating_sub(clamped);
+        let mut scrollbar_state = ScrollbarState::new(max_scroll + 1).position(thumb_pos);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            chunks[n].inner(Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
+            &mut scrollbar_state,
+        );
+    }
 }

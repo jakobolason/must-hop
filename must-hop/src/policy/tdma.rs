@@ -8,7 +8,11 @@ use log::{debug, error, info};
 #[cfg(feature = "debug")]
 use embedded_hal::digital::OutputPin;
 
-use core::{marker::PhantomData, num::NonZeroU8};
+use core::{
+    cmp::{max, min},
+    marker::PhantomData,
+    num::NonZeroU8,
+};
 use postcard::{from_bytes, ser_flavors::Size, serialize_with_flavor, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -21,33 +25,35 @@ mod slots;
 
 use controller::Controller;
 
+use core::time::Duration as CoreDuration;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
-type VecT3 = Vec<(u8, i32), 5>;
+type VecFB = Vec<(u8, i32), 7>;
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct SlotAllocation {
+pub(crate) struct SyncBeacon {
     my_slot: u8,
     /// Bit mask for known slots, meaning only 8 nodes can be known at a time
     known_slots: u8,
     // The tau_hb duration in secs, should be converted back to a Duration on followers
     tau_hb: u8,
     pub(crate) gps_time_us: u64,
-    /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    pub(crate) t3_deltas: VecT3,
+    /// A list of (node_id, T3 - T2 delta in ms) for PTP (leader)
+    /// follower returns it's error value to it's leader for sync control
+    pub(crate) feedback_vec: VecFB,
 }
 
 /// Only used for tests
 #[allow(dead_code)]
-impl SlotAllocation {
+impl SyncBeacon {
     pub(super) fn new() -> Self {
         Self {
             my_slot: 1,
             known_slots: 0,
             tau_hb: 10,
             gps_time_us: 0,
-            t3_deltas: Vec::new(),
+            feedback_vec: Vec::new(),
         }
     }
 }
@@ -61,6 +67,8 @@ pub trait DebugPin {}
 #[cfg(not(feature = "debug"))]
 impl<T> DebugPin for T {}
 
+/// The minimum amount of time(ms) that a node should listen, regardless of transmit parameters
+const MIN_RX_WINDOW: u32 = 500_u32;
 impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     pub fn new(
         // FIXME: Remove from user, should be set by GW
@@ -76,25 +84,17 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             slot_manager: SlotManager {
                 slot_duration,
                 tau_hb: TauHbMode::Low,
-                hb_countdown: 0,
                 slots_per_frame: slots_per_frame.into(),
-                my_tx_slot: None,
-                known_slots_mask: SlotMask::default(),
-                node_id: 0,
                 gw_hops: 255,
                 leader_id: None,
+                ..Default::default()
             },
             time_manager: TimeManager {
                 time_sync,
-                last_hb_instant: None,
-                hbt_pkt: None,
-                t3_deltas: Vec::new(),
                 controller,
                 err_threshold: ERR_THRESHOLD,
-                sync_counter: 0,
-                out_of_sync: true,
+                ..Default::default()
             },
-            counter: 0,
 
             #[cfg(feature = "debug")]
             debug_pin: None,
@@ -103,6 +103,8 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Use this to give a previously known approximate speed of the chip, to decrease the time to
+    /// stability of this node.
     pub fn set_controller(self, v_s: i64, kp: i64, ki: i64) -> Self {
         let controller = Controller::new(v_s, kp, ki);
         Self {
@@ -114,6 +116,23 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    pub fn set_max_toa(self, max_toa_ms: u32) -> Self {
+        let max_rx_window: u32 = (self.slot_manager.slot_duration.as_millis() as u32)
+            / self.slot_manager.slots_per_frame as u32;
+        // NOTE: Should user be alerted here, if this does'nt work?
+        let rx_window = max_toa_ms.max(MIN_RX_WINDOW).min(max_rx_window);
+        // let rx_window = min(max(MIN_RX_WINDOW, max_toa_ms), max_rx_window);
+        Self {
+            slot_manager: SlotManager {
+                rx_window,
+                ..self.slot_manager
+            },
+            ..self
+        }
+    }
+
+    /// Set the time stamp this node should use, instead of getting it from a leader. Mostly use
+    /// this if you are GW
     pub fn set_time_sync(self, time_sync: (u64, Instant)) -> Self {
         Self {
             time_manager: TimeManager {
@@ -124,6 +143,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Set the node id this should have, to be used for finding the slot
     pub fn set_node_id(self, node_id: u8) -> Self {
         Self {
             slot_manager: SlotManager {
@@ -134,16 +154,22 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Use this to set a specific tx slot this node should use, regardless of what it might receive
+    /// from others. Mostly use this if you are a GW
     pub fn set_tx_slot(self, tx_slot: u8) -> Self {
+        let mut copied_sm = self.slot_manager.known_slots_mask;
+        copied_sm.claim(tx_slot);
         Self {
             slot_manager: SlotManager {
                 my_tx_slot: Some(tx_slot),
+                known_slots_mask: copied_sm,
                 ..self.slot_manager
             },
             ..self
         }
     }
 
+    /// Set the time period before sending a heartbeat (IN THE HIGH FREQUENCY SETTING)
     pub fn set_tau_hb(self, tau_hb: u8) -> Self {
         let tau_hb = TauHbMode::from_secs(tau_hb);
         Self {
@@ -155,6 +181,20 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
+    /// Use this to ensure that this node does not wait to listen for a leader, before beginning to
+    /// transmit.
+    pub fn node_is_leader(self) -> Self {
+        Self {
+            time_manager: TimeManager {
+                heard_by_leader: true,
+                ..self.time_manager
+            },
+            ..self
+        }
+    }
+
+    /// Debug mode: If this is set, the node will pull the pin high when a slot begins, which allows
+    /// one to track the time synchronization of the system.
     #[cfg(feature = "debug")]
     pub fn set_debug_pin(self, pin: P) -> Self {
         Self {
@@ -168,7 +208,6 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             _state: PhantomData,
             slot_manager: self.slot_manager,
             time_manager: self.time_manager,
-            counter: self.counter,
             #[cfg(feature = "debug")]
             debug_pin: self.debug_pin,
             #[cfg(not(feature = "debug"))]
@@ -181,17 +220,19 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
     fn default() -> Self {
         TdmaMac::new(
             Duration::from_secs(1),
-            NonZeroU8::new(10).unwrap(),
+            // The SlotManager can only hold 5 nodes, so this should default to that max
+            NonZeroU8::new(5).unwrap(),
             None,
             None,
         )
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 enum TauHbMode {
     High,
+    #[default]
     Low,
 }
 
@@ -211,12 +252,17 @@ impl TauHbMode {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct SlotManager {
     slot_duration: Duration,
     slots_per_frame: u8,
     my_tx_slot: Option<u8>,
     tau_hb: TauHbMode,
     hb_countdown: u8,
+    /// How long a node listens for, in a known node slot, is determined by the `set_max_toa` which
+    /// uses the given amount of milliseconds of the largest possible transmission delay, to make
+    /// the node correctly listen for enough time.
+    rx_window: u32,
     /// A mask to know what other node's one know
     known_slots_mask: SlotMask,
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
@@ -231,21 +277,28 @@ const ERR_THRESHOLD: u32 = 30_000;
 const IN_SYNC_THRESHOLD: u8 = 5;
 // How long it takes, before a node goes back into full listening mode
 const HB_TIMEOUT: Duration = Duration::from_secs(120);
+
+#[derive(Default)]
 pub(crate) struct TimeManager<const SIZE: usize> {
     /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,
     last_hb_instant: Option<Instant>,
     hbt_pkt: Option<MHPacket<SIZE>>,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
-    t3_deltas: VecT3,
+    feedback_vec: VecFB,
     /// Handles error correction
     controller: Controller,
-    /// The same type as from t3_deltas
+    /// The same type as from feedback_vec
     err_threshold: u32,
     /// Sync counter, if a node is out of sync, it adds one to this.
     sync_counter: u8,
     /// If a single node is out of sync, we set this to go into low tau
     out_of_sync: bool,
+    /// We should only go up in sync_counter, if there actually was a node who said it was in sync
+    in_sync: bool,
+    /// Set when we receive a HB from our leader whose known_slots includes our own slot.
+    /// Only then do we consider ourselves "heard" and advance the sync counter.
+    heard_by_leader: bool,
 }
 
 pub struct Builder;
@@ -258,8 +311,6 @@ pub struct TdmaMac<State, P, const SIZE: usize> {
     slot_manager: SlotManager,
     time_manager: TimeManager<SIZE>,
 
-    // FIXME: Remove later
-    counter: u8,
     #[cfg(feature = "debug")]
     pub debug_pin: Option<P>,
     #[cfg(not(feature = "debug"))]
@@ -311,9 +362,9 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             * (self.slot_manager.slots_per_frame as u64);
         let time_in_frame = current_time_us % frame_duration_us;
 
-        // Add half of slot duration to achieve 'round to nearest' int division
+        // Round to nearest slot, wrapping within the frame to avoid returning slots_per_frame
         let slot_dur = self.slot_manager.slot_duration.as_micros();
-        ((time_in_frame + (slot_dur / 2)) / slot_dur) as u8
+        ((time_in_frame + (slot_dur / 2)) % frame_duration_us / slot_dur) as u8
     }
     fn reset_sync(&mut self) {
         self.time_manager.time_sync = None;
@@ -325,9 +376,10 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         self.slot_manager.known_slots_mask = SlotMask::default();
         self.slot_manager.tau_hb = TauHbMode::Low;
         self.slot_manager.hb_countdown = 0;
+        self.time_manager.controller.prev_err = 0;
     }
 
-    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: RxPacket) {
+    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: &RxPacket) {
         // Look for a heartbeat and get allocation from byte slices
         let received_hb = pkts
             .iter()
@@ -337,7 +389,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     && pkt.source_id != self.slot_manager.node_id
             })
             .find_map(|pkt| {
-                from_bytes::<SlotAllocation>(&pkt.payload)
+                from_bytes::<SyncBeacon>(&pkt.payload)
                     .ok()
                     .map(|alloc| (pkt, alloc))
             });
@@ -348,21 +400,29 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             Some(tple) => tple,
             None => return,
         };
+
         // Resync node to heartbeat's announced slot, if hb came closer to gw than me
-        let (src, val) = if self.slot_manager.node_id != GATEWAY_ID
-            && pkt.hop_to_gw < self.slot_manager.gw_hops
-        {
-            self.time_manager.last_hb_instant = Some(Instant::now());
+        let should_use_pkt = match self.slot_manager.leader_id {
+            Some(lid) => lid == pkt.source_id,
+            None => {
+                self.slot_manager.node_id != GATEWAY_ID && pkt.hop_to_gw < self.slot_manager.gw_hops
+            }
+        };
+        let (src, val) = if should_use_pkt {
+            // self.time_manager.last_hb_instant = Some(Instant::now());
             // Controller updates internal drift, and returns adjusted stamps
-            self.time_manager.time_sync = Some(self.time_manager.controller.run_transferfunction(
-                &alloc,
-                rx_pkt,
-                self.time_manager.time_sync,
-                self.slot_manager
-                    .my_tx_slot
-                    .unwrap_or(self.slot_manager.node_id),
-            ));
-            // TODO:
+            self.time_manager.time_sync = Some(
+                self.time_manager.controller.run_transferfunction(
+                    &alloc,
+                    rx_pkt,
+                    self.time_manager.time_sync,
+                    self.slot_manager
+                        .my_tx_slot
+                        .unwrap_or(self.slot_manager.node_id),
+                ),
+            );
+
+            // TODO: timeout missing
             // denote this as a leader node. This should only be set once (with a timeout
             // perhaps) such that 2 equal leader nodes don't make this follower node unstable
             let leader_id = match self.slot_manager.leader_id {
@@ -373,6 +433,21 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     pkt.source_id
                 }
             };
+            if leader_id == pkt.source_id {
+                self.time_manager.last_hb_instant = Some(Instant::now());
+
+                // Mark ourselves as heard when the leader's allocation already knows our slot,
+                // so followers only advance toward High mode once they're confirmed visible.
+                if !self.time_manager.heard_by_leader
+                    && let Some(my_slot) = self.slot_manager.my_tx_slot
+                    && alloc.known_slots & (1 << my_slot) != 0
+                {
+                    self.time_manager.heard_by_leader = true;
+                }
+
+                // pkt.hop_to_gw
+            }
+
             // If this is leader, then we check if the tau_hb matches theirs
             // if leader_id == pkt.source_id && alloc.tau_hb != self.slot_manager.tau_hb.as_secs() {
             //     self.slot_manager.tau_hb = TauHbMode::from_secs(alloc.tau_hb);
@@ -382,13 +457,16 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         } else {
             // If a follower's error is above threshold, increase out of sync counter
             if let Some((_, prev_err)) = alloc
-                .t3_deltas
+                .feedback_vec
                 .iter()
                 .find(|t| t.0 == self.slot_manager.node_id)
-                && prev_err.unsigned_abs() > self.time_manager.err_threshold
             {
-                info!("Node out of sync ...{}", prev_err);
-                self.time_manager.out_of_sync = true;
+                if prev_err.unsigned_abs() > self.time_manager.err_threshold {
+                    info!("Node out of sync ...{}", prev_err);
+                    self.time_manager.out_of_sync = true;
+                } else {
+                    self.time_manager.in_sync = true;
+                }
             }
 
             // if we are GW, then we want to update out t3 deltas on this node
@@ -402,10 +480,15 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             (pkt.source_id, t3)
         };
         // Leader calculates t3s, and follower returns calculated error
-        match self.time_manager.t3_deltas.iter().position(|t| t.0 == src) {
-            Some(idx) => self.time_manager.t3_deltas[idx] = (src, val),
+        match self
+            .time_manager
+            .feedback_vec
+            .iter()
+            .position(|t| t.0 == src)
+        {
+            Some(idx) => self.time_manager.feedback_vec[idx] = (src, val),
             None => {
-                if self.time_manager.t3_deltas.push((src, val)).is_err() {
+                if self.time_manager.feedback_vec.push((src, val)).is_err() {
                     error!("T3 deltas is full!")
                 }
             }
@@ -424,6 +507,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 self.slot_manager.node_id,
             ) {
                 Some(free_slot) => {
+                    info!("Found my slot to be {}", free_slot);
                     self.slot_manager.my_tx_slot = Some(free_slot);
                     self.slot_manager.known_slots_mask.claim(free_slot);
                 }
@@ -440,6 +524,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 0
             }
         };
+        info!("GIVEN TOA: {}", toa);
         info!("[TAU_SLICE]|{}|", Instant::now().as_micros());
         // FIXME: Remember setting this
         let measured_spi_delay = 0;
@@ -449,15 +534,15 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     fn approximate_packet_size<const LEN: usize>(
         &self,
         my_tx_slot: u8,
-        t3_deltas: VecT3,
+        feedback_vec: VecFB,
         tx_queue: &Vec<MHPacket<SIZE>, LEN>,
     ) -> usize {
-        let dummy_allocation = SlotAllocation {
+        let dummy_allocation = SyncBeacon {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_frames(),
             gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
-            t3_deltas,
+            feedback_vec,
         };
         let alloc_size = serialize_with_flavor(&dummy_allocation, Size::default()).unwrap();
 
@@ -493,7 +578,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             }
         };
         // FIXME: Remember setting this
-        let measured_constant_offset = 0;
+        let measured_constant_offset = 7;
         let total_size = used_slice.len() + measured_constant_offset;
 
         info!("[SIZE EXPECTED]|{}|", total_size);
@@ -520,10 +605,12 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 if self.time_manager.out_of_sync {
                     self.time_manager.sync_counter = 0;
                     info!("STILL OUT OF SYNC");
+
                     // Reset it, so this is tested again in the next run
                     // NOTE: Only reset here, not in sync_epoch
                     self.time_manager.out_of_sync = false;
-                } else {
+                } else if self.time_manager.in_sync {
+                    self.time_manager.in_sync = false;
                     self.time_manager.sync_counter =
                         self.time_manager.sync_counter.saturating_add(1);
                     info!("THEY WAS IN SYNC: {}", self.time_manager.sync_counter);
@@ -541,16 +628,17 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     fn update_heartbeat(
         &self,
         mut hbt: MHPacket<SIZE>,
-        my_tx_slot: u8,
-        t3_deltas: VecT3,
+        my_slot: u8,
+        feedback_vec: VecFB,
         adjusted_timestamp: u64,
     ) -> MHPacket<SIZE> {
-        let allocation = SlotAllocation {
-            my_slot: my_tx_slot,
+        info!("Sending my slot as {}", my_slot);
+        let allocation = SyncBeacon {
+            my_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
             tau_hb: self.slot_manager.tau_hb.skip_frames(),
             gps_time_us: adjusted_timestamp,
-            t3_deltas,
+            feedback_vec,
         };
         let mut buf = [0u8; SIZE];
         if let Ok(serialized_slice) = to_slice(&allocation, &mut buf) {
@@ -558,6 +646,72 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             let _ = hbt.payload.extend_from_slice(serialized_slice);
         }
         hbt
+    }
+
+    async fn rx<Node, const LEN: usize>(
+        &mut self,
+        node: &mut Node,
+        rx_buffer: &mut Node::ReceiveBuffer,
+        with_timeout: Option<CoreDuration>,
+    ) -> Option<(Vec<MHPacket<SIZE>, LEN>, RxPacket)>
+    where
+        Node: MHNode<SIZE, LEN>,
+    {
+        let conn = node.listen(rx_buffer, with_timeout).await;
+        if let Ok(conn) = conn
+            && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
+        {
+            self.sync_epoch(&pkts, &rx_pkt);
+            Some((pkts, rx_pkt))
+        } else {
+            // Check to see if we haven't heard from *leader* in some time
+            if let Some(inst) = self.time_manager.last_hb_instant
+                && Instant::now() > inst + HB_TIMEOUT
+            {
+                // NOTE: This does not fire for the GW, because last_hb_instant should always be None
+                info!("Have not heard from leader before timeout, returning to listening mode");
+                self.reset_sync();
+            }
+            None
+        }
+    }
+    async fn tx<Node, const LEN: usize>(
+        &mut self,
+        node: &mut Node,
+        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        my_tx_slot: u8,
+    ) -> Result<(), Node::Error>
+    where
+        Node: MHNode<SIZE, LEN>,
+    {
+        if !tx_queue.is_full()
+            && let Some(pkt) = self.time_manager.hbt_pkt.take()
+        {
+            let extracted_deltas: VecFB = core::mem::take(&mut self.time_manager.feedback_vec);
+            let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
+                self.approximate_packet_size(my_tx_slot, extracted_deltas.clone(), tx_queue),
+            ));
+            self.update_tau_hb();
+            info!(
+                "[STATE_SYNC]|{:?}|{}|",
+                self.slot_manager.tau_hb, self.time_manager.sync_counter
+            );
+            let upd_pkt =
+                self.update_heartbeat(pkt, my_tx_slot, extracted_deltas, adjusted_timestamp);
+            if let Err(pkt) = tx_queue.push(upd_pkt) {
+                error!("Queue is full even though we just checked??");
+                self.time_manager.hbt_pkt = Some(pkt);
+            }
+        } else {
+            // Update so we eventually send a hb out
+            self.slot_manager.hb_countdown = self.slot_manager.hb_countdown.saturating_sub(1);
+        }
+        if !tx_queue.is_empty() {
+            let tx_result = node.transmit(tx_queue).await;
+            tx_queue.clear();
+            tx_result?;
+        }
+        Ok(())
     }
 }
 
@@ -608,44 +762,24 @@ where
         // TODO: Go back into this, if not heard a heartbeat in some time
         let Some(timestamps) = self.time_manager.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
-            let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_secs(10)))
-                .await;
-            match conn {
-                Ok(conn) => {
-                    let (rec, rx_pkt) = node.receive(conn, rx_buffer).await?;
-                    // Check for being heartbeat
-                    self.sync_epoch(&rec, rx_pkt);
-                    // TODO: Wait 200ms, then transmit HB yourself
-                    Timer::after(Duration::from_millis(200)).await;
-                    if let Some(hbt_pkt) = self.time_manager.hbt_pkt.take()
-                        && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
-                    {
-                        let extracted_deltas: VecT3 =
-                            core::mem::take(&mut self.time_manager.t3_deltas);
-                        let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
-                            self.approximate_packet_size(
-                                my_tx_slot,
-                                extracted_deltas.clone(),
-                                tx_queue,
-                            ),
-                        ));
-                        self.update_tau_hb();
-                        let upd_pkt = self.update_heartbeat(
-                            hbt_pkt,
-                            my_tx_slot,
-                            extracted_deltas,
-                            adjusted_timestamp,
-                        );
-                        node.transmit(&[upd_pkt]).await?;
-                    }
+            if let Some((pkts, _rx_pkt)) = self
+                .rx(node, rx_buffer, Some(CoreDuration::from_secs(10)))
+                .await
+            {
+                // Check for being heartbeat
+                // self.sync_epoch(&pkts, &rx_pkt);
+                // TODO: Wait 200ms, then transmit HB yourself
+                Timer::after(Duration::from_millis(200)).await;
 
-                    return Ok(Some(rec));
+                if self.time_manager.hbt_pkt.is_some()
+                    && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
+                {
+                    self.tx(node, tx_queue, my_tx_slot).await?;
                 }
-                Err(e) => {
-                    info!("Error in getting conn: {:?}", e);
-                    return Ok(None);
-                }
+
+                return Ok(Some(pkts));
+            } else {
+                return Ok(None);
             }
         };
 
@@ -664,74 +798,43 @@ where
 
         if let Some(my_tx_slot) = self.slot_manager.my_tx_slot
             && slot == my_tx_slot
+            && self.time_manager.heard_by_leader
         {
             // debug!(" !!!  MY SLOT !!! ");
             // NOTE: Introduce a 100ms delay here, to ensure nodes are listening in your slot
             Timer::after(Duration::from_millis(100)).await;
 
-            if !tx_queue.is_full()
-                && let Some(pkt) = self.time_manager.hbt_pkt.take()
-            {
-                let extracted_deltas: VecT3 = core::mem::take(&mut self.time_manager.t3_deltas);
-                let adjusted_timestamp = self.calc_adjust_timestamp(node.calc_tx_delay(
-                    self.approximate_packet_size(my_tx_slot, extracted_deltas.clone(), tx_queue),
-                ));
-                self.update_tau_hb();
-                let upd_pkt =
-                    self.update_heartbeat(pkt, my_tx_slot, extracted_deltas, adjusted_timestamp);
-                if let Err(pkt) = tx_queue.push(upd_pkt) {
-                    error!("Queue is full even though we just checked??");
-                    self.time_manager.hbt_pkt = Some(pkt);
-                }
-            } else {
-                // Update so we eventually send a hb out
-                self.slot_manager.hb_countdown -= 1;
-            }
-            if !tx_queue.is_empty() {
-                let tx_result = node.transmit(tx_queue).await;
-                tx_queue.clear();
-                tx_result?;
-            }
+            self.tx(node, tx_queue, my_tx_slot).await?;
 
             // TODO: Wait 100ms, then listen for 200ms for new nodes on network
+            // TODO: Shuoldn't this only be done after heartbeats?
             Timer::after(Duration::from_millis(100)).await;
-            let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_millis(200)))
-                .await;
-            if let Ok(conn) = conn
-                && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
+            if let Some((pkts, _rx_pkt)) = self
+                .rx(node, rx_buffer, Some(CoreDuration::from_millis(200)))
+                .await
             {
-                info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts);
-                self.sync_epoch(&pkts, rx_pkt);
+                info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts.len());
                 received_packets = pkts;
             }
         } else if self.slot_manager.known_slots_mask.is_taken(slot) {
             // Only listen if its for a known node
             // debug!(" -- NOT MY SLOT ---   ");
-            let conn = node
-                .listen(rx_buffer, Some(core::time::Duration::from_millis(500)))
-                .await;
-            if let Ok(conn) = conn
-                && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
+            if let Some((pkts, _rx_pkt)) = self
+                .rx(
+                    node,
+                    rx_buffer,
+                    Some(CoreDuration::from_millis(
+                        self.slot_manager.rx_window as u64,
+                    )),
+                )
+                .await
             {
-                self.sync_epoch(&pkts, rx_pkt);
                 received_packets = pkts;
-            } else {
-                // Check to see if we haven't heard from *leader* in some time
-                if let Some(inst) = self.time_manager.last_hb_instant
-                    && Instant::now() > inst + HB_TIMEOUT
-                {
-                    info!(
-                        "Have not heard from leader before timeout, returning to listening moode"
-                    );
-                    // then we go into listening mode
-                    // self.time_manager.time_sync = None;
-                    self.reset_sync();
-                }
             }
         }
         #[cfg(feature = "debug")]
         if let Some(pin) = self.debug_pin.as_mut() {
+            Timer::after(Duration::from_millis(1)).await;
             let _ = pin.set_low();
         }
         Ok(Some(received_packets))
