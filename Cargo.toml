@@ -9,8 +9,10 @@ exclude = [
 
 [workspace.dependencies]
 
-lora-phy = { path = "../../repos/pr-lora-rs/lora-phy" }
-lora-modulation = { path = "../../repos/pr-lora-rs/lora-modulation" }
+# lora-phy = { path = "../../repos/pr-lora-rs/lora-phy" }
+# lora-modulation = { path = "../../repos/pr-lora-rs/lora-modulation" }
+lora-phy = "3.0.1"
+lora-modulation = "0.1.5"
 
 [profile.dev]
 opt-level = "s"
