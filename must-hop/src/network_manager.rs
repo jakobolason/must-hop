@@ -11,7 +11,7 @@ use heapless::Vec;
 use lora_phy::mod_params::RadioError;
 use postcard::Error as PostError;
 
-/// Interna
+/// Internal pending-packet state (not serialized); used for retransmission and timeouts.
 #[derive(Debug, PartialEq)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 struct PendingPacket<const SIZE: usize> {

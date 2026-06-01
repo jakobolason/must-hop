@@ -181,7 +181,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
-    /// Use this to ensure that this node does nat wait to listen for a leader, before beginning to
+    /// Use this to ensure that this node does not wait to listen for a leader, before beginning to
     /// transmit.
     pub fn node_is_leader(self) -> Self {
         Self {
@@ -669,7 +669,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 && Instant::now() > inst + HB_TIMEOUT
             {
                 // NOTE: This does not fire for the GW, because last_hb_instant should always be None
-                info!("Have not heard from leader before timeout, returning to listening moode");
+                info!("Have not heard from leader before timeout, returning to listening mode");
                 self.reset_sync();
             }
             None
