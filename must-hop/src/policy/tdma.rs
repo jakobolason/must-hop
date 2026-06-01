@@ -8,7 +8,11 @@ use log::{debug, error, info};
 #[cfg(feature = "debug")]
 use embedded_hal::digital::OutputPin;
 
-use core::{marker::PhantomData, num::NonZeroU8};
+use core::{
+    cmp::{max, min},
+    marker::PhantomData,
+    num::NonZeroU8,
+};
 use postcard::{from_bytes, ser_flavors::Size, serialize_with_flavor, to_slice};
 use serde::{Deserialize, Serialize};
 
@@ -63,6 +67,8 @@ pub trait DebugPin {}
 #[cfg(not(feature = "debug"))]
 impl<T> DebugPin for T {}
 
+/// The minimum amount of time(ms) that a node should listen, regardless of transmit parameters
+const MIN_RX_WINDOW: u32 = 500_u32;
 impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     pub fn new(
         // FIXME: Remove from user, should be set by GW
@@ -111,9 +117,12 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn set_max_toa(self, max_toa_ms: u32) -> Self {
+        let max_rx_window: u32 = self.slot_manager.slots_per_frame as u32
+            / (self.slot_manager.slot_duration.as_millis() as u32);
+        let rx_window = min(max(MIN_RX_WINDOW, max_toa_ms), max_rx_window);
         Self {
             slot_manager: SlotManager {
-                max_toa_ms,
+                rx_window,
                 ..self.slot_manager
             },
             ..self
@@ -248,8 +257,10 @@ pub(crate) struct SlotManager {
     my_tx_slot: Option<u8>,
     tau_hb: TauHbMode,
     hb_countdown: u8,
-    /// The maximum transmission delay, should optimally be computed at build time
-    max_toa_ms: u32,
+    /// How long a node listens for, in a known node slot, is determined by the `set_max_toa` which
+    /// uses the given amount of milliseconds of the largest possible transmission delay, to make
+    /// the node correctly listen for enough time.
+    rx_window: u32,
     /// A mask to know what other node's one know
     known_slots_mask: SlotMask,
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
@@ -804,7 +815,13 @@ where
             // Only listen if its for a known node
             // debug!(" -- NOT MY SLOT ---   ");
             if let Some((pkts, _rx_pkt)) = self
-                .rx(node, rx_buffer, Some(CoreDuration::from_millis(500)))
+                .rx(
+                    node,
+                    rx_buffer,
+                    Some(CoreDuration::from_millis(
+                        self.slot_manager.rx_window as u64,
+                    )),
+                )
                 .await
             {
                 received_packets = pkts;
