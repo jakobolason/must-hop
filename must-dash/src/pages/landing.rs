@@ -101,7 +101,10 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
                         format!("[probe {}] ", n.probe_index),
                         Style::default().fg(Color::DarkGray),
                     ),
-                    Span::raw(format!("KP={} KI={}  SF={} BW={}kHz", n.kp, n.ki, n.sf, n.bw)),
+                    Span::raw(format!(
+                        "KP={} KI={}  SF={} BW={}kHz",
+                        n.kp, n.ki, n.sf, n.bw
+                    )),
                 ]))
             })
             .collect()
@@ -200,8 +203,17 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
     let title = app.pending_node.as_ref().map_or_else(
         || " Configure Node ".to_string(),
         |n| {
-            let verb = if app.editing_node_index.is_some() { "Edit" } else { "Configure" };
-            format!(" {} Node — probe [{}]: {} ", verb, n.probe_index, n.name_short())
+            let verb = if app.editing_node_index.is_some() {
+                "Edit"
+            } else {
+                "Configure"
+            };
+            format!(
+                " {} Node — probe [{}]: {} ",
+                verb,
+                n.probe_index,
+                n.name_short()
+            )
         },
     );
 
@@ -247,7 +259,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(Line::from(" Kp ").left_aligned())
-                .title(Line::from("[1 decimal used]").right_aligned()),
+                .title(Line::from("[no decimals allowed]").right_aligned()),
         )
         .style(style_for(ProbeConfigFocus::Kp));
     f.render_widget(kp, chunks[0]);
@@ -259,7 +271,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(Line::from(" Ki ").left_aligned())
-                .title(Line::from("[2 decimals used]").right_aligned()),
+                .title(Line::from("[no decimals allowed]").right_aligned()),
         )
         .style(style_for(ProbeConfigFocus::Ki));
     f.render_widget(ki, chunks[1]);
@@ -299,6 +311,18 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
         )
         .style(style_for(ProbeConfigFocus::Bw));
     f.render_widget(bw, chunks[4]);
+
+    // BW field
+    let tau_val = node.map_or("", |n| n.tau.as_str());
+    let tau = Paragraph::new(tau_val)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Line::from(" heartbeat duration (tau) [s] ").left_aligned())
+                .title(Line::from("[10-100]").right_aligned()),
+        )
+        .style(style_for(ProbeConfigFocus::Tau));
+    f.render_widget(tau, chunks[4]);
 
     // Confirm button
     let confirm_label = if focus == ProbeConfigFocus::Confirm {

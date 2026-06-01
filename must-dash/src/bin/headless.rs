@@ -47,6 +47,10 @@ struct Args {
     #[arg(long, default_value = "0.4")]
     ki: String,
 
+    /// Heartbeat duration
+    #[arg(long, default_value = "10")]
+    tau: String,
+
     /// Run duration in seconds
     #[arg(long, default_value_t = 600)]
     duration: u64,
@@ -62,8 +66,8 @@ async fn main() {
 
     let args = Args::parse();
     eprintln!(
-        "[headless] SF={} BW={} KP={} KI={} nodes={:?} duration={}s",
-        args.sf, args.bw, args.kp, args.ki, args.nodes, args.duration,
+        "[headless] SF={} BW={} KP={} KI={} nodes={:?} tau={} duration={}s",
+        args.sf, args.bw, args.kp, args.ki, args.nodes, args.tau, args.duration,
     );
 
     let mut app = must_dash::app::App::new(false);
@@ -77,6 +81,7 @@ async fn main() {
             source_id: node.node_id.clone(),
             sf: args.sf.clone(),
             bw: args.bw.clone(),
+            tau: args.tau.clone(),
         });
     }
     app.defaults.sf = args.sf;

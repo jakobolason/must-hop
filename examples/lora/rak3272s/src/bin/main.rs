@@ -62,6 +62,7 @@ include!(concat!(env!("OUT_DIR"), "/env_vars.rs"));
 const DEFAULT_SOURCEID: u8 = 2;
 const DEFAULT_KI: i64 = 25;
 const DEFAULT_KP: i64 = 20;
+const DEFAULT_TAU: u8 = 10;
 const DEFAULT_ALT_MDLTN: bool = false;
 
 bind_interrupts!(struct Irqs{
@@ -223,11 +224,13 @@ pub async fn lora_task(
 
     let ki = KI.unwrap_or(DEFAULT_KI);
     let kp = KP.unwrap_or(DEFAULT_KP);
+    let tau = TAU.unwrap_or(DEFAULT_TAU);
     let mac = TdmaMac::default()
         .set_controller(23334395, kp, ki)
         .set_debug_pin(debug_pin)
         .set_node_id(source_id)
         .set_max_toa(MAX_TOA_MS)
+        .set_tau_hb(tau)
         .build();
     let nm =
         network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(source_id, timeout, max_retries);

@@ -28,6 +28,19 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         Ok("500") => Bandwidth::BW500kHz,
         _ => panic!("BW can either be 125, 250 or 500kHz!"),
     };
+    let tau = match std::env::var("TAU").as_deref() {
+        Ok(val) => {
+            let val = val.parse::<u8>().unwrap();
+            if !(10..=100).contains(&val) {
+                panic!("tau should be between 10 and 100 for the controller to work properly!");
+            }
+            val
+        }
+        Err(_) => {
+            error!("No TAU found in env, defaulting to 10..");
+            10
+        }
+    };
     log::info!("radio params: SF={:?} BW={:?}", spreading, bandwidth);
 
     let conc = match create_concentrator(spreading, bandwidth) {
@@ -58,7 +71,6 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     let gw_source_id = 1;
     let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");
     let sync_pin = gpio.get(21).expect("Failed to get GPIO 21").into_output();
-    let tau_hb = 10;
 
     let mac = TdmaMac::default()
         .set_debug_pin(sync_pin)
@@ -71,7 +83,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
                 .as_micros() as u64,
             embassy_time::Instant::now(),
         ))
-        .set_tau_hb(tau_hb)
+        .set_tau_hb(tau)
         .set_max_toa(max_toa_ms)
         .node_is_leader()
         .build();

@@ -23,6 +23,7 @@ impl Controller {
             v_s,
             ki,
             kp,
+            leader_skip_frames: 1,
             ..Default::default()
         }
     }
@@ -52,8 +53,8 @@ impl Controller {
         let (time_sync, error, delay) =
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
         // info!("LEADER IS IN {}", hb.tau_hb);
-        self.leader_skip_frames = hb.tau_hb;
 
+        self.leader_skip_frames = hb.tau_hb;
         // Conditional integration anti-windup
         // let tentative_v_s = self.apply_pi_controller(error);
         // let delta_vs = tentative_v_s - self.v_s;
@@ -175,9 +176,9 @@ impl Controller {
         // let kp: f32 = self.kp as f32 / 10.0;
         // let ki: f32 = self.ki as f32 / 10.0;
         // info!("kp: {}, ki: {}", kp, ki);
-        let kp_term = (self.kp * (err - self.prev_err)) / (10_i64 * self.leader_skip_frames as i64);
+        let kp_term = (self.kp * (err - self.prev_err)) / self.leader_skip_frames as i64;
 
-        let ki_term = (self.ki * err) / (100_i64 * self.leader_skip_frames as i64);
+        let ki_term = (self.ki * err) / self.leader_skip_frames as i64;
         info!("Kp term: {}, Ki term: {}", kp_term, ki_term);
         let delta_u = kp_term + ki_term;
         self.v_s + delta_u

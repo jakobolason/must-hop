@@ -31,6 +31,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=ALT_MDLTN");
     println!("cargo:rerun-if-env-changed=SF");
     println!("cargo:rerun-if-env-changed=BW");
+    println!("cargo:rerun-if-env-changed=TAU");
 
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let path = &out.join("env_vars.rs");
@@ -39,6 +40,7 @@ fn main() {
     let source_id_code: String = parse_env_var::<u8>("SOURCEID");
     let kp_code: String = parse_env_var::<i64>("KP");
     let ki_code: String = parse_env_var::<i64>("KI");
+    let tau_code: String = parse_env_var::<u8>("TAU");
     let alt_mdltn: String = parse_env_var::<bool>("ALT_MDLTN");
 
     let (sf_code, sf_num) = match env::var("SF") {
@@ -76,12 +78,13 @@ fn main() {
             const SOURCEID: Option<u8> = {};\n\
             const KP: Option<i64> = {};\n\
             const KI: Option<i64> = {};\n\
+            const TAU: Option<u8> = {};\n\
             const ALT_MDLTN: Option<bool> = {};\n\
             const SF: Option<SpreadingFactor> = {};\n\
             const SF_NUM: u8 = {};\n\
             const BW: Option<Bandwidth> = {};\n\
             const BW_KHZ: u32 = {};\n",
-            source_id_code, kp_code, ki_code, alt_mdltn, sf_code, sf_num, bw_code, bw_khz
+            source_id_code, kp_code, ki_code, tau_code, alt_mdltn, sf_code, sf_num, bw_code, bw_khz
         )
     )
     .unwrap();

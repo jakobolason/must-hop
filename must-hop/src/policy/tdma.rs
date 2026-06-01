@@ -117,10 +117,11 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn set_max_toa(self, max_toa_ms: u32) -> Self {
-        let max_rx_window: u32 = self.slot_manager.slots_per_frame as u32
-            / (self.slot_manager.slot_duration.as_millis() as u32);
+        let max_rx_window: u32 = (self.slot_manager.slot_duration.as_millis() as u32)
+            / self.slot_manager.slots_per_frame as u32;
         // NOTE: Should user be alerted here, if this does'nt work?
-        let rx_window = min(max(MIN_RX_WINDOW, max_toa_ms), max_rx_window);
+        let rx_window = max_toa_ms.max(MIN_RX_WINDOW).min(max_rx_window);
+        // let rx_window = min(max(MIN_RX_WINDOW, max_toa_ms), max_rx_window);
         Self {
             slot_manager: SlotManager {
                 rx_window,

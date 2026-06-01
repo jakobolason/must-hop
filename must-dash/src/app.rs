@@ -12,6 +12,7 @@ const KI_DEFAULT: &str = "0.4";
 const KP_DEFAULT: &str = "0.5";
 const SF_DEFAULT: &str = "7";
 const BW_DEFAULT: &str = "125";
+const TAU_DEFAULT: &str = "10";
 
 pub enum AppEvent {
     Input(KeyCode),
@@ -71,6 +72,7 @@ pub struct NodeConfig {
     pub source_id: String,
     pub sf: String,
     pub bw: String,
+    pub tau: String,
 }
 
 /// Which field is active in the ProbeConfig form. Defined here so both
@@ -83,6 +85,7 @@ pub enum ProbeConfigFocus {
     SourceId,
     Sf,
     Bw,
+    Tau,
     Confirm,
 }
 
@@ -93,6 +96,7 @@ pub struct Defaults {
     pub ki: String,
     pub sf: String,
     pub bw: String,
+    pub tau: String,
 }
 
 pub struct App {
@@ -120,9 +124,16 @@ impl App {
         let ki = env::var("KI").unwrap_or_else(|_| KI_DEFAULT.to_string());
         let sf = env::var("SF").unwrap_or_else(|_| SF_DEFAULT.to_string());
         let bw = env::var("BW").unwrap_or_else(|_| BW_DEFAULT.to_string());
+        let tau = env::var("TAU").unwrap_or_else(|_| TAU_DEFAULT.to_string());
 
         let mut app = Self {
-            defaults: Defaults { kp, ki, sf, bw },
+            defaults: Defaults {
+                kp,
+                ki,
+                sf,
+                bw,
+                tau,
+            },
             available_probes: Vec::new(),
             probe_fetch_error: None,
             configured_nodes: Vec::new(),
@@ -178,6 +189,7 @@ impl App {
                 source_id: String::new(),
                 sf: self.defaults.sf.clone(),
                 bw: self.defaults.bw.clone(),
+                tau: self.defaults.tau.clone(),
             });
         }
     }
@@ -194,6 +206,7 @@ impl App {
                 source_id: node.source_id.clone(),
                 sf: node.sf.clone(),
                 bw: node.bw.clone(),
+                tau: self.defaults.tau.clone(),
             });
         }
     }
@@ -204,6 +217,7 @@ impl App {
             self.defaults.ki = node.ki.clone();
             self.defaults.sf = node.sf.clone();
             self.defaults.bw = node.bw.clone();
+            self.defaults.tau = node.tau.clone();
             if let Some(i) = self.editing_node_index.take() {
                 if i < self.configured_nodes.len() {
                     self.configured_nodes[i] = node;
@@ -236,6 +250,7 @@ impl App {
                 ProbeConfigFocus::SourceId => node.source_id.push(c),
                 ProbeConfigFocus::Sf => node.sf.push(c),
                 ProbeConfigFocus::Bw => node.bw.push(c),
+                ProbeConfigFocus::Tau => node.tau.push(c),
                 ProbeConfigFocus::Confirm => {}
             }
         }
@@ -258,6 +273,9 @@ impl App {
                 }
                 ProbeConfigFocus::Bw => {
                     node.bw.pop();
+                }
+                ProbeConfigFocus::Tau => {
+                    node.tau.pop();
                 }
                 ProbeConfigFocus::Confirm => {}
             }
@@ -302,8 +320,16 @@ impl App {
             .map(|n| n.bw.as_str())
             .unwrap_or(&self.defaults.bw)
             .to_string();
+        let gw_tau = first
+            .map(|n| n.tau.as_str())
+            .unwrap_or(&self.defaults.tau)
+            .to_string();
         let mut gw_envs = color_envs();
-        gw_envs.extend([("SF".to_string(), gw_sf), ("BW".to_string(), gw_bw)]);
+        gw_envs.extend([
+            ("SF".to_string(), gw_sf),
+            ("BW".to_string(), gw_bw),
+            ("TAU".to_string(), gw_tau),
+        ]);
         log::info!("GW ENVS: {:?}", gw_envs);
 
         let mut descs = vec![ProcessDescriptor {
@@ -317,11 +343,12 @@ impl App {
         for node in &self.configured_nodes {
             let mut envs = color_envs();
             envs.extend([
-                ("KP".to_string(), cast_f32(&node.kp, 10.0)),
-                ("KI".to_string(), cast_f32(&node.ki, 100.0)),
+                ("KP".to_string(), node.kp.clone()),
+                ("KI".to_string(), node.ki.clone()),
                 ("SOURCEID".to_string(), node.source_id.clone()),
                 ("SF".to_string(), node.sf.clone()),
                 ("BW".to_string(), node.bw.clone()),
+                ("TAU".to_string(), node.tau.clone()),
                 ("PROBE".to_string(), node.probe_id.clone()),
             ]);
             descs.push(ProcessDescriptor {
@@ -366,6 +393,10 @@ impl App {
                     new_content.push_str(&format!("BW={}\n", self.defaults.bw));
                     found.insert("BW", true);
                 }
+                "TAU" => {
+                    new_content.push_str(&format!("TAU={}\n", self.defaults.tau));
+                    found.insert("TAU", true);
+                }
                 _ => {
                     new_content.push_str(line);
                     new_content.push('\n');
@@ -377,6 +408,7 @@ impl App {
             ("KI", &self.defaults.ki),
             ("SF", &self.defaults.sf),
             ("BW", &self.defaults.bw),
+            ("TAU", &self.defaults.tau),
         ] {
             if !found.contains_key(key) {
                 new_content.push_str(&format!("{key}={val}\n"));
@@ -399,7 +431,8 @@ impl App {
         let n_nodes = self.configured_nodes.len();
         let kp = first.map(|n| n.kp.as_str()).unwrap_or(&self.defaults.kp);
         let ki = first.map(|n| n.ki.as_str()).unwrap_or(&self.defaults.ki);
-        let meta = format!("SF{sf}_BW{bw}_KP{kp}_KI{ki}_{n_nodes}nodes");
+        let tau = first.map(|n| n.tau.as_str()).unwrap_or(&self.defaults.tau);
+        let meta = format!("SF{sf}_BW{bw}_KP{kp}_KI{ki}_TAU{tau}_{n_nodes}nodes");
 
         let prefix = "./analysis/data";
         let main_prefix = format!("{prefix}/main");

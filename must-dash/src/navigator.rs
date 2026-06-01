@@ -125,7 +125,8 @@ impl Navigator {
             ProbeConfigFocus::Ki => ProbeConfigFocus::SourceId,
             ProbeConfigFocus::SourceId => ProbeConfigFocus::Sf,
             ProbeConfigFocus::Sf => ProbeConfigFocus::Bw,
-            ProbeConfigFocus::Bw => ProbeConfigFocus::Confirm,
+            ProbeConfigFocus::Bw => ProbeConfigFocus::Tau,
+            ProbeConfigFocus::Tau => ProbeConfigFocus::Confirm,
             ProbeConfigFocus::Confirm => ProbeConfigFocus::Kp,
         };
     }
@@ -137,7 +138,8 @@ impl Navigator {
             ProbeConfigFocus::SourceId => ProbeConfigFocus::Ki,
             ProbeConfigFocus::Sf => ProbeConfigFocus::SourceId,
             ProbeConfigFocus::Bw => ProbeConfigFocus::Sf,
-            ProbeConfigFocus::Confirm => ProbeConfigFocus::Bw,
+            ProbeConfigFocus::Tau => ProbeConfigFocus::Bw,
+            ProbeConfigFocus::Confirm => ProbeConfigFocus::Tau,
         };
     }
 
