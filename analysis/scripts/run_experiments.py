@@ -12,11 +12,13 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 EXPERIMENTS = [
-    {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "times": 15},
-    {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    # {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    # {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 15},
     {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    {"sf": 10, "bw": 125, "kp": 40, "ki": 50, "times": 15},
     # {"sf": 5, "bw": 125, "kp": 40, "ki": 50, "times": 10},
     # {"sf": 5, "bw": 125, "kp": 10, "ki": 50, "times": 10},
     # {"sf": 5, "bw": 125, "kp": 13, "ki": 32, "times": 10},
@@ -76,35 +78,36 @@ def run_experiment(
     print(f"[runner] SF={sf} BW={bw} nodes={node_args} duration={duration}s")
 
     start = datetime.now()
-    result = subprocess.run(
+    proc = subprocess.Popen(
         [
             str(HEADLESS_BIN),
-            "--sf",
-            str(sf),
-            "--bw",
-            str(bw),
-            "--kp",
-            str(kp),
-            "--ki",
-            str(ki),
-            "--duration",
-            str(duration),
+            "--sf", str(sf),
+            "--bw", str(bw),
+            "--kp", str(kp),
+            "--ki", str(ki),
+            "--duration", str(duration),
             *node_args,
         ],
         cwd=REPO_ROOT,
         stderr=subprocess.PIPE,
         text=True,
     )
+    try:
+        _, stderr = proc.communicate()
+    except KeyboardInterrupt:
+        proc.terminate()
+        proc.wait()
+        raise
     end = datetime.now()
 
     # Re-print stderr so the user still sees headless progress messages.
-    if result.stderr:
-        sys.stderr.write(result.stderr)
+    if stderr:
+        sys.stderr.write(stderr)
 
-    data_paths = _parse_data_paths(result.stderr or "")
+    data_paths = _parse_data_paths(stderr or "")
 
     elapsed = (end - start).total_seconds()
-    status = "ok" if result.returncode == 0 else f"failed:{result.returncode}"
+    status = "ok" if proc.returncode == 0 else f"failed:{proc.returncode}"
     print(f"[runner] → {status}  ({elapsed:.0f}s)\n")
 
     return {
@@ -117,7 +120,7 @@ def run_experiment(
         "started_at": start.isoformat(),
         "ended_at": end.isoformat(),
         "elapsed_s": elapsed,
-        "exit_code": result.returncode,
+        "exit_code": proc.returncode,
         "main_stats": data_paths["main_stats"],
         "hw_stats": data_paths["hw_stats"],
     }
@@ -136,28 +139,35 @@ def main() -> None:
 
     expanded = [exp for exp in EXPERIMENTS for _ in range(exp.get("times", 1))]
 
-    for i, exp in enumerate(expanded):
-        print(f"=== Experiment {i + 1}/{len(expanded)} ===")
-        record = run_experiment(
-            sf=exp["sf"],
-            bw=exp["bw"],
-            kp=exp["kp"],
-            ki=exp["ki"],
-            nodes=NODES,
-            duration=DURATION,
-        )
-        results.append(record)
+    try:
+        for i, exp in enumerate(expanded):
+            print(f"=== Experiment {i + 1}/{len(expanded)} ===")
+            record = run_experiment(
+                sf=exp["sf"],
+                bw=exp["bw"],
+                kp=exp["kp"],
+                ki=exp["ki"],
+                nodes=NODES,
+                duration=DURATION,
+            )
+            results.append(record)
 
-        # Write manifest after every run so progress is not lost on interruption
-        manifest_path.write_text(
-            json.dumps({"run_id": run_id, "experiments": results}, indent=2)
-        )
+            # Write manifest after every run so progress is not lost on interruption
+            manifest_path.write_text(
+                json.dumps({"run_id": run_id, "experiments": results}, indent=2)
+            )
 
-        if i < len(expanded) - 1:
-            print(f"[runner] Waiting {INTER_RUN_DELAY}s before next run...")
-            time.sleep(INTER_RUN_DELAY)
+            if i < len(expanded) - 1:
+                print(f"[runner] Waiting {INTER_RUN_DELAY}s before next run...")
+                try:
+                    time.sleep(INTER_RUN_DELAY)
+                except KeyboardInterrupt:
+                    print("\n[runner] Interrupted during wait — stopping sweep.")
+                    raise
+    except KeyboardInterrupt:
+        print(f"\n[runner] Sweep interrupted after {len(results)}/{len(expanded)} experiments.")
 
-    print("=== All experiments complete ===")
+    print("=== All experiments complete ===" if len(results) == len(expanded) else "=== Partial run ===")
     print(f"Manifest: {manifest_path}")
     for r in results:
         flag = "success" if r["exit_code"] == 0 else "failed"

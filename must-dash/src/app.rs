@@ -321,20 +321,20 @@ impl App {
             .map(|n| n.tau.as_str())
             .unwrap_or(&self.defaults.tau)
             .to_string();
-        log::info!("GW params: SF={gw_sf} BW={gw_bw} TAU={gw_tau}");
+        let mut gw_envs = color_envs();
+        gw_envs.extend([
+            ("SF".to_string(), gw_sf),
+            ("BW".to_string(), gw_bw),
+            ("TAU".to_string(), gw_tau),
+        ]);
+        log::info!("GW envs: {:?}", gw_envs);
 
         let mut descs = vec![ProcessDescriptor {
             source_id: "gw".to_string(),
             role: LogRole::Gateway,
             command: "just".to_string(),
-            args: vec![
-                "run-gw".to_string(),
-                // "--".to_string(),
-                format!("SF={gw_sf}"),
-                format!("BW={gw_bw}"),
-                format!("TAU={gw_tau}"),
-            ],
-            envs: color_envs(),
+            args: vec!["run-gw".to_string()],
+            envs: gw_envs,
         }];
 
         for node in &self.configured_nodes {

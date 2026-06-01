@@ -6,6 +6,7 @@ PI_USER := env("PI_USER", "pi")
 PI_TARGET_DIR := "/home/" + PI_USER + "/must-hop"
 GW_SF := env("SF", "7")
 GW_BW := env("BW", "125")
+GW_TAU := env("TAU", "10")
 PROBE := env("PROBE", "1366:0101")
 
 # Build must-hop and must-gw
@@ -131,10 +132,11 @@ deploy-gw-pi: build-gw-pi
     scp target/aarch64-unknown-linux-gnu/release/must-gw {{ PI_USER }}@{{ PI_HOST }}:{{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw
 
 [group('Pi deployments')]
-run-gw *args: deploy-gw-pi
+run-gw: deploy-gw-pi
     @echo "Running GW on pi"
     ssh -tt {{ PI_USER }}@{{ PI_HOST }} 'chmod +x {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw \
-      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always {{ args }} \
+      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
+         SF={{ GW_SF }} BW={{ GW_BW }} TAU={{ GW_TAU }} \
        chrt -f 90 {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 [group('Dashboard')]
