@@ -172,10 +172,6 @@ impl Controller {
     }
 
     fn apply_pi_controller(&self, err: i64) -> i64 {
-        // TODO: Switch the self.* to f32, this is just runtime overhead
-        // let kp: f32 = self.kp as f32 / 10.0;
-        // let ki: f32 = self.ki as f32 / 10.0;
-        // info!("kp: {}, ki: {}", kp, ki);
         let kp_term = (self.kp * (err - self.prev_err)) / self.leader_skip_frames as i64;
 
         let ki_term = (self.ki * err) / self.leader_skip_frames as i64;

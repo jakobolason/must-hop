@@ -74,6 +74,10 @@ where
     /// Used if different parameters should be use for the Rx
     alt_mdtln_params: Option<ModulationParams>,
     done_instant: Option<Instant>,
+    /// Used to calculate ToA
+    bb_mod: BaseBandModulationParams,
+    pa_len: Option<u8>,
+    explicit_header: bool,
 }
 
 /// Calculated in calc_tau_spi
@@ -88,18 +92,9 @@ where
     /// Returns the (preamble, packet) ToA
     fn calc_toa(&self, bytes: u8) -> u32 {
         // Using the formula to calculate time-on-air
-        // let bb_mod = BaseBandModulationParams::new(
-        //     self.mdltn_params.spreading_factor,
-        //     self.mdltn_params.bandwidth,
-        //     self.mdltn_params.coding_rate,
-        // );
-        //
-        // bb_mod.time_on_air_us(
-        //     Some(self.tx_pkt_params.preamble_length as u8),
-        //     !self.tx_pkt_params.implicit_header,
-        //     bytes,
-        // )
-        0
+
+        self.bb_mod
+            .time_on_air_us(self.pa_len, self.explicit_header, bytes)
     }
 
     fn avg_slice_delay(&self, payload_len: u8) -> u64 {
@@ -300,6 +295,8 @@ where
             rx_mdltn_params,
         )?;
 
+        let bb_mod = BaseBandModulationParams::new(tx_mod.sf, tx_mod.bw, tx_mod.cr);
+
         Ok(Self {
             lora,
             tx_pkt_params,
@@ -307,6 +304,9 @@ where
             mdltn_params,
             alt_mdtln_params,
             done_instant: None,
+            bb_mod,
+            pa_len: Some(pack_params.pre_amp as u8),
+            explicit_header: !pack_params.imp_hed,
         })
     }
 
