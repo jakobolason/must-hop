@@ -95,8 +95,13 @@ def run_experiment(
     try:
         _, stderr = proc.communicate()
     except KeyboardInterrupt:
-        proc.terminate()
-        proc.wait()
+        # headless already received SIGINT from the terminal — give it time to
+        # call shutdown_processes and clean up its children before we force-kill it.
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            proc.wait()
         raise
     end = datetime.now()
 
