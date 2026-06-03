@@ -61,10 +61,7 @@ struct Args {
 }
 
 /// Same probe-serial → DIN mapping as main.rs.
-const DIN_MAP: &[(&str, u8)] = &[
-    ("000680157336", 0),
-    ("000680172544", 1),
-];
+const DIN_MAP: &[(&str, u8)] = &[("1366:0101:000801024520", 0), ("1366:0101:000801024472", 1)];
 
 #[tokio::main]
 async fn main() {

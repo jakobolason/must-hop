@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import Any
 
 EXPERIMENTS = [
-    # {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 1},
     # {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 15},
-    {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 15},
-    {"sf": 10, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    # {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 15},
+    # {"sf": 10, "bw": 125, "kp": 40, "ki": 50, "times": 15},
     # {"sf": 5, "bw": 125, "kp": 40, "ki": 50, "times": 10},
     # {"sf": 5, "bw": 125, "kp": 10, "ki": 50, "times": 10},
     # {"sf": 5, "bw": 125, "kp": 13, "ki": 32, "times": 10},
@@ -35,10 +35,10 @@ NODES = [
 
 
 # Seconds per experiment run (~10 min default)
-DURATION = 600
+DURATION = 100
 
 # Seconds to wait between runs for radio settling
-INTER_RUN_DELAY = 300
+INTER_RUN_DELAY = 30
 
 
 REPO_ROOT = Path(__file__).parent.parent.parent.resolve()

@@ -1,5 +1,6 @@
 use chrono::Local;
 use dotenv::dotenv;
+use log::info;
 use std::fs;
 use std::path::Path;
 use std::{env, fs::File, str::FromStr};
@@ -278,12 +279,24 @@ impl App {
     pub fn backspace_pending(&mut self, focus: ProbeConfigFocus) {
         if let Some(node) = &mut self.pending_node {
             match focus {
-                ProbeConfigFocus::Kp => { node.kp.pop(); }
-                ProbeConfigFocus::Ki => { node.ki.pop(); }
-                ProbeConfigFocus::SourceId => { node.source_id.pop(); }
-                ProbeConfigFocus::Sf => { node.sf.pop(); }
-                ProbeConfigFocus::Bw => { node.bw.pop(); }
-                ProbeConfigFocus::Tau => { node.tau.pop(); }
+                ProbeConfigFocus::Kp => {
+                    node.kp.pop();
+                }
+                ProbeConfigFocus::Ki => {
+                    node.ki.pop();
+                }
+                ProbeConfigFocus::SourceId => {
+                    node.source_id.pop();
+                }
+                ProbeConfigFocus::Sf => {
+                    node.sf.pop();
+                }
+                ProbeConfigFocus::Bw => {
+                    node.bw.pop();
+                }
+                ProbeConfigFocus::Tau => {
+                    node.tau.pop();
+                }
                 ProbeConfigFocus::Confirm => {}
             }
         }
@@ -299,6 +312,13 @@ impl App {
             .iter()
             .map(|d| LogSource::new(&d.source_id, d.role))
             .collect();
+        let probe_ids: Vec<String> = self
+            .configured_nodes
+            .iter()
+            .map(|n| n.probe_id.clone())
+            .collect();
+        info!("trying to use probe ids: {:?}", probe_ids);
+        info!("With given din map: {:?}", self.din_map);
         self.node_stats = self
             .configured_nodes
             .iter()
@@ -516,6 +536,7 @@ impl App {
             .trim()
             .trim_end_matches("ms")
             .trim();
+        info!("checking din_str: {din_str}");
         let din_idx: u8 = match din_str {
             "din0" => 0,
             "din1" => 1,
@@ -523,11 +544,13 @@ impl App {
         };
         // "nan" parses to f32::NAN in Rust — kept as-is to preserve "no edge" information.
         let delay_ms: f32 = val_str.parse().unwrap_or(f32::NAN);
+        info!("the delay captured was: {delay_ms}");
         if let Some(ns) = self
             .node_stats
             .iter_mut()
             .find(|ns| ns.din_index == Some(din_idx))
         {
+            info!("found node who should get this: {}", ns.source_id);
             ns.hardware_delay.push(delay_ms);
         }
     }
@@ -557,7 +580,10 @@ impl App {
         match role {
             LogRole::Node => {
                 log::debug!("node({source_id}) | tag={tag:?} parts={:?}", &parts[1..]);
-                let idx = self.node_stats.iter().position(|ns| ns.source_id == source_id);
+                let idx = self
+                    .node_stats
+                    .iter()
+                    .position(|ns| ns.source_id == source_id);
                 let Some(idx) = idx else { return };
 
                 if tag.contains("[SYNC]") && parts.len() >= 5 {
@@ -589,8 +615,7 @@ impl App {
                             .on_sync(delay, err, prev, new, hw_mean, hw_samples);
                     }
                 } else if tag.contains("[DELTAS]") && parts.len() >= 3 {
-                    if let (Ok(up), Ok(down)) =
-                        (extract::<f32>(parts[1]), extract::<f32>(parts[2]))
+                    if let (Ok(up), Ok(down)) = (extract::<f32>(parts[1]), extract::<f32>(parts[2]))
                     {
                         self.node_stats[idx].stats.on_deltas(up, down);
                     }

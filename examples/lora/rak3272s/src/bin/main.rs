@@ -150,7 +150,7 @@ async fn sensor_task(
 
 /// From the study, sensor data will likely be between 20-40 bytes per transmission
 const MAX_PACK_LEN: usize = 40;
-const MAX_RADIO_BUFFER: usize = 255; // kB
+const MAX_RADIO_BUFFER: usize = 256; // kB
 const LEN: usize = 5; // floor(256/MAX_PACK_LEN)
 
 const GW_ID: u8 = 1;
@@ -165,11 +165,8 @@ const MAX_TOA_MS: u32 = {
         Some(bw) => bw,
         None => Bandwidth::_125KHz,
     };
-    BaseBandModulationParams::new(sf, bw, CodingRate::_4_8).time_on_air_us(
-        Some(8),
-        true,
-        MAX_RADIO_BUFFER as u8,
-    ) / 1000
+    BaseBandModulationParams::new(sf, bw, CodingRate::_4_8).time_on_air_us(Some(8), true, 255_u8)
+        / 1000
 };
 
 #[embassy_executor::task]
