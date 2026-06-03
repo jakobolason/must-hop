@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Any
 
 EXPERIMENTS = [
-    {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 5},
+    {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 15, "times": 5},
+    {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 20, "times": 5},
+    {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 30, "times": 5},
     # {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 15},
     # {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 15},
     # {"sf": 10, "bw": 125, "kp": 40, "ki": 50, "times": 15},
