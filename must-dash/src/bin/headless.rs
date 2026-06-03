@@ -60,6 +60,12 @@ struct Args {
     nodes: Vec<NodeArg>,
 }
 
+/// Same probe-serial → DIN mapping as main.rs.
+const DIN_MAP: &[(&str, u8)] = &[
+    ("000680157336", 0),
+    ("000680172544", 1),
+];
+
 #[tokio::main]
 async fn main() {
     init_logger();
@@ -70,7 +76,7 @@ async fn main() {
         args.sf, args.bw, args.kp, args.ki, args.nodes, args.tau, args.duration,
     );
 
-    let mut app = must_dash::app::App::new(false);
+    let mut app = must_dash::app::App::new(false, DIN_MAP);
     for (i, node) in args.nodes.iter().enumerate() {
         app.configured_nodes.push(NodeConfig {
             probe_index: i,

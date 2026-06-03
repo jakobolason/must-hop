@@ -1,9 +1,9 @@
 use crate::{MHNode, PacketType, RxPacket, policy::tdma::slots::SlotMask};
 
 #[cfg(not(feature = "in_std"))]
-use defmt::{debug, error, info};
+use defmt::{debug, error, info, warn};
 #[cfg(feature = "in_std")]
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 
 #[cfg(feature = "debug")]
 use embedded_hal::digital::OutputPin;
@@ -67,9 +67,7 @@ impl<T> DebugPin for T {}
 const MIN_RX_WINDOW: u32 = 500_u32;
 impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     pub fn new(
-        // FIXME: Remove from user, should be set by GW
         slot_duration: Duration,
-        // FIXME: Remove from user, should be set by GW
         slots_per_frame: core::num::NonZeroU8,
         time_sync: Option<(u64, Instant)>,
         known_skew_ratio: Option<i64>,
@@ -113,15 +111,22 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn set_max_toa(self, max_toa_ms: u32) -> Self {
-        // NOTE: Should user be alerted here, if this does'nt work?
-        let rx_window = max_toa_ms
-            .max(MIN_RX_WINDOW)
-            .min(self.slot_manager.slot_duration.as_millis() as u32);
+        // Use a minimum rx window so they don't become way too small
+        let rx_window = max_toa_ms.max(MIN_RX_WINDOW);
+        let slot_duration = if rx_window as u64 > self.slot_manager.slot_duration.as_millis() {
+            info!("The max toa was biger than slot duration, increasing slot dur");
+            // Use a 100ms guard band to decrease packet loss in a non-synchronized state
+            let guard_band = 100;
+            Duration::from_millis(rx_window as u64 + guard_band)
+        } else {
+            self.slot_manager.slot_duration
+        };
         // let rx_window = min(max(MIN_RX_WINDOW, max_toa_ms), max_rx_window);
         info!("The window was found to be {}", rx_window);
         Self {
             slot_manager: SlotManager {
                 rx_window,
+                slot_duration,
                 ..self.slot_manager
             },
             ..self
@@ -166,12 +171,14 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
-    /// Set the time period before sending a heartbeat (IN THE HIGH FREQUENCY SETTING)
-    pub fn set_tau_hb(self, tau_hb: u8) -> Self {
-        let tau_hb = TauHbMode::from_secs(tau_hb);
+    /// Set the heartbeat period in seconds. The actual period will be
+    /// `slot_duration × slots_per_frame × skip_frames`, where `skip_frames = tau_hb_secs /
+    /// frame_dur_secs` (min 1). Computation happens in `build()` so that any `set_max_toa()`
+    /// inflation of `slot_duration` is already reflected.
+    pub fn set_tau_hb(self, tau_hb_secs: u8) -> Self {
         Self {
             slot_manager: SlotManager {
-                tau_hb,
+                tau_hb_secs,
                 ..self.slot_manager
             },
             ..self
@@ -201,9 +208,28 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn build(self) -> TdmaMac<Runner, P, SIZE> {
+        let frame_dur_ms = self.slot_manager.slot_duration.as_millis()
+            .saturating_mul(self.slot_manager.slots_per_frame as u64);
+        let tau_hb_ms = self.slot_manager.tau_hb_secs as u64 * 1000;
+        let tau_hb_high_skip = if tau_hb_ms > 0 && frame_dur_ms > 0 {
+            let skip = (tau_hb_ms / frame_dur_ms).max(1) as u8;
+            let actual_hb_ms = skip as u64 * frame_dur_ms;
+            if actual_hb_ms != tau_hb_ms {
+                warn!(
+                    "tau_hb {}ms is not achievable: frame_dur={}ms, high_skip={}, actual_hb={}ms",
+                    tau_hb_ms, frame_dur_ms, skip, actual_hb_ms
+                );
+            }
+            skip
+        } else {
+            3 // default: HB every 3 frames in High mode if set_tau_hb was never called
+        };
         TdmaMac::<Runner, P, SIZE> {
             _state: PhantomData,
-            slot_manager: self.slot_manager,
+            slot_manager: SlotManager {
+                tau_hb_high_skip,
+                ..self.slot_manager
+            },
             time_manager: self.time_manager,
             #[cfg(feature = "debug")]
             debug_pin: self.debug_pin,
@@ -216,7 +242,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
 impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
     fn default() -> Self {
         TdmaMac::new(
-            Duration::from_secs(1),
+            Duration::from_secs(2),
             // The SlotManager can only hold 5 nodes, so this should default to that max
             NonZeroU8::new(5).unwrap(),
             None,
@@ -234,17 +260,11 @@ enum TauHbMode {
 }
 
 impl TauHbMode {
-    pub const fn skip_frames(&self) -> u8 {
+    /// Low = 1 frame per HB (fast sync rate); High = `high_skip` frames per HB.
+    pub const fn skip_frames(&self, high_skip: u8) -> u8 {
         match self {
-            Self::High => 3,
+            Self::High => high_skip,
             Self::Low => 1,
-        }
-    }
-
-    pub fn from_secs(count: u8) -> Self {
-        match count {
-            10 => Self::Low,
-            _ => Self::High,
         }
     }
 }
@@ -255,6 +275,12 @@ pub(crate) struct SlotManager {
     slots_per_frame: u8,
     my_tx_slot: Option<u8>,
     tau_hb: TauHbMode,
+    /// Frames to skip between HBs in High (cruise) mode. Computed in build() from
+    /// tau_hb_secs / (slot_duration * slots_per_frame). Default 3 if set_tau_hb never called.
+    tau_hb_high_skip: u8,
+    /// Raw secs from set_tau_hb(), kept so build() can compute tau_hb_high_skip after
+    /// set_max_toa() has potentially inflated slot_duration. 0 = not set (use default skip=3).
+    tau_hb_secs: u8,
     hb_countdown: u8,
     /// How long a node listens for, in a known node slot, is determined by the `set_max_toa` which
     /// uses the given amount of milliseconds of the largest possible transmission delay, to make
@@ -533,7 +559,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let dummy_allocation = SyncBeacon {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
-            tau_hb: self.slot_manager.tau_hb.skip_frames(),
+            tau_hb: self.slot_manager.tau_hb.skip_frames(self.slot_manager.tau_hb_high_skip),
             gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
             feedback_vec,
         };
@@ -629,7 +655,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let allocation = SyncBeacon {
             my_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
-            tau_hb: self.slot_manager.tau_hb.skip_frames(),
+            tau_hb: self.slot_manager.tau_hb.skip_frames(self.slot_manager.tau_hb_high_skip),
             gps_time_us: adjusted_timestamp,
             feedback_vec,
         };
@@ -729,7 +755,7 @@ where
         }
         if self.slot_manager.hb_countdown == 0 {
             self.slot_manager.hb_countdown =
-                self.slot_manager.tau_hb.skip_frames().saturating_sub(1);
+                self.slot_manager.tau_hb.skip_frames(self.slot_manager.tau_hb_high_skip).saturating_sub(1);
             true
         } else {
             false

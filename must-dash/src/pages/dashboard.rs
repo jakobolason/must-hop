@@ -41,24 +41,22 @@ pub fn draw_dash(
 }
 
 fn draw_dash_header(f: &mut Frame, app: &App, area: Rect) {
-    let stats = &app.dash_stats;
     let n = 10;
-
     let fmt_ms = |v: Option<f32>| v.map_or("--".to_string(), |x| format!("{:.3}ms", x));
     let fmt_ppb = |v: Option<f32>| v.map_or("--".to_string(), |x| format!("{}", x as i64));
 
-    let header_text = format!(
-        "  Medians (last {n}) \
-         | Measured Δ: {} \
-         | Clock Err: {} \
-         | Prev Speed: {} ppb \
-         | New Speed: {} ppb  \
-         [TAB: Focus | ESC: Back | Q: Quit] ",
-        fmt_ms(stats.median_n(n, |p| p.delay_ms)),
-        fmt_ms(stats.median_n(n, |p| p.err_ms)),
-        fmt_ppb(stats.median_n(n, |p| p.prev_speed)),
-        fmt_ppb(stats.median_n(n, |p| p.new_speed)),
-    );
+    let mut header_text = format!("  Medians (last {n})  ");
+    for ns in &app.node_stats {
+        let s = &ns.stats;
+        header_text.push_str(&format!(
+            "| [{}] Δ:{} Err:{} Spd:{} ppb  ",
+            ns.node_label,
+            fmt_ms(s.median_n(n, |p| p.delay_ms)),
+            fmt_ms(s.median_n(n, |p| p.err_ms)),
+            fmt_ppb(s.median_n(n, |p| p.new_speed)),
+        ));
+    }
+    header_text.push_str("[TAB: Focus | ESC: Back | Q: Quit]");
 
     let header = ratatui::widgets::Paragraph::new(header_text)
         .block(Block::default().borders(Borders::ALL).title(" Metrics "))
@@ -87,27 +85,47 @@ fn draw_dash_data(
     let left_area = chunks[0];
     let right_area = chunks[1];
 
-    let data_block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Data History")
-        .style(if *dash_focus == DashFocus::Data {
-            Style::default().fg(Color::LightCyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        });
+    draw_history_panels(f, app, left_area, dash_focus, history_scroll);
 
-    let entries_that_can_be_seen = left_area.height.saturating_sub(3) as usize;
-    let total_packets = app.dash_stats.packets.len();
-    let clamped_scroll = history_scroll.min(total_packets.saturating_sub(entries_that_can_be_seen));
-    let history_lines = app
-        .dash_stats
-        .get_history_lines(entries_that_can_be_seen, clamped_scroll);
+    if right_area.height > 6 && right_area.width > 2 {
+        draw_dash_charts(f, app, right_area, graph_scroll);
+    }
+}
 
-    let history_items = history_lines.into_iter().map(Row::new);
+fn draw_history_panels(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    dash_focus: &DashFocus,
+    history_scroll: usize,
+) {
+    let n = app.node_stats.len();
+    if n == 0 {
+        let placeholder = Block::default()
+            .borders(Borders::ALL)
+            .title(" Data History ")
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(placeholder, area);
+        return;
+    }
+
+    let panel_constraints: Vec<Constraint> = (0..n)
+        .map(|_| Constraint::Ratio(1, n as u32))
+        .collect();
+
+    let panels = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(panel_constraints)
+        .split(area);
+
+    let block_style = if *dash_focus == DashFocus::Data {
+        Style::default().fg(Color::LightCyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
 
     let header = Row::new(vec![
-        "Pkt", "HW Avg", "Err", "Delay", "Δ Up", "Δ Down", "Speed", "GW µs", "GW B", "Node µs",
-        "Node B", "τ_hb",
+        "Pkt", "HW Avg", "Err", "Delay", "Δ Up", "Δ Down", "Speed", "τ_hb",
     ])
     .style(
         Style::default()
@@ -117,45 +135,50 @@ fn draw_dash_data(
     .bottom_margin(0);
 
     let widths = [
-        Constraint::Length(4),     // "Pkt" — "00"
-        Constraint::Percentage(7), // HW Avg
-        Constraint::Percentage(7), // Err
-        Constraint::Percentage(7), // Delay
-        Constraint::Percentage(9), // Δ Up
-        Constraint::Percentage(9), // Δ Down
-        Constraint::Percentage(9), // Speed (ppb, no decimal needed)
-        Constraint::Percentage(9), // GW µs
-        Constraint::Percentage(5), // GW B
-        Constraint::Percentage(9), // Node µs
-        Constraint::Percentage(5), // Node B
-        Constraint::Length(2),     // τ Hi/Lo
+        Constraint::Length(4),      // Pkt
+        Constraint::Percentage(13), // HW Avg
+        Constraint::Percentage(13), // Err
+        Constraint::Percentage(13), // Delay
+        Constraint::Percentage(14), // Δ Up
+        Constraint::Percentage(14), // Δ Down
+        Constraint::Percentage(14), // Speed
+        Constraint::Length(4),      // τ Hi/Lo
     ];
 
-    let history_table = Table::new(history_items, widths)
-        .header(header)
-        .block(data_block)
-        .column_spacing(1);
+    for (ns, &panel_area) in app.node_stats.iter().zip(panels.iter()) {
+        let entries_visible = panel_area.height.saturating_sub(3) as usize;
+        let total = ns.stats.packets.len();
+        let clamped = history_scroll.min(total.saturating_sub(entries_visible));
 
-    f.render_widget(history_table, left_area);
+        let lines = ns.stats.get_history_lines(entries_visible, clamped);
+        let rows = lines.into_iter().map(Row::new);
 
-    if total_packets > entries_that_can_be_seen {
-        let scroll_pos = total_packets
-            .saturating_sub(entries_that_can_be_seen)
-            .saturating_sub(clamped_scroll);
-        let mut scrollbar_state = ScrollbarState::new(total_packets)
-            // .viewport_content_length(entries_that_can_be_seen)
-            .position(scroll_pos);
-        f.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight),
-            left_area.inner(Margin {
-                vertical: 1,
-                horizontal: 0,
-            }),
-            &mut scrollbar_state,
-        );
-    }
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" {} ({}) ", ns.node_label, ns.probe_id))
+            .style(block_style);
 
-    if right_area.height > 6 && right_area.width > 2 {
-        draw_dash_charts(f, app, right_area, graph_scroll);
+        let table = Table::new(rows, widths)
+            .header(header.clone())
+            .block(block)
+            .column_spacing(1);
+
+        f.render_widget(table, panel_area);
+
+        if total > entries_visible {
+            let scroll_pos = total
+                .saturating_sub(entries_visible)
+                .saturating_sub(clamped);
+            let mut scrollbar_state =
+                ScrollbarState::new(total).position(scroll_pos);
+            f.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                panel_area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
+                &mut scrollbar_state,
+            );
+        }
     }
 }

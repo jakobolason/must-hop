@@ -72,7 +72,13 @@ def _parse_data_paths(stderr: str) -> dict[str, str | None]:
 
 
 def run_experiment(
-    sf: int, bw: int, kp: int, ki: int, nodes: list[dict[str, str]], duration: int
+    sf: int,
+    bw: int,
+    kp: int,
+    ki: int,
+    tau: int,
+    nodes: list[dict[str, str]],
+    duration: int,
 ) -> dict[str, Any]:
     node_args = [f"{n['node_id']}:{n['probe_id']}" for n in nodes]
     print(f"[runner] SF={sf} BW={bw} nodes={node_args} duration={duration}s")
@@ -81,11 +87,18 @@ def run_experiment(
     proc = subprocess.Popen(
         [
             str(HEADLESS_BIN),
-            "--sf", str(sf),
-            "--bw", str(bw),
-            "--kp", str(kp),
-            "--ki", str(ki),
-            "--duration", str(duration),
+            "--sf",
+            str(sf),
+            "--bw",
+            str(bw),
+            "--kp",
+            str(kp),
+            "--ki",
+            str(ki),
+            "--tau",
+            str(tau),
+            "--duration",
+            str(duration),
             *node_args,
         ],
         cwd=REPO_ROOT,
@@ -152,6 +165,7 @@ def main() -> None:
                 bw=exp["bw"],
                 kp=exp["kp"],
                 ki=exp["ki"],
+                tau=exp["tau"],
                 nodes=NODES,
                 duration=DURATION,
             )
@@ -170,9 +184,15 @@ def main() -> None:
                     print("\n[runner] Interrupted during wait — stopping sweep.")
                     raise
     except KeyboardInterrupt:
-        print(f"\n[runner] Sweep interrupted after {len(results)}/{len(expanded)} experiments.")
+        print(
+            f"\n[runner] Sweep interrupted after {len(results)}/{len(expanded)} experiments."
+        )
 
-    print("=== All experiments complete ===" if len(results) == len(expanded) else "=== Partial run ===")
+    print(
+        "=== All experiments complete ==="
+        if len(results) == len(expanded)
+        else "=== Partial run ==="
+    )
     print(f"Manifest: {manifest_path}")
     for r in results:
         flag = "success" if r["exit_code"] == 0 else "failed"

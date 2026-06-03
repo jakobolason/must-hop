@@ -21,14 +21,20 @@ pub fn draw_dash_logs(
     };
 
     let n = app.sources.len();
-    let delay_pct = 5u16;
+    let n_hw = app
+        .node_stats
+        .iter()
+        .filter(|ns| ns.din_index.is_some())
+        .count();
+    let hw_pct_each = 5u16;
+    let total_hw_pct = hw_pct_each * n_hw as u16;
     let source_pct = if n != 0 {
-        (100u16 - delay_pct) / n as u16
+        (100u16 - total_hw_pct) / n as u16
     } else {
         0
     };
     let leftover = if n != 0 {
-        (100u16 - delay_pct) % n as u16
+        (100u16 - total_hw_pct) % n as u16
     } else {
         0
     };
@@ -36,7 +42,9 @@ pub fn draw_dash_logs(
     let mut constraints: Vec<Constraint> = (0..n)
         .map(|i| Constraint::Percentage(source_pct + if i == 0 { leftover } else { 0 }))
         .collect();
-    constraints.push(Constraint::Percentage(delay_pct));
+    for _ in 0..n_hw {
+        constraints.push(Constraint::Percentage(hw_pct_each));
+    }
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -79,40 +87,55 @@ pub fn draw_dash_logs(
         }
     }
 
-    // Delay panel is always last, driven by DashStats rather than a log buffer
-    let delay_raw = app
-        .dash_stats
-        .hardware_delay
+    // One HW delay panel per node that has a DIN index assigned.
+    let hw_nodes: Vec<_> = app
+        .node_stats
         .iter()
-        .map(|v| v.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let delay_text = delay_raw
-        .into_text()
-        .unwrap_or_else(|_| ratatui::text::Text::raw(&delay_raw));
-    let delay_panel = Paragraph::new(delay_text).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" hw delay ")
-            .style(log_title_style),
-    );
-    let visible_lines = chunks[n].height as usize - 2;
-    let total_lines = app.dash_stats.hardware_delay.len();
-    let max_scroll = total_lines.saturating_sub(visible_lines);
-    let clamped = logs_scroll.min(max_scroll);
-    let scroll_row = max_scroll.saturating_sub(clamped);
-    f.render_widget(delay_panel.scroll((scroll_row as u16, 0)), chunks[n]);
+        .filter(|ns| ns.din_index.is_some())
+        .collect();
 
-    if total_lines > visible_lines {
-        let thumb_pos = max_scroll.saturating_sub(clamped);
-        let mut scrollbar_state = ScrollbarState::new(max_scroll + 1).position(thumb_pos);
-        f.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight),
-            chunks[n].inner(Margin {
-                vertical: 1,
-                horizontal: 0,
-            }),
-            &mut scrollbar_state,
+    for (hw_i, ns) in hw_nodes.iter().enumerate() {
+        let panel_idx = n + hw_i;
+        let raw = ns
+            .hardware_delay
+            .iter()
+            .map(|v: &f32| {
+                if v.is_finite() {
+                    format!("{:.4}", v)
+                } else {
+                    "--".to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let text = raw
+            .into_text()
+            .unwrap_or_else(|_| ratatui::text::Text::raw(&raw));
+        let title = format!(" hw din{} ", ns.din_index.unwrap_or(0));
+        let panel = Paragraph::new(text).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .style(log_title_style),
         );
+        let visible_lines = chunks[panel_idx].height as usize - 2;
+        let total_lines = ns.hardware_delay.len();
+        let max_scroll = total_lines.saturating_sub(visible_lines);
+        let clamped = logs_scroll.min(max_scroll);
+        let scroll_row = max_scroll.saturating_sub(clamped);
+        f.render_widget(panel.scroll((scroll_row as u16, 0)), chunks[panel_idx]);
+
+        if total_lines > visible_lines {
+            let thumb_pos = max_scroll.saturating_sub(clamped);
+            let mut scrollbar_state = ScrollbarState::new(max_scroll + 1).position(thumb_pos);
+            f.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                chunks[panel_idx].inner(Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
+                &mut scrollbar_state,
+            );
+        }
     }
 }

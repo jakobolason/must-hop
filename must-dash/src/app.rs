@@ -2,7 +2,7 @@ use chrono::Local;
 use dotenv::dotenv;
 use std::fs;
 use std::path::Path;
-use std::{env, fs::File, io::Write, str::FromStr};
+use std::{env, fs::File, str::FromStr};
 
 use crossterm::event::KeyCode;
 
@@ -37,6 +37,29 @@ pub struct LogSource {
     pub id: String,
     pub role: LogRole,
     pub logs: Vec<String>,
+}
+
+/// Per-node stats bundle: identity metadata + the stats accumulator + HW buffer.
+pub struct NodeStats {
+    /// Matches the `source_id` on the corresponding `ProcessDescriptor` (e.g. `"node-1"`).
+    pub source_id: String,
+    /// Human-readable label written into CSV rows ("node A", "node B", …).
+    pub node_label: String,
+    /// Hardware probe serial — written into CSV rows for traceability.
+    pub probe_id: String,
+    pub stats: DashStats,
+    /// DIN index on the Digital Discovery scope that feeds HW delay samples for this node.
+    /// `None` means no scope channel is assigned.
+    pub din_index: Option<u8>,
+    /// Per-node hardware-delay samples from the scope (NaN = no edge found in window).
+    pub hardware_delay: Vec<f32>,
+    /// Index into `hardware_delay` up to which samples have been consumed into `PacketEntry`s.
+    pub last_hw_idx: usize,
+}
+
+fn node_label_from_index(i: usize) -> String {
+    let c = (b'A' + i as u8) as char;
+    format!("node {c}")
 }
 
 impl LogSource {
@@ -108,17 +131,12 @@ pub struct App {
     /// Some(i) while editing configured_nodes[i]; None when adding a new node.
     pub editing_node_index: Option<usize>,
     pub sources: Vec<LogSource>,
-    pub dash_stats: DashStats,
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self::new(true)
-    }
+    pub node_stats: Vec<NodeStats>,
+    din_map: &'static [(&'static str, u8)],
 }
 
 impl App {
-    pub fn new(fetch_probes: bool) -> Self {
+    pub fn new(fetch_probes: bool, din_map: &'static [(&'static str, u8)]) -> Self {
         let _ = dotenv();
         let kp = env::var("KP").unwrap_or_else(|_| KP_DEFAULT.to_string());
         let ki = env::var("KI").unwrap_or_else(|_| KI_DEFAULT.to_string());
@@ -140,7 +158,8 @@ impl App {
             pending_node: None,
             editing_node_index: None,
             sources: Vec::new(),
-            dash_stats: DashStats::new(),
+            node_stats: Vec::new(),
+            din_map,
         };
         if fetch_probes {
             app.fetch_probes();
@@ -259,24 +278,12 @@ impl App {
     pub fn backspace_pending(&mut self, focus: ProbeConfigFocus) {
         if let Some(node) = &mut self.pending_node {
             match focus {
-                ProbeConfigFocus::Kp => {
-                    node.kp.pop();
-                }
-                ProbeConfigFocus::Ki => {
-                    node.ki.pop();
-                }
-                ProbeConfigFocus::SourceId => {
-                    node.source_id.pop();
-                }
-                ProbeConfigFocus::Sf => {
-                    node.sf.pop();
-                }
-                ProbeConfigFocus::Bw => {
-                    node.bw.pop();
-                }
-                ProbeConfigFocus::Tau => {
-                    node.tau.pop();
-                }
+                ProbeConfigFocus::Kp => { node.kp.pop(); }
+                ProbeConfigFocus::Ki => { node.ki.pop(); }
+                ProbeConfigFocus::SourceId => { node.source_id.pop(); }
+                ProbeConfigFocus::Sf => { node.sf.pop(); }
+                ProbeConfigFocus::Bw => { node.bw.pop(); }
+                ProbeConfigFocus::Tau => { node.tau.pop(); }
                 ProbeConfigFocus::Confirm => {}
             }
         }
@@ -284,7 +291,7 @@ impl App {
 
     pub fn reset_data(&mut self) {
         self.sources.clear();
-        self.dash_stats = DashStats::new();
+        self.node_stats.clear();
     }
 
     pub fn init_sources(&mut self, descriptors: &[ProcessDescriptor]) {
@@ -292,10 +299,30 @@ impl App {
             .iter()
             .map(|d| LogSource::new(&d.source_id, d.role))
             .collect();
+        self.node_stats = self
+            .configured_nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| NodeStats {
+                source_id: format!("node-{}", node.source_id),
+                node_label: node_label_from_index(i),
+                din_index: self
+                    .din_map
+                    .iter()
+                    .find(|(pid, _)| *pid == node.probe_id)
+                    .map(|(_, d)| *d),
+                probe_id: node.probe_id.clone(),
+                stats: DashStats::new(),
+                hardware_delay: Vec::new(),
+                last_hw_idx: 0,
+            })
+            .collect();
     }
 
     pub fn has_data(&self) -> bool {
-        self.sources.iter().any(|s| !s.logs.is_empty())
+        self.node_stats
+            .iter()
+            .any(|ns| !ns.stats.packets.is_empty() || !ns.hardware_delay.is_empty())
     }
 
     pub fn build_descriptors(&self) -> Vec<ProcessDescriptor> {
@@ -448,18 +475,27 @@ impl App {
 
         let main_out = if let Ok(f) = File::create(&main_filename) {
             let mut wtr = csv::Writer::from_writer(f);
-            for row in self.dash_stats.csv_rows() {
-                let _ = wtr.serialize(row);
+            for ns in &self.node_stats {
+                for row in ns.stats.csv_rows(&ns.node_label, &ns.probe_id) {
+                    let _ = wtr.serialize(row);
+                }
             }
             Some(main_filename)
         } else {
             None
         };
 
-        let hw_out = if let Ok(mut f) = File::create(&hw_filename) {
-            let _ = writeln!(f, "hardware_delay");
-            for hw in &self.dash_stats.hardware_delay {
-                let _ = writeln!(f, "{}", hw);
+        let hw_out = if let Ok(f) = File::create(&hw_filename) {
+            let mut wtr = csv::Writer::from_writer(f);
+            let _ = wtr.write_record(["node_id", "probe_id", "hardware_delay"]);
+            for ns in &self.node_stats {
+                for &hw in &ns.hardware_delay {
+                    let _ = wtr.write_record([
+                        ns.node_label.as_str(),
+                        ns.probe_id.as_str(),
+                        &hw.to_string(),
+                    ]);
+                }
             }
             Some(hw_filename)
         } else {
@@ -469,14 +505,30 @@ impl App {
         (main_out, hw_out)
     }
 
+    /// Parse a line from capture_deltas.py (`"din0: 5.1234 ms"` or `"din1: nan ms"`)
+    /// and push the value into the matching node's hardware_delay buffer.
     pub fn add_hw_delay(&mut self, log_str: String) {
-        let parsed = log_str
-            .split(':')
-            .nth(1)
-            .map(|s| s.trim().trim_end_matches("ms").trim())
-            .and_then(|s| s.parse::<f32>().ok());
-        if let Some(delay_ms) = parsed {
-            self.dash_stats.hardware_delay.push(delay_ms);
+        let mut parts = log_str.splitn(2, ':');
+        let din_str = parts.next().unwrap_or("").trim();
+        let val_str = parts
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_end_matches("ms")
+            .trim();
+        let din_idx: u8 = match din_str {
+            "din0" => 0,
+            "din1" => 1,
+            _ => return,
+        };
+        // "nan" parses to f32::NAN in Rust — kept as-is to preserve "no edge" information.
+        let delay_ms: f32 = val_str.parse().unwrap_or(f32::NAN);
+        if let Some(ns) = self
+            .node_stats
+            .iter_mut()
+            .find(|ns| ns.din_index == Some(din_idx))
+        {
+            ns.hardware_delay.push(delay_ms);
         }
     }
 
@@ -505,6 +557,9 @@ impl App {
         match role {
             LogRole::Node => {
                 log::debug!("node({source_id}) | tag={tag:?} parts={:?}", &parts[1..]);
+                let idx = self.node_stats.iter().position(|ns| ns.source_id == source_id);
+                let Some(idx) = idx else { return };
+
                 if tag.contains("[SYNC]") && parts.len() >= 5 {
                     if let (Ok(delay), Ok(err), Ok(prev), Ok(new)) = (
                         extract::<f32>(parts[1]),
@@ -512,21 +567,41 @@ impl App {
                         extract::<f32>(parts[3]),
                         extract::<f32>(parts[4]),
                     ) {
-                        self.dash_stats.on_sync(delay, err, prev, new);
+                        let hw_samples: Vec<f32> = self.node_stats[idx].hardware_delay
+                            [self.node_stats[idx].last_hw_idx..]
+                            .to_vec();
+                        let hw_mean = {
+                            let valid: Vec<f32> = hw_samples
+                                .iter()
+                                .copied()
+                                .filter(|v| v.is_finite())
+                                .collect();
+                            if valid.is_empty() {
+                                f32::NAN
+                            } else {
+                                valid.iter().sum::<f32>() / valid.len() as f32
+                            }
+                        };
+                        let new_hw_idx = self.node_stats[idx].hardware_delay.len();
+                        self.node_stats[idx].last_hw_idx = new_hw_idx;
+                        self.node_stats[idx]
+                            .stats
+                            .on_sync(delay, err, prev, new, hw_mean, hw_samples);
                     }
                 } else if tag.contains("[DELTAS]") && parts.len() >= 3 {
-                    if let (Ok(up), Ok(down)) = (extract::<f32>(parts[1]), extract::<f32>(parts[2]))
+                    if let (Ok(up), Ok(down)) =
+                        (extract::<f32>(parts[1]), extract::<f32>(parts[2]))
                     {
-                        self.dash_stats.on_deltas(up, down);
+                        self.node_stats[idx].stats.on_deltas(up, down);
                     }
                 } else if tag.contains("[SIZE EXPECTED]") && parts.len() >= 2 {
                     if let Ok(size) = extract::<usize>(parts[1]) {
                         log::info!("Got pre size {size}");
-                        self.dash_stats.on_node_slice_size(size);
+                        self.node_stats[idx].stats.on_node_slice_size(size);
                     }
                 } else if tag.contains("[TAU_SLICE]") && parts.len() >= 2 {
                     if let Ok(ts) = extract::<u64>(parts[1]) {
-                        self.dash_stats.on_node_slice_pre(ts);
+                        self.node_stats[idx].stats.on_node_slice_pre(ts);
                     }
                 } else if tag.contains("[TAU_SLICE_POST]")
                     && parts.len() >= 3
@@ -534,30 +609,19 @@ impl App {
                         (extract::<u64>(parts[1]), extract::<usize>(parts[2]))
                 {
                     log::info!("Got post size: {size}");
-                    self.dash_stats.on_node_slice_post(ts, size);
+                    self.node_stats[idx].stats.on_node_slice_post(ts, size);
                 }
             }
             LogRole::Gateway => {
                 log::debug!("gw({source_id}) | tag={tag:?} parts={:?}", &parts[1..]);
-                if tag.contains("[TAU_SLICE]") && parts.len() >= 2 {
-                    if let Ok(ts) = extract::<u64>(parts[1]) {
-                        self.dash_stats.on_gw_slice_pre(ts);
+                // STATE_SYNC is broadcast to all nodes so tau_hb_high stays in sync.
+                if tag.contains("[STATE_SYNC]") && parts.len() >= 2 {
+                    let mode = parts[1].trim();
+                    for ns in &mut self.node_stats {
+                        ns.stats.on_state_sync(mode);
                     }
-                } else if tag.contains("[TAU_SLICE_POST]")
-                    && parts.len() >= 3
-                    && let (Ok(ts), Ok(size)) =
-                        (extract::<u64>(parts[1]), extract::<usize>(parts[2]))
-                {
-                    self.dash_stats.on_gw_slice_post(ts, size);
-                } else if tag.contains("[STATE_SYNC]") && parts.len() >= 2 {
-                    self.dash_stats.on_state_sync(parts[1].trim());
-                } else if tag.contains("[SIZE EXPECTED]")
-                    && parts.len() >= 2
-                    && let Ok(size) = extract::<usize>(parts[1])
-                {
-                    log::info!("Got pre size {size}");
-                    self.dash_stats.on_gw_slice_size(size);
                 }
+                // Gateway TAU_SLICE events are displayed in the log panel but not tracked in stats.
             }
         }
     }

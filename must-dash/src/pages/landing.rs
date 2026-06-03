@@ -313,7 +313,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
         .style(style_for(ProbeConfigFocus::Bw));
     f.render_widget(bw, chunks[4]);
 
-    // BW field
+    // TAU field
     let tau_val = node.map_or("", |n| n.tau.as_str());
     let tau = Paragraph::new(tau_val)
         .block(

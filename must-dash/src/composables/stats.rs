@@ -4,6 +4,8 @@ use serde::Serialize;
 /// and filling it in [`DashStats::csv_rows`] — the header and value order follow automatically.
 #[derive(Serialize)]
 pub struct MainCsvRow {
+    pub node_id: String,
+    pub probe_id: String,
     pub delay_ms: f32,
     pub err_ms: f32,
     pub prev_speed: f32,
@@ -11,21 +13,18 @@ pub struct MainCsvRow {
     pub delta_up_ms: Option<f32>,
     pub delta_down_ms: Option<f32>,
     pub mean_hw_delay_ms: f32,
-    pub gw_time_us: Option<u64>,
-    pub gw_bytes: Option<usize>,
     pub node_time_us: Option<u64>,
     pub node_bytes: Option<usize>,
     pub tau_hb_high: bool,
 }
 
 pub struct ChartData {
-    /// Clock error series (was `delay` — now correctly uses err_ms)
+    /// Clock error series
     pub err: Vec<(f64, f64)>,
     pub up: Vec<(f64, f64)>,
     pub down: Vec<(f64, f64)>,
     pub hw: Vec<(f64, f64)>,
     /// Hardware-delay samples collected since the last SYNC (not yet finalized into a packet).
-    /// Placed one interval to the right of the last completed packet.  Empty when scrolled back.
     pub hw_live: Vec<(f64, f64)>,
     pub x_bounds: [f64; 2],
     pub y_bounds: [f64; 2],
@@ -44,7 +43,6 @@ pub struct PacketEntry {
     /// None when `[DELTAS]` was absent or REJECTED this cycle
     pub delta_up_ms: Option<f32>,
     pub delta_down_ms: Option<f32>,
-    /// Mean of all hardware-delay samples collected since the previous SYNC
     pub mean_hw_delay_ms: f32,
     /// Raw hardware-delay samples collected since the previous SYNC
     pub hw_samples: Vec<f32>,
@@ -62,28 +60,18 @@ struct PendingPacket {
 }
 
 /// Time and byte-size diff between TAU_SLICE and TAU_SLICE_POST.
-/// Displayed by index alongside PacketEntry; may lag or lead.
 pub struct SliceDiff {
-    /// Elapsed micros between pre- and post-slice timestamp
     pub time_us: u64,
-    /// Byte-size difference
     pub bytes: usize,
 }
 
 pub struct DashStats {
     /// One entry per completed SYNC cycle
     pub packets: Vec<PacketEntry>,
-    /// Raw hardware-delay samples (~10× the packet rate)
-    pub hardware_delay: Vec<f32>,
-    /// One diff per GW TAU_SLICE_POST
-    pub gw_diff: Vec<SliceDiff>,
     /// One diff per node TAU_SLICE_POST
     pub node_diff: Vec<SliceDiff>,
     // --- private scratchpad, not for display ---
     pending: PendingPacket,
-    last_hw_idx: usize,
-    last_gw_slice_us: u64,
-    last_gw_slice_size: usize,
     last_node_slice_us: u64,
     last_node_slice_size: usize,
 }
@@ -98,13 +86,8 @@ impl DashStats {
     pub fn new() -> Self {
         Self {
             packets: Vec::new(),
-            hardware_delay: Vec::new(),
-            gw_diff: Vec::new(),
             node_diff: Vec::new(),
             pending: PendingPacket::default(),
-            last_hw_idx: 0,
-            last_gw_slice_us: 0,
-            last_gw_slice_size: 0,
             last_node_slice_us: 0,
             last_node_slice_size: 0,
         }
@@ -128,7 +111,7 @@ impl DashStats {
 
     /// Returns the most recent `max_lines` packets formatted for the history table.
     ///
-    /// Columns: Packet | Error | Speed | Δ Up | Δ Down | HW Delay | GW µs | GW B | Node µs | Node B
+    /// Columns: Pkt | HW Avg | Err | Delay | Δ Up | Δ Down | Speed | τ_hb
     pub fn get_history_lines(&self, max_lines: usize, scroll: usize) -> Vec<Vec<String>> {
         let len = self.packets.len();
         let end = len.saturating_sub(scroll);
@@ -142,21 +125,6 @@ impl DashStats {
             .enumerate()
             .map(|(offset, p)| {
                 let i = start + offset;
-                let gw_us = self.gw_diff.get(i).map_or("--".to_string(), |d| {
-                    format!("{:.3}ms", d.time_us as f32 / 1_000.0)
-                });
-                let gw_b = self
-                    .gw_diff
-                    .get(i)
-                    .map_or("--".to_string(), |d| format!("{}B", d.bytes));
-                let node_us = self.node_diff.get(i).map_or("--".to_string(), |d| {
-                    format!("{:.3}ms", d.time_us as f32 / 1_000.0)
-                });
-                let node_b = self
-                    .node_diff
-                    .get(i)
-                    .map_or("--".to_string(), |d| format!("{}B", d.bytes));
-
                 vec![
                     format!("{:02}", i),
                     fmt_ms(p.mean_hw_delay_ms),
@@ -165,32 +133,25 @@ impl DashStats {
                     fmt_opt_ms(p.delta_up_ms),
                     fmt_opt_ms(p.delta_down_ms),
                     format!("{}", p.new_speed as i64),
-                    gw_us,
-                    gw_b,
-                    node_us,
-                    node_b,
                     if p.tau_hb_high { "Hi" } else { "Lo" }.to_string(),
                 ]
             })
             .collect()
     }
 
-    /// Prepares data for the chart.  Uses `err_ms` (clock error) as the primary series.
+    /// Prepares data for the chart.
     ///
-    /// All visible packets are stretched evenly across the full chart width `[0, num_points-1]`
-    /// so the graph always fills the widget.  `scroll` shifts the visible window back in time
-    /// (0 = most recent packets).
-    ///
-    /// HW delay samples for each packet are spread linearly between that packet's x position
-    /// and the previous packet's, so they sit visually within the heartbeat interval.
-    pub fn get_chart_data(&self, max_x_points: usize, scroll: usize) -> ChartData {
+    /// `hw_pending` is the slice of global hardware-delay samples collected since this
+    /// node's last SYNC — passed in by the caller since the buffer lives in `App`.
+    /// All visible packets are stretched evenly across `[0, num_points-1]`.
+    /// `scroll` shifts the visible window back in time (0 = most recent packets).
+    pub fn get_chart_data(&self, max_x_points: usize, scroll: usize, hw_pending: &[f32]) -> ChartData {
         let num_points = max_x_points.max(1);
 
         let end = self.packets.len().saturating_sub(scroll);
         let start = end.saturating_sub(num_points);
         let slice = &self.packets[start..end];
 
-        // Map index i (0..n) → x in [0, num_points-1], stretching data to fill the chart.
         let stretch = |i: usize, n: usize| -> f64 {
             if n <= 1 {
                 0.0
@@ -219,7 +180,6 @@ impl DashStats {
             .map(|(i, p)| (stretch(i, n), p.delta_down_ms.unwrap_or(0.0) as f64))
             .collect();
 
-        // Spread each packet's hw samples linearly across (x_prev, x_current].
         let hw: Vec<(f64, f64)> = slice
             .iter()
             .enumerate()
@@ -238,21 +198,17 @@ impl DashStats {
             })
             .collect();
 
-        // Width of one inter-packet interval in chart units (used for the live zone).
         let interval = if n > 1 {
             (num_points - 1) as f64 / (n - 1) as f64
         } else {
             (num_points as f64).max(1.0)
         };
 
-        // Pending hw samples (since last SYNC, not yet in any PacketEntry).
-        // Only shown when not scrolled back — they represent the live "right edge."
         let hw_live: Vec<(f64, f64)> = if scroll == 0 {
-            let pending = &self.hardware_delay[self.last_hw_idx..];
             let x_anchor = if n == 0 { 0.0 } else { stretch(n - 1, n) };
             let x_live_end = x_anchor + interval;
-            let pn = pending.len();
-            pending
+            let pn = hw_pending.len();
+            hw_pending
                 .iter()
                 .enumerate()
                 .map(|(j, &v)| {
@@ -274,7 +230,6 @@ impl DashStats {
             (num_points - 1) as f64 + interval
         };
 
-        // Y-axis bounds across all series
         let (min_val, max_val) = err
             .iter()
             .chain(up.iter())
@@ -306,11 +261,16 @@ impl DashStats {
         }
     }
 
-    pub fn csv_rows(&self) -> impl Iterator<Item = MainCsvRow> + '_ {
-        self.packets.iter().enumerate().map(|(i, p)| {
-            let gw = self.gw_diff.get(i);
+    pub fn csv_rows<'a>(
+        &'a self,
+        node_label: &'a str,
+        probe_id: &'a str,
+    ) -> impl Iterator<Item = MainCsvRow> + 'a {
+        self.packets.iter().enumerate().map(move |(i, p)| {
             let nd = self.node_diff.get(i);
             MainCsvRow {
+                node_id: node_label.to_string(),
+                probe_id: probe_id.to_string(),
                 delay_ms: p.delay_ms,
                 err_ms: p.err_ms,
                 prev_speed: p.prev_speed,
@@ -318,8 +278,6 @@ impl DashStats {
                 delta_up_ms: p.delta_up_ms,
                 delta_down_ms: p.delta_down_ms,
                 mean_hw_delay_ms: p.mean_hw_delay_ms,
-                gw_time_us: gw.map(|d| d.time_us),
-                gw_bytes: gw.map(|d| d.bytes),
                 node_time_us: nd.map(|d| d.time_us),
                 node_bytes: nd.map(|d| d.bytes),
                 tau_hb_high: p.tau_hb_high,
@@ -336,16 +294,17 @@ impl DashStats {
         self.pending.tau_hb_high = mode == "High";
     }
 
-    pub fn on_sync(&mut self, delay_ms: f32, err_ms: f32, prev_speed: f32, new_speed: f32) {
-        // Consume all hardware-delay samples collected since last sync
-        let hw_samples: Vec<f32> = self.hardware_delay[self.last_hw_idx..].to_vec();
-        let mean_hw = if hw_samples.is_empty() {
-            0.0
-        } else {
-            hw_samples.iter().sum::<f32>() / hw_samples.len() as f32
-        };
-        self.last_hw_idx = self.hardware_delay.len();
-
+    /// `hw_mean` and `hw_samples` are provided by the caller from the global HW buffer,
+    /// sliced from this node's last consumed index to the current buffer length.
+    pub fn on_sync(
+        &mut self,
+        delay_ms: f32,
+        err_ms: f32,
+        prev_speed: f32,
+        new_speed: f32,
+        hw_mean: f32,
+        hw_samples: Vec<f32>,
+    ) {
         let pending = std::mem::take(&mut self.pending);
         self.packets.push(PacketEntry {
             delay_ms,
@@ -354,7 +313,7 @@ impl DashStats {
             new_speed,
             delta_up_ms: pending.delta_up_ms,
             delta_down_ms: pending.delta_down_ms,
-            mean_hw_delay_ms: mean_hw,
+            mean_hw_delay_ms: hw_mean,
             hw_samples,
             tau_hb_high: pending.tau_hb_high,
         });
@@ -371,24 +330,7 @@ impl DashStats {
     pub fn on_node_slice_post(&mut self, ts_us: u64, size: usize) {
         self.node_diff.push(SliceDiff {
             time_us: ts_us.saturating_sub(self.last_node_slice_us),
-            // bytes: size.saturating_sub(self.last_node_slice_size),
             bytes: size,
         });
-    }
-
-    pub fn on_gw_slice_pre(&mut self, ts_us: u64) {
-        self.last_gw_slice_us = ts_us;
-    }
-
-    pub fn on_gw_slice_post(&mut self, ts_us: u64, size: usize) {
-        self.gw_diff.push(SliceDiff {
-            time_us: ts_us.saturating_sub(self.last_gw_slice_us),
-            // bytes: size.saturating_sub(self.last_gw_slice_size),
-            bytes: size,
-        });
-    }
-
-    pub fn on_gw_slice_size(&mut self, size: usize) {
-        self.last_gw_slice_size = size;
     }
 }

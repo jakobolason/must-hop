@@ -151,7 +151,10 @@ pub fn spawn_log_processes(
         .collect()
 }
 
-pub fn initialize(interactive: bool) -> (App, Sender<AppEvent>, Receiver<AppEvent>) {
+pub fn initialize(
+    interactive: bool,
+    din_map: &'static [(&'static str, u8)],
+) -> (App, Sender<AppEvent>, Receiver<AppEvent>) {
     let (tx, rx) = mpsc::channel(100);
     init_logger();
 
@@ -171,17 +174,18 @@ pub fn initialize(interactive: bool) -> (App, Sender<AppEvent>, Receiver<AppEven
             }
         });
     }
-    let app = App::new(interactive);
+    let app = App::new(interactive, din_map);
 
     (app, tx, rx)
 }
 
 pub async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    din_map: &'static [(&'static str, u8)],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut navigator = Navigator::new();
 
-    let (mut app, tx, mut rx) = initialize(true);
+    let (mut app, tx, mut rx) = initialize(true, din_map);
     let mut log_children = Vec::new();
     let mut delay_child = None;
 
@@ -331,7 +335,9 @@ pub async fn run_app(
                         KeyCode::Down if navigator.dash_focus == DashFocus::Logs => {
                             navigator.scroll_logs_down()
                         }
-                        KeyCode::Left => navigator.scroll_graph_back(app.dash_stats.packets.len()),
+                        KeyCode::Left => navigator.scroll_graph_back(
+                            app.node_stats.first().map_or(0, |ns| ns.stats.packets.len()),
+                        ),
                         KeyCode::Right => navigator.scroll_graph_forward(),
                         KeyCode::Char('p') => {
                             // Stops the processes, but doesn't go back to landing. They can still

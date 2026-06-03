@@ -1,36 +1,28 @@
 # ONLY TO BE USED ON PI
+import math
 import signal
 import sys
 import time
 from ctypes import *
 
 
-# SAMPLE_RATE_HZ       = 3_125_000   # Rate field (e.g. 3.125 MHz)
-SAMPLE_RATE_HZ       = 160_000   # Rate field (e.g. 3.125 MHz)
-TIME_BASE_MS_PER_DIV = 20.0         # Base field (e.g. 1 ms/div)
-TRIGGER_POSITION_S   = 0.0         # Position field (0 s = trigger centred in window)
+SAMPLE_RATE_HZ       = 160_000
+TIME_BASE_MS_PER_DIV = 20.0
+TRIGGER_POSITION_S   = 0.0
 
-# Which DIN pins to watch. TRIGGER_PIN fires the acquisition; the script then
-# finds the nearest rising edge on SIGNAL_PIN and reports the delta.
-TRIGGER_PIN = 2   # DIN2 — arms the capture on its rising edge
-SIGNAL_PIN  = 1   # DIN1 — the edge we're measuring against
+# DIN2 = gateway (trigger); DIN0 and DIN1 = one node each.
+# must-dash maps DIN index → node via the ProbeConfig DIN field.
+TRIGGER_PIN  = 2
+SIGNAL_PINS  = [0, 1]   # measured against the trigger each acquisition
 
-OUTPUT_FILE = "/tmp/timing_delta.csv"
-
-# ── Derived values (no need to touch these) ────────────────────────────────
-# WaveForms always shows 10 divisions, so total window = Base × 10.
-_DIVISIONS      = 10
-_WINDOW_S       = (TIME_BASE_MS_PER_DIV / 1000.0) * _DIVISIONS
-# _CLOCK_HZ       = 100_000_000          # Digital Discovery internal clock
-# _DIVIDER        = round(_CLOCK_HZ / SAMPLE_RATE_HZ)
-NUM_SAMPLES     = round(SAMPLE_RATE_HZ * _WINDOW_S)
-
-# FDwfDigitalInTriggerPositionSet takes the number of samples captured *after*
-# the trigger. Position 0 s means the trigger sits at the centre of the buffer.
+# ── Derived values ─────────────────────────────────────────────────────────
+_DIVISIONS            = 10
+_WINDOW_S             = (TIME_BASE_MS_PER_DIV / 1000.0) * _DIVISIONS
+NUM_SAMPLES           = round(SAMPLE_RATE_HZ * _WINDOW_S)
 _POST_TRIGGER_SAMPLES = round(NUM_SAMPLES / 2 - TRIGGER_POSITION_S * SAMPLE_RATE_HZ)
 
-_TRIG_MASK   = 1 << TRIGGER_PIN
-_SIGNAL_MASK = 1 << SIGNAL_PIN
+_TRIG_MASK    = 1 << TRIGGER_PIN
+_SIGNAL_MASKS = [1 << p for p in SIGNAL_PINS]
 
 # ── SDK setup ──────────────────────────────────────────────────────────────
 sys.path.append("/usr/share/digilent/waveforms/samples/py")
@@ -43,10 +35,9 @@ except ImportError:
 dwf = cdll.LoadLibrary("libdwf.so")
 
 
-# Raise SystemExit on SIGTERM/SIGHUP so the finally block runs and the device
-# is properly closed even when the SSH session drops unexpectedly.
 def _shutdown(sig, frame):
     raise SystemExit(0)
+
 
 signal.signal(signal.SIGTERM, _shutdown)
 signal.signal(signal.SIGHUP, _shutdown)
@@ -64,26 +55,48 @@ print("Device opened.")
 hzSys = c_double()
 dwf.FDwfDigitalInInternalClockInfo(hdwf, byref(hzSys))
 _CLOCK_HZ = hzSys.value
-_DIVIDER = int(round(_CLOCK_HZ / SAMPLE_RATE_HZ))
+_DIVIDER  = int(round(_CLOCK_HZ / SAMPLE_RATE_HZ))
 
 dwf.FDwfDigitalInTriggerAutoTimeoutSet(hdwf, c_double(0))
 dwf.FDwfDigitalInDividerSet(hdwf, c_int(_DIVIDER))
-dwf.FDwfDigitalInSampleFormatSet(hdwf, c_int(16))   # 16-bit words, DIN0–DIN15
+dwf.FDwfDigitalInSampleFormatSet(hdwf, c_int(16))
 dwf.FDwfDigitalInBufferSizeSet(hdwf, c_int(NUM_SAMPLES))
 
-# Trigger on the rising edge of TRIGGER_PIN
 dwf.FDwfDigitalInTriggerPositionSet(hdwf, c_int(_POST_TRIGGER_SAMPLES))
 dwf.FDwfDigitalInTriggerSourceSet(hdwf, trigsrcDetectorDigitalIn)
 dwf.FDwfDigitalInTriggerSet(hdwf, c_int(0), c_int(0), c_int(_TRIG_MASK), c_int(0))
 
 print(f"  Sample rate : {SAMPLE_RATE_HZ / 1e6:.4g} MHz  (divider {_DIVIDER})")
 print(f"  Window      : {_WINDOW_S * 1000:.1f} ms  ({NUM_SAMPLES} samples)")
-print(f"  Trigger     : DIN{TRIGGER_PIN} rising  |  Signal: DIN{SIGNAL_PIN} rising")
-
-print(f"Logging to console -> Ctrl-C to stop\n")
+print(f"  Trigger     : DIN{TRIGGER_PIN} rising")
+print(f"  Signals     : DIN{SIGNAL_PINS[0]} DIN{SIGNAL_PINS[1]}")
+print()
 
 rgwData = (c_uint16 * NUM_SAMPLES)()
 status  = c_byte()
+
+
+def find_trigger(data, n):
+    """Return sample index of the first rising edge on TRIGGER_PIN, or -1."""
+    for i in range(1, n):
+        if not (data[i - 1] & _TRIG_MASK) and (data[i] & _TRIG_MASK):
+            return i
+    return -1
+
+
+def nearest_rising(data, n, mask):
+    """Return sample index of the rising edge on `mask` nearest to sample 0,
+    searching the full buffer.  Returns -1 if no rising edge is found."""
+    best_idx  = -1
+    best_dist = n
+    for i in range(1, n):
+        if not (data[i - 1] & mask) and (data[i] & mask):
+            dist = abs(i)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx  = i
+    return best_idx
+
 
 try:
     while True:
@@ -99,30 +112,31 @@ try:
 
         dwf.FDwfDigitalInStatusData(hdwf, rgwData, c_int(NUM_SAMPLES * 2))
 
-        # Find the trigger edge (TRIGGER_PIN rising)
-        idx_trig = -1
-        for i in range(1, NUM_SAMPLES):
-            if not (rgwData[i-1] & _TRIG_MASK) and (rgwData[i] & _TRIG_MASK):
-                idx_trig = i
-                break
-        # Find the nearest SIGNAL_PIN rising edge
-        idx_sig = -1
-        if idx_trig != -1:
-            min_dist = NUM_SAMPLES
-            for i in range(1, NUM_SAMPLES):
-                if not (rgwData[i-1] & _SIGNAL_MASK) and (rgwData[i] & _SIGNAL_MASK):
-                    dist = abs(i - idx_trig)
-                    if dist < min_dist:
-                        min_dist = dist
-                        idx_sig = i
+        idx_trig = find_trigger(rgwData, NUM_SAMPLES)
 
-        if idx_trig != -1 and idx_sig != -1:
-            delta_ms = (idx_sig - idx_trig) / SAMPLE_RATE_HZ * 1000.0
-            # with open(OUTPUT_FILE, "a") as f:
-            #     f.write(f"{capture_count},{delta_ms:.4f}\n")
-            print(f"Capture: {delta_ms:.4f} ms")
-        else:
-            print(f"Capture: edge not found in buffer.")
+        for pin, mask in zip(SIGNAL_PINS, _SIGNAL_MASKS):
+            if idx_trig == -1:
+                # No trigger edge found — report sentinel for all signals
+                print(f"din{pin}: nan ms", flush=True)
+                continue
+
+            # Search for the nearest rising edge on this signal pin.
+            # We re-index the buffer relative to the trigger so that the
+            # nearest-to-zero edge is the one in the same heartbeat slot.
+            best_idx  = -1
+            best_dist = NUM_SAMPLES
+            for i in range(1, NUM_SAMPLES):
+                if not (rgwData[i - 1] & mask) and (rgwData[i] & mask):
+                    dist = abs(i - idx_trig)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_idx  = i
+
+            if best_idx == -1:
+                print(f"din{pin}: nan ms", flush=True)
+            else:
+                delta_ms = (best_idx - idx_trig) / SAMPLE_RATE_HZ * 1000.0
+                print(f"din{pin}: {delta_ms:.4f} ms", flush=True)
 
 except (KeyboardInterrupt, SystemExit):
     print("\nStopped.")
