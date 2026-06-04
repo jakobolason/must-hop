@@ -165,7 +165,7 @@ const MAX_TOA_MS: u32 = {
         Some(bw) => bw,
         None => Bandwidth::_125KHz,
     };
-    BaseBandModulationParams::new(sf, bw, CodingRate::_4_8).time_on_air_us(Some(8), true, 255_u8)
+    BaseBandModulationParams::new(sf, bw, CodingRate::_4_8).time_on_air_us(Some(8), true, 140_u8)
         / 1000
 };
 

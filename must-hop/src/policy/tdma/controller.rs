@@ -226,7 +226,8 @@ mod controller_tests {
 
     #[test]
     fn drift_duration_scales_linearly_with_duration() {
-        let c = make_controller(500_000, 0, 0);
+        let mut c = make_controller(500_000, 0, 0);
+        c.leader_skip_frames = 10;
         let d1 = c.calc_drift_duration(1_000_000);
         let d2 = c.calc_drift_duration(2_000_000);
         // Doubling the duration should double the drift

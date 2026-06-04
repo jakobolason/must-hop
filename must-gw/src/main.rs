@@ -66,7 +66,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     };
     let node = node::GWNode::new(conc, pkt_params);
     // microsecs -> millisecs
-    let max_toa_ms = node.calc_toa(255) / 1000;
+    let max_toa_ms = node.calc_toa(140) / 1000;
 
     let gw_source_id = 1;
     let gpio = Gpio::new().expect("Failed to initialize RPPAL GPIO");

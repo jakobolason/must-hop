@@ -129,14 +129,16 @@ where
             .await
         {
             Ok(conn) => match node.receive(conn, rx_buffer).await {
-                Ok((mut pkts, _rx_hw_timestamp)) => {
-                    // check for a heartbeat which shuold be sent on
+                Ok((pkts, _rx_hw_timestamp)) => {
+                    // Heartbeats that should be relayed must go out on the next tick.
+                    // Push into tx_queue (not pkts) — pkts feeds handle_packets, which
+                    // returns None for HB and would drop the forwarded copy.
                     if let Some(fwd_pkt) = pkts
                         .iter()
                         .filter(|p| p.packet_type == PacketType::HeartBeat)
                         .find_map(|p| self.handle_hb(p))
                     {
-                        let _ = pkts.push(fwd_pkt);
+                        let _ = tx_queue.push(fwd_pkt);
                     }
                     Ok(Some(pkts))
                 }

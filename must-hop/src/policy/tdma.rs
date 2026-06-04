@@ -171,14 +171,23 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
         }
     }
 
-    /// Set the heartbeat period in seconds. The actual period will be
-    /// `slot_duration × slots_per_frame × skip_frames`, where `skip_frames = tau_hb_secs /
-    /// frame_dur_secs` (min 1). Computation happens in `build()` so that any `set_max_toa()`
-    /// inflation of `slot_duration` is already reflected.
+    /// Set the heartbeat period in seconds. Also inflates `slot_duration` to
+    /// `tau_hb_secs / slots_per_frame` if that's larger than the current value, so a single
+    /// frame spans (at least) the requested heartbeat period. Both Low and High modes then
+    /// fire HBs at `tau_hb_secs` intervals (with `tau_hb_high_skip = 1`) in the common case
+    /// where TOA isn't the binding constraint. `set_max_toa` and `set_tau_hb` are
+    /// order-independent — whichever produces the larger slot wins.
     pub fn set_tau_hb(self, tau_hb_secs: u8) -> Self {
+        let slot_from_tau_ms = tau_hb_secs as u64 * 1000 / self.slot_manager.slots_per_frame as u64;
+        let slot_duration = if slot_from_tau_ms > self.slot_manager.slot_duration.as_millis() {
+            Duration::from_millis(slot_from_tau_ms)
+        } else {
+            self.slot_manager.slot_duration
+        };
         Self {
             slot_manager: SlotManager {
                 tau_hb_secs,
+                slot_duration,
                 ..self.slot_manager
             },
             ..self
@@ -208,7 +217,10 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     pub fn build(self) -> TdmaMac<Runner, P, SIZE> {
-        let frame_dur_ms = self.slot_manager.slot_duration.as_millis()
+        let frame_dur_ms = self
+            .slot_manager
+            .slot_duration
+            .as_millis()
             .saturating_mul(self.slot_manager.slots_per_frame as u64);
         let tau_hb_ms = self.slot_manager.tau_hb_secs as u64 * 1000;
         let tau_hb_high_skip = if tau_hb_ms > 0 && frame_dur_ms > 0 {
@@ -244,7 +256,7 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
         TdmaMac::new(
             Duration::from_secs(2),
             // The SlotManager can only hold 5 nodes, so this should default to that max
-            NonZeroU8::new(5).unwrap(),
+            NonZeroU8::new(2).unwrap(),
             None,
             None,
         )
@@ -559,7 +571,10 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let dummy_allocation = SyncBeacon {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
-            tau_hb: self.slot_manager.tau_hb.skip_frames(self.slot_manager.tau_hb_high_skip),
+            tau_hb: self
+                .slot_manager
+                .tau_hb
+                .skip_frames(self.slot_manager.tau_hb_high_skip),
             gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
             feedback_vec,
         };
@@ -655,7 +670,10 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let allocation = SyncBeacon {
             my_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
-            tau_hb: self.slot_manager.tau_hb.skip_frames(self.slot_manager.tau_hb_high_skip),
+            tau_hb: self
+                .slot_manager
+                .tau_hb
+                .skip_frames(self.slot_manager.tau_hb_high_skip),
             gps_time_us: adjusted_timestamp,
             feedback_vec,
         };
@@ -754,8 +772,11 @@ where
             return true;
         }
         if self.slot_manager.hb_countdown == 0 {
-            self.slot_manager.hb_countdown =
-                self.slot_manager.tau_hb.skip_frames(self.slot_manager.tau_hb_high_skip).saturating_sub(1);
+            self.slot_manager.hb_countdown = self
+                .slot_manager
+                .tau_hb
+                .skip_frames(self.slot_manager.tau_hb_high_skip)
+                .saturating_sub(1);
             true
         } else {
             false
@@ -857,5 +878,83 @@ where
             let _ = pin.set_low();
         }
         Ok(Some(received_packets))
+    }
+}
+
+#[cfg(test)]
+mod build_tests {
+    use super::*;
+
+    type Mac = TdmaMac<Builder, (), 64>;
+
+    fn default_builder() -> Mac {
+        Mac::new(
+            Duration::from_secs(2),
+            NonZeroU8::new(5).unwrap(),
+            None,
+            None,
+        )
+    }
+
+    #[test]
+    fn tau_binding_sets_slot_to_tau_over_spf() {
+        // Small TOA, tau=20s with 5 slots/frame: slot should be 4s, frame 20s, skip 1.
+        let built = default_builder().set_max_toa(300).set_tau_hb(20).build();
+        assert_eq!(
+            built.slot_manager.slot_duration,
+            Duration::from_millis(4000)
+        );
+        assert_eq!(built.slot_manager.tau_hb_high_skip, 1);
+        assert_eq!(built.slot_manager.tau_hb_secs, 20);
+    }
+
+    #[test]
+    fn tau_binding_non_multiple_of_frame_dur() {
+        // tau=15s with 5 slots/frame: slot becomes 3s, frame 15s, skip 1 — no warning.
+        let built = default_builder().set_max_toa(300).set_tau_hb(15).build();
+        assert_eq!(
+            built.slot_manager.slot_duration,
+            Duration::from_millis(3000)
+        );
+        assert_eq!(built.slot_manager.tau_hb_high_skip, 1);
+    }
+
+    #[test]
+    fn toa_binding_overrides_tau_at_high_sf() {
+        // max_toa=3000ms forces slot to 3100ms (rx_window + 100 guard). tau=10s wants
+        // slot=2000ms, so TOA wins. frame_dur=15500ms > tau_hb_ms=10000ms, so the
+        // ceil-to-1 path fires and the warn is emitted (not asserted here).
+        let built = default_builder().set_max_toa(3000).set_tau_hb(10).build();
+        assert_eq!(
+            built.slot_manager.slot_duration,
+            Duration::from_millis(3100)
+        );
+        assert_eq!(built.slot_manager.tau_hb_high_skip, 1);
+    }
+
+    #[test]
+    fn user_supplied_slot_wins_when_largest() {
+        // User passes slot_duration=5s via new(); tau=10s wants 2s; TOA small. User wins.
+        let built = Mac::new(
+            Duration::from_secs(5),
+            NonZeroU8::new(5).unwrap(),
+            None,
+            None,
+        )
+        .set_max_toa(300)
+        .set_tau_hb(10)
+        .build();
+        assert_eq!(built.slot_manager.slot_duration, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn set_max_toa_then_set_tau_hb_is_order_independent() {
+        let a = default_builder().set_max_toa(300).set_tau_hb(20).build();
+        let b = default_builder().set_tau_hb(20).set_max_toa(300).build();
+        assert_eq!(a.slot_manager.slot_duration, b.slot_manager.slot_duration);
+        assert_eq!(
+            a.slot_manager.tau_hb_high_skip,
+            b.slot_manager.tau_hb_high_skip
+        );
     }
 }
