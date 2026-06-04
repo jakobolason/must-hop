@@ -40,7 +40,7 @@ NODES = [
 
 
 # Seconds per experiment run (~10 min default)
-DURATION = 300
+DURATION = 600
 
 # Seconds to wait between runs for radio settling
 INTER_RUN_DELAY = 30
