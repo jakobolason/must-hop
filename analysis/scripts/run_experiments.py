@@ -14,23 +14,26 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+TAUS = [10, 15, 20, 30]
+
 EXPERIMENTS = [
-    # {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 5},
-    # {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 15, "times": 5},
-    # {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 20, "times": 5},
-    # {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "tau": 30, "times": 5},
-    {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
-    {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
-    {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
-    {"sf": 10, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
-    {"sf": 11, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
-    # {"sf": 5, "bw": 125, "kp": 40, "ki": 50, "times": 10},
-    # {"sf": 5, "bw": 125, "kp": 10, "ki": 50, "times": 10},
-    # {"sf": 5, "bw": 125, "kp": 13, "ki": 32, "times": 10},
-    # {"sf": 5, "bw": 125, "kp": 13, "ki": 4.59, "times": 10},
-    # {"sf": 5, "bw": 125, "kp": 1, "ki": 1, "times": 10},
-    # {"sf": 5, "bw": 125, "kp": 100, "ki": 500, "times": 10},
+    {"sf": 7, "bw": 125, "kp": 4 / tau, "ki": 5 / tau, "tau": tau, "times": 10}
+    for tau in TAUS
 ]
+
+# EXPERIMENTS = [
+# {"sf": 7, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
+# {"sf": 8, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
+# {"sf": 9, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
+# {"sf": 10, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
+# {"sf": 11, "bw": 125, "kp": 40, "ki": 50, "times": 10, "tau": 10},
+# {"sf": 5, "bw": 125, "kp": 40, "ki": 50, "times": 10},
+# {"sf": 5, "bw": 125, "kp": 10, "ki": 50, "times": 10},
+# {"sf": 5, "bw": 125, "kp": 13, "ki": 32, "times": 10},
+# {"sf": 5, "bw": 125, "kp": 13, "ki": 4.59, "times": 10},
+# {"sf": 5, "bw": 125, "kp": 1, "ki": 1, "times": 10},
+# {"sf": 5, "bw": 125, "kp": 100, "ki": 500, "times": 10},
+# ]
 
 # Nodes: list of {"node_id": "<source id>", "probe_id": "<probe serial>"}
 # Passed to headless as positional args in "node_id:probe_id" format.
@@ -40,7 +43,7 @@ NODES = [
 
 
 # Seconds per experiment run (~10 min default)
-DURATION = 600
+DURATION = 1200
 
 # Seconds to wait between runs for radio settling
 INTER_RUN_DELAY = 30

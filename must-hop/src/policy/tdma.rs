@@ -898,14 +898,14 @@ mod build_tests {
 
     #[test]
     fn tau_binding_sets_slot_to_tau_over_spf() {
-        // Small TOA, tau=20s with 5 slots/frame: slot should be 4s, frame 20s, skip 1.
-        let built = default_builder().set_max_toa(300).set_tau_hb(20).build();
+        // Small TOA, tau=10s with 5 slots/frame: slot should be 2s, frame 10s, skip 1.
+        let built = default_builder().set_max_toa(300).set_tau_hb(10).build();
         assert_eq!(
             built.slot_manager.slot_duration,
-            Duration::from_millis(4000)
+            Duration::from_millis(2000)
         );
         assert_eq!(built.slot_manager.tau_hb_high_skip, 1);
-        assert_eq!(built.slot_manager.tau_hb_secs, 20);
+        assert_eq!(built.slot_manager.tau_hb_secs, 10);
     }
 
     #[test]
