@@ -3,6 +3,7 @@ use must_dash::app::NodeConfig;
 use must_dash::{
     app::AppEvent, init_logger, shutdown_processes, spawn_log_processes, spawn_pty_reader,
 };
+use strip_ansi_escapes::strip_str;
 use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
@@ -114,10 +115,11 @@ async fn main() {
             result = tokio::time::timeout_at(deadline, rx.recv()) => {
                 match result {
                     Ok(Some(AppEvent::ProcessLog { source, text, overwrite })) => {
+                        let clean = strip_str(&text);
                         if source == "gw" {
-                            last_gw = format!("{source} => {text}");
+                            last_gw = format!("{source} => {clean}");
                         } else {
-                            last_node = format!("{source} => {text}");
+                            last_node = format!("{source} => {clean}");
                         }
                         let status = format!("hw:   {last_hw}\ngw:   {last_gw}\nnode: {last_node}");
                         let lines = status.lines().count();
