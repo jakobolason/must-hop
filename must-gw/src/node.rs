@@ -134,8 +134,8 @@ impl GWNode {
         )
     }
     fn avg_slice_delay(&self, payload_len: usize) -> u64 {
-        // INTERCEPT + SLOPE * payload_len as u64
-        0
+        INTERCEPT + SLOPE * payload_len as u64
+        // 0
     }
 }
 

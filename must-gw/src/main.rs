@@ -31,7 +31,7 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
     let tau = match std::env::var("TAU").as_deref() {
         Ok(val) => {
             let val = val.parse::<u8>().unwrap();
-            if !(10..=100).contains(&val) {
+            if !(1..=100).contains(&val) {
                 panic!("tau should be between 10 and 100 for the controller to work properly!");
             }
             val
