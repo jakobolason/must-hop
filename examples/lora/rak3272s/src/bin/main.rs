@@ -15,12 +15,10 @@ use embassy_stm32::{
     gpio::{Level, Output, Speed},
     mode::Async,
     peripherals,
-    rcc::LsConfig,
-    rcc::{MSIRange, Sysclk, mux},
-    rng,
-    rng::Rng,
-    spi::Spi,
-    spi::mode::Master,
+    rcc::{LsConfig, LseConfig, LseDrive, LseMode, MSIRange, RtcClockSource, Sysclk, mux},
+    rng::{self, Rng},
+    spi::{Spi, mode::Master},
+    time::Hertz,
 };
 
 use embassy_time::{Delay, Timer};
@@ -74,13 +72,39 @@ bind_interrupts!(struct Irqs{
 async fn main(spawner: Spawner) {
     let mut config = Config::default();
     {
-        config.rcc.ls = LsConfig::default_lsi();
+        config.rcc.ls = LsConfig {
+            rtc: RtcClockSource::LSE,
+            lse: Some(LseConfig {
+                frequency: Hertz(32_768),
+                mode: LseMode::Oscillator(LseDrive::High),
+                peripherals_clocked: true,
+            }),
+            lsi: false,
+        };
         config.rcc.msi = Some(MSIRange::RANGE48M);
         config.rcc.sys = Sysclk::MSI;
         config.rcc.mux.rngsel = mux::Rngsel::MSI;
         config.enable_debug_during_sleep = true;
     }
     let p = embassy_stm32::init(config);
+    info!("Checking this: {}", embassy_stm32::pac::RCC.cr().read());
+    let bdcr = embassy_stm32::pac::RCC.bdcr().read();
+    info!(
+        "BDCR: lseon={} lserdy={} rtcsel={}",
+        bdcr.lseon(),
+        bdcr.lserdy(),
+        bdcr.rtcsel() as u8
+    );
+    // confirm LSE is actually ready (this is the only documented precondition)
+    while !embassy_stm32::pac::RCC.bdcr().read().lserdy() {}
+    info!("LSE confirmed ready; attempting MSIPLLEN=1");
+
+    // write and read back immediately
+    embassy_stm32::pac::RCC
+        .cr()
+        .modify(|w| w.set_msipllen(true));
+    let after = embassy_stm32::pac::RCC.cr().read();
+    info!("after manual write: msipllen={}", after.msipllen());
 
     info!("config done...");
     let rx_pin = Output::new(p.PB8, Level::Low, Speed::VeryHigh);
@@ -223,7 +247,7 @@ pub async fn lora_task(
     let kp = KP.unwrap_or(DEFAULT_KP);
     let tau = TAU.unwrap_or(DEFAULT_TAU);
     let mac = TdmaMac::default()
-        .set_controller(23334395, kp, ki)
+        .set_controller(0, kp, ki)
         .set_debug_pin(debug_pin)
         .set_node_id(source_id)
         .set_max_toa(MAX_TOA_MS)
