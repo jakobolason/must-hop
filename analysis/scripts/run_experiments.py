@@ -14,8 +14,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-TAUS = [10, 15, 20, 30]
+# EXPERIMENT 1: 6 different PI controllers
+KPKIs = [(40, 50), (10, 50), (13, 32), (13, 5), (1, 1), (100, 500)]
+EXPERIMENTS = [
+    {"sf": 5, "bw": 125, "kp": kp, "ki": ki, "tau": 10, "times": 10}
+    for (kp, ki) in KPKIs
+]
 
+# EXPERIMENT 2: Test controller with different spreading factors
+SFs = [5, 6, 7, 8, 9, 10, 11]
+EXPERIMENTS = [
+    {"sf": sf, "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 10} for sf in SFs
+]
+
+# EXPERIMENT 3: Test different heartbeat intervals
+TAUS = [10, 15, 20, 30]
 EXPERIMENTS = [
     {"sf": 7, "bw": 125, "kp": 4 / tau, "ki": 5 / tau, "tau": tau, "times": 10}
     for tau in TAUS
@@ -43,7 +56,7 @@ NODES = [
 
 
 # Seconds per experiment run (~10 min default)
-DURATION = 1200
+DURATION = 600
 
 # Seconds to wait between runs for radio settling
 INTER_RUN_DELAY = 30
