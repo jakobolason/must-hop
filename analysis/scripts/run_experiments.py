@@ -132,16 +132,16 @@ def run_experiment(
         # headless already received SIGINT from the terminal — give it time to
         # call shutdown_processes and clean up its children before we force-kill it.
         try:
-            proc.wait(timeout=15)
+            _ = proc.wait(timeout=15)
         except subprocess.TimeoutExpired:
             proc.terminate()
-            proc.wait()
+            _ = proc.wait()
         raise
     end = datetime.now()
 
     # Re-print stderr so the user still sees headless progress messages.
     if stderr:
-        sys.stderr.write(stderr)
+        _ = sys.stderr.write(stderr)
 
     data_paths = _parse_data_paths(stderr or "")
 
@@ -193,12 +193,12 @@ def main() -> None:
             results.append(record)
 
             # Write manifest after every run so progress is not lost on interruption
-            manifest_path.write_text(
+            _ = manifest_path.write_text(
                 json.dumps({"run_id": run_id, "experiments": results}, indent=2)
             )
 
             if i < len(expanded) - 1:
-                print(f"Done with run {i}")
+                print(f"== Experiment {i + 1}/{len(expanded)} ==")
                 print(f"[runner] Waiting {INTER_RUN_DELAY}s before next run...")
                 try:
                     time.sleep(INTER_RUN_DELAY)

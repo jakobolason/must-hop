@@ -11,7 +11,7 @@ use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, channel, channel::Channel};
 
 use embassy_stm32::{
-    Config, bind_interrupts,
+    Config, bind_interrupts, dma,
     gpio::{Level, Output, Speed},
     mode::Async,
     peripherals,
@@ -66,6 +66,8 @@ const DEFAULT_ALT_MDLTN: bool = false;
 bind_interrupts!(struct Irqs{
     SUBGHZ_RADIO => InterruptHandler;
     RNG => rng::InterruptHandler<peripherals::RNG>;
+    DMA1_CHANNEL1 => dma::InterruptHandler<peripherals::DMA1_CH1>;
+    DMA1_CHANNEL2 => dma::InterruptHandler<peripherals::DMA1_CH2>;
 });
 
 #[embassy_executor::main]
@@ -110,7 +112,7 @@ async fn main(spawner: Spawner) {
     let rx_pin = Output::new(p.PB8, Level::Low, Speed::VeryHigh);
     let tx_pin = Output::new(p.PC13, Level::Low, Speed::VeryHigh);
 
-    let spi = Spi::new_subghz(p.SUBGHZSPI, p.DMA1_CH1, p.DMA1_CH2);
+    let spi = Spi::new_subghz(p.SUBGHZSPI, p.DMA1_CH1, p.DMA1_CH2, Irqs);
     let spi = SubghzSpiDevice(spi);
     // TODO: Can it work wit low power?
     let use_high_power_pa = false;
@@ -132,14 +134,13 @@ async fn main(spawner: Spawner) {
     info!("lora setup done ...");
     let debug_pin = Output::new(p.PA2, Level::Low, Speed::VeryHigh);
 
-    if let Err(e) = spawner.spawn(lora_task(lora, CHANNEL.receiver(), debug_pin)) {
-        error!("error in spawning lora task: {:?}", e);
-    }
-    // TODO: Add sensor data creation task
+    spawner.spawn(
+        lora_task(lora, CHANNEL.receiver(), debug_pin)
+            .expect("Spwaning lora task should not error"),
+    );
     let rng = Rng::new(p.RNG, Irqs);
-    if let Err(e) = spawner.spawn(sensor_task(CHANNEL.sender(), rng)) {
-        error!("Error in spawning lora task: {:?}, ", e);
-    }
+    spawner
+        .spawn(sensor_task(CHANNEL.sender(), rng).expect("Spawning sensor task should not error"));
 
     loop {
         info!("from main...");
