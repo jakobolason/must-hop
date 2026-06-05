@@ -110,32 +110,37 @@ async fn main() {
     let mut last_hw = String::new();
     let mut prev_lines: usize = 0;
 
+    let term_cols = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(200);
+    let truncate = |s: &str, prefix_len: usize| -> String {
+        let max = term_cols.saturating_sub(prefix_len);
+        let s = s.trim_end();
+        if s.chars().count() > max { s.chars().take(max).collect() } else { s.to_owned() }
+    };
+
     loop {
         tokio::select! {
             result = tokio::time::timeout_at(deadline, rx.recv()) => {
                 match result {
                     Ok(Some(AppEvent::ProcessLog { source, text, overwrite })) => {
-                        let clean = strip_str(&text);
+                        let clean = truncate(&strip_str(&text), source.len() + 4);
                         if source == "gw" {
                             last_gw = format!("{source} => {clean}");
                         } else {
                             last_node = format!("{source} => {clean}");
                         }
                         let status = format!("hw:   {last_hw}\ngw:   {last_gw}\nnode: {last_node}");
-                        let lines = status.lines().count();
                         if prev_lines > 0 { print!("\x1B[{prev_lines}A\r\x1B[J"); }
                         print!("{status}");
-                        prev_lines = lines;
+                        prev_lines = status.lines().count();
                         let _ = std::io::stdout().flush();
                         app.add_log(&source, text, overwrite);
                     }
                     Ok(Some(AppEvent::HardwareLog { delay_ms })) => {
-                        last_hw = format!("hw: {delay_ms}ms");
+                        last_hw = format!("{delay_ms}ms");
                         let status = format!("hw:   {last_hw}\ngw:   {last_gw}\nnode: {last_node}");
-                        let lines = status.lines().count();
                         if prev_lines > 0 { print!("\x1B[{prev_lines}A\r\x1B[J"); }
                         print!("{status}");
-                        prev_lines = lines;
+                        prev_lines = status.lines().count();
                         let _ = std::io::stdout().flush();
                         app.add_hw_delay(delay_ms);
                     }
