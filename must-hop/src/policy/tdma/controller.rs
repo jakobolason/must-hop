@@ -134,8 +134,8 @@ impl Controller {
                 down_ms,
                 nw_delay as f32 / 1000.0
             );
-            // nw_delay
-            (*delta_up / 2) as i64
+            nw_delay
+            // (*delta_up / 2) as i64
             // }
         } else {
             0

@@ -1162,19 +1162,13 @@ name = "lora-modulation"
 version = "0.1.5"
 
 [[package]]
-name = "lora-modulation"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c96c4a41a1f1ad04de765306e1829c7007a37898fe4033204fa82cf2e055624"
-
-[[package]]
 name = "lora-phy"
 version = "3.0.2-alpha"
 dependencies = [
  "document-features",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
- "lora-modulation 0.1.5",
+ "lora-modulation",
  "num-traits",
 ]
 
@@ -1185,7 +1179,7 @@ dependencies = [
  "libc",
  "libloragw-sys",
  "log",
- "lora-modulation 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lora-modulation",
  "rppal 0.14.1",
  "serde",
  "toml",
@@ -1279,7 +1273,7 @@ dependencies = [
  "heapless 0.9.2",
  "libloragw-sys",
  "log",
- "lora-modulation 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lora-modulation",
  "loragw",
  "must-hop",
  "postcard",
@@ -1297,7 +1291,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "heapless 0.9.2",
  "log",
- "lora-modulation 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lora-modulation",
  "lora-phy",
  "postcard",
  "serde",
