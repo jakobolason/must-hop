@@ -44,7 +44,8 @@ pub struct LogSource {
 pub struct NodeStats {
     /// Matches the `source_id` on the corresponding `ProcessDescriptor` (e.g. `"node-1"`).
     pub source_id: String,
-    /// Human-readable label written into CSV rows ("node A", "node B", …).
+    /// Human-readable label written into CSV rows ("node-7", "node-9", …).
+    /// Derived from the configured source_id so the value stays stable across runs.
     pub node_label: String,
     /// Hardware probe serial — written into CSV rows for traceability.
     pub probe_id: String,
@@ -56,11 +57,6 @@ pub struct NodeStats {
     pub hardware_delay: Vec<f32>,
     /// Index into `hardware_delay` up to which samples have been consumed into `PacketEntry`s.
     pub last_hw_idx: usize,
-}
-
-fn node_label_from_index(i: usize) -> String {
-    let c = (b'A' + i as u8) as char;
-    format!("node {c}")
 }
 
 impl LogSource {
@@ -322,10 +318,9 @@ impl App {
         self.node_stats = self
             .configured_nodes
             .iter()
-            .enumerate()
-            .map(|(i, node)| NodeStats {
+            .map(|node| NodeStats {
                 source_id: format!("node-{}", node.source_id),
-                node_label: node_label_from_index(i),
+                node_label: format!("node-{}", node.source_id),
                 din_index: self
                     .din_map
                     .iter()
@@ -644,6 +639,13 @@ impl App {
                     let mode = parts[1].trim();
                     for ns in &mut self.node_stats {
                         ns.stats.on_state_sync(mode);
+                    }
+                } else if tag.contains("[GW_PKT]") && parts.len() >= 4 {
+                    let node = parts[1].trim();
+                    if let Some(ns) = self.node_stats.iter_mut().find(|p| p.source_id == node)
+                        && let Ok(pkt_id) = parts[2].trim().parse::<u16>()
+                    {
+                        ns.stats.on_gw_packet(pkt_id);
                     }
                 }
                 // Gateway TAU_SLICE events are displayed in the log panel but not tracked in stats.

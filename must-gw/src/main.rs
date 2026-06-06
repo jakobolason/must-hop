@@ -3,7 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use log::error;
 use loragw::{Bandwidth, Spreading};
 use must_gw::{create_concentrator, node};
-use must_hop::{mesh_router::MeshRouter, network_manager::NetworkManager, policy::tdma::TdmaMac};
+use must_hop::{
+    PacketType, mesh_router::MeshRouter, network_manager::NetworkManager, policy::tdma::TdmaMac,
+};
 use rppal::gpio::Gpio;
 use std::io::Write;
 use tokio::time::Instant;
@@ -96,8 +98,10 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
         let mut rec_buf = None;
         match router.tick(&mut rec_buf).await {
             Ok(res) => {
-                if !res.is_empty() {
-                    log::info!("got pkts: {:?}", res)
+                for pkt in &res {
+                    if pkt.packet_type == PacketType::Data {
+                        log::info!("[GW_PKT] | node-{} | {} |", pkt.source_id, pkt.packet_id);
+                    }
                 }
             }
             Err(e) => error!("Error in ticking: {:?}", e),

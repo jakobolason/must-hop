@@ -16,6 +16,7 @@ pub struct MainCsvRow {
     pub node_time_us: Option<u64>,
     pub node_bytes: Option<usize>,
     pub tau_hb_high: bool,
+    pub pkt_loss: f32,
 }
 
 pub struct ChartData {
@@ -48,6 +49,7 @@ pub struct PacketEntry {
     pub hw_samples: Vec<f32>,
     /// tau_hb mode at transmit time: true = High, false = Low
     pub tau_hb_high: bool,
+    pub pkt_loss: f32,
 }
 
 /// Accumulated state for the packet that is currently being built.
@@ -70,6 +72,12 @@ pub struct DashStats {
     pub packets: Vec<PacketEntry>,
     /// One diff per node TAU_SLICE_POST
     pub node_diff: Vec<SliceDiff>,
+    /// Data packets from this node that the gateway received during the run.
+    pub pkt_received: u32,
+    /// Packet-id gaps inferred from non-contiguous [GW_PKT] events (i.e. lost packets).
+    pub pkt_skipped: u32,
+    /// Highest packet_id observed at the gateway; `None` until the first packet arrives.
+    pub pkt_last_id: Option<u16>,
     // --- private scratchpad, not for display ---
     pending: PendingPacket,
     last_node_slice_us: u64,
@@ -87,6 +95,9 @@ impl DashStats {
         Self {
             packets: Vec::new(),
             node_diff: Vec::new(),
+            pkt_received: 0,
+            pkt_skipped: 0,
+            pkt_last_id: None,
             pending: PendingPacket::default(),
             last_node_slice_us: 0,
             last_node_slice_size: 0,
@@ -145,7 +156,12 @@ impl DashStats {
     /// node's last SYNC — passed in by the caller since the buffer lives in `App`.
     /// All visible packets are stretched evenly across `[0, num_points-1]`.
     /// `scroll` shifts the visible window back in time (0 = most recent packets).
-    pub fn get_chart_data(&self, max_x_points: usize, scroll: usize, hw_pending: &[f32]) -> ChartData {
+    pub fn get_chart_data(
+        &self,
+        max_x_points: usize,
+        scroll: usize,
+        hw_pending: &[f32],
+    ) -> ChartData {
         let num_points = max_x_points.max(1);
 
         let end = self.packets.len().saturating_sub(scroll);
@@ -281,6 +297,7 @@ impl DashStats {
                 node_time_us: nd.map(|d| d.time_us),
                 node_bytes: nd.map(|d| d.bytes),
                 tau_hb_high: p.tau_hb_high,
+                pkt_loss: p.pkt_loss,
             }
         })
     }
@@ -306,6 +323,11 @@ impl DashStats {
         hw_samples: Vec<f32>,
     ) {
         let pending = std::mem::take(&mut self.pending);
+        let pkt_loss: f32 = if self.pkt_received > 0 || self.pkt_skipped > 0 {
+            self.pkt_skipped as f32 / (self.pkt_received + self.pkt_skipped) as f32
+        } else {
+            0_f32
+        };
         self.packets.push(PacketEntry {
             delay_ms,
             err_ms,
@@ -316,6 +338,7 @@ impl DashStats {
             mean_hw_delay_ms: hw_mean,
             hw_samples,
             tau_hb_high: pending.tau_hb_high,
+            pkt_loss,
         });
     }
 
@@ -332,5 +355,25 @@ impl DashStats {
             time_us: ts_us.saturating_sub(self.last_node_slice_us),
             bytes: size,
         });
+    }
+
+    /// This node's packet was successfully received by the gateway, check if the last packet id was
+    /// more than 1 lower than this new id, because that would mean that there were some prior
+    /// packets which were not received.
+    pub fn on_gw_packet(&mut self, packet_id: u16) {
+        self.pkt_received += 1;
+        let diff = if let Some(last_id) = self.pkt_last_id {
+            packet_id.wrapping_sub(last_id)
+        } else {
+            0
+        };
+        if diff > 0 && diff < 1024 {
+            // remove the diff for this packet, if we missed one, then diff is 2, and we missed 2-1
+            // packets
+            if diff > 1 {
+                self.pkt_skipped += (diff - 1) as u32;
+            }
+            self.pkt_last_id = Some(packet_id);
+        }
     }
 }
