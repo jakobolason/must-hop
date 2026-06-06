@@ -1,8 +1,31 @@
+import os
+import re
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+# Matches tokens like SF9, BW125, KP40, KI50, TAU10 anywhere in the filename,
+# and a trailing <N>nodes token.
+_PARAM_RE = re.compile(r"_(SF|BW|KP|KI|TAU)(\d+)")
+_NODES_RE = re.compile(r"_(\d+)nodes")
+
+
+def parse_params_from_filename(path):
+    """
+    Extract experiment parameters from a main_stats / hw_stats filename like
+    `hw_stats_01-06:21.02_SF9_BW125_KP40_KI50_TAU10_1nodes.csv`.
+
+    Returns a dict with lowercase keys (sf, bw, kp, ki, tau, nodes); missing
+    tokens are simply absent from the dict.
+    """
+    name = os.path.basename(str(path))
+    out = {k.lower(): int(v) for k, v in _PARAM_RE.findall(name)}
+    m = _NODES_RE.search(name)
+    if m:
+        out["nodes"] = int(m.group(1))
+    return out
 
 
 def get_pct_in_low(df):
@@ -50,19 +73,25 @@ def analyze_runs(runs, min_entries=10):
             )
             continue
 
-        mean = hw_stats.mean()
-        std = hw_stats.std()
+        hw_delay = hw_stats["hardware_delay"]
+        mean = float(hw_delay.mean())
+        std = float(hw_delay.std())
         pct_in_low, first_index = get_pct_in_low(stats)
+
+        # Pull params from the filename so fields not present in the run dict
+        # (notably `tau` in older manifests) are still available downstream.
+        fname_params = parse_params_from_filename(run["hw_stats"])
 
         results.append(
             {
-                "sf": run.get("sf"),
-                "bw": run.get("bw"),
-                "kp": run.get("kp"),
-                "ki": run.get("ki"),
-                "nodes": len(run.get("nodes", [])),
-                "mean_hw_delay": float(mean.iloc[0]),
-                "std_hw_delay": float(std.iloc[0]),
+                "sf": run.get("sf", fname_params.get("sf")),
+                "bw": run.get("bw", fname_params.get("bw")),
+                "kp": run.get("kp", fname_params.get("kp")),
+                "ki": run.get("ki", fname_params.get("ki")),
+                "tau": run.get("tau", fname_params.get("tau")),
+                "nodes": len(run.get("nodes", [])) or fname_params.get("nodes"),
+                "mean_hw_delay": mean,
+                "std_hw_delay": std,
                 "pct_in_low": float(pct_in_low),
                 "settling_index": first_index,
                 "main_stats": run["main_stats"],
@@ -107,6 +136,7 @@ def aggregate_group(group):
         "bw": first["bw"],
         "kp": first["kp"],
         "ki": first["ki"],
+        "tau": first.get("tau"),
         "nodes": first["nodes"],
         "n_runs": len(group),
         # Robust center: median ± IQR
@@ -162,10 +192,12 @@ def _table_row(i, r, aggregate=False):
         s_sd = r.get("settling_sd", 0.0)
 
         # median ±IQR (IQR = Q75-Q25, a robust spread measure)
-        mean_str = f"${r['mean_hw_delay']:.1f} ±{iqr:.1f}iqr$,"
+        mean_str = f"${r['mean_hw_delay']:.1f} ±{iqr:.1f}i q r$,"
         std_str = f"${r['std_hw_delay']:.2f} ±{std_sd:.2f}$,"
         plow_str = f"${r['pct_in_low'] * 100:.1f} ±{plow_sd * 100:.1f}%$,"
-        settle_str = f"${settle_val} ±{s_sd:.0f}$," if settle_val is not None else "—"
+        settle_str = (
+            f"${settle_val * 10} ±{s_sd * 10:.0f}$," if settle_val is not None else "—"
+        )
     else:
         sd_tag = f" $±{r['mean_hw_delay_sd']:.2f}$," if "mean_hw_delay_sd" in r else ""
         mean_str = f"${r['mean_hw_delay']:.3f}{sd_tag}$,"
@@ -228,12 +260,14 @@ def print_grouped_results(results, by=("sf", "bw"), aggregate=True):
 
 
 def plot_grouped_results(
-    results, by=("sf", "bw"), title="Per-run HW delay by modulation"
+    results, by=("sf", "bw"), title="Per-run HW delay by modulation", n_cols=2
 ):
     """
     One subplot per modulation group. Each run is plotted as a point on the
     x-axis with y = mean_hw_delay and error bars showing ± std_hw_delay.
     A shaded band behind the line shows the same ±1σ extent.
+
+    `n_cols` controls the subplot grid width; rows are added as needed.
     """
     grouped = group_results(results, by=by)
     n_groups = len(grouped)
@@ -241,10 +275,10 @@ def plot_grouped_results(
         print("No results to plot.")
         return
 
-    n_cols = 2
+    n_cols = max(1, min(n_cols, n_groups))
     n_rows = int(np.ceil(n_groups / n_cols))
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(10, 4 * n_rows), sharey=True, squeeze=False
+        n_rows, n_cols, figsize=(10, 4 * n_rows), sharey="row", squeeze=False
     )
 
     for i, (key, group) in enumerate(grouped.items()):
@@ -296,6 +330,7 @@ def plot_oscillation_traces(
     by: tuple[str, str] = ("kp", "ki"),
     value_col: str = "hardware_delay",
     skip_initial: int = 3,
+    n_cols: int = 2,
 ):
     """
     One subplot per group. Overlays the per-sample time series of `value_col`
@@ -304,18 +339,19 @@ def plot_oscillation_traces(
     (after dropping the first `skip_initial` samples to ignore startup):
       - RMS of value_col per run  (lower = quieter loop)
       - sign-changes per run      (higher = faster oscillation)
+
+    `n_cols` controls the subplot grid width; rows are added as needed.
     """
     grouped = group_results(results, by=by)
     n_groups = len(grouped)
     if n_groups == 0:
         print("No results to plot.")
         return
-    print(n_groups)
 
-    n_cols = 2
+    n_cols = max(1, min(n_cols, n_groups))
     n_rows = int(np.ceil(n_groups / n_cols))
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(11, 4 * n_rows), sharey=True, squeeze=False
+        n_rows, n_cols, figsize=(11, 4 * n_rows), sharey="row", squeeze=False
     )
 
     for i, (key, group) in enumerate(grouped.items()):
@@ -357,7 +393,7 @@ def plot_oscillation_traces(
         letter_prefix = f"({chr(ord('a') + i)})"
         ax.set_title(
             f"{letter_prefix}    {label}  (n={arr.shape[0]})\n"
-            f"RMS={rms.mean():.2f}±{rms.std():.2f}  "
+            f"RMS={rms.mean():.2f}±{rms.std():.2f}\n  "
             f"sign-changes/run={sc.mean():.1f}±{sc.std():.1f}"
         )
         ax.set_xlabel("Sample index in run")
