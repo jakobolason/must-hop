@@ -12,7 +12,7 @@ use crossterm::event::{self, Event as CEvent, KeyCode};
 use navigator::{DashFocus, LandingSection, LandingSubView, NavigatorView};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
-use portable_pty::{Child, CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::time::Duration;
 use tokio::sync::mpsc::{self, Receiver};
@@ -336,7 +336,9 @@ pub async fn run_app(
                             navigator.scroll_logs_down()
                         }
                         KeyCode::Left => navigator.scroll_graph_back(
-                            app.node_stats.first().map_or(0, |ns| ns.stats.packets.len()),
+                            app.node_stats
+                                .first()
+                                .map_or(0, |ns| ns.stats.packets.len()),
                         ),
                         KeyCode::Right => navigator.scroll_graph_forward(),
                         KeyCode::Char('p') => {

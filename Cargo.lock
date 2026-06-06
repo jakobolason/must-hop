@@ -1295,6 +1295,7 @@ dependencies = [
  "lora-phy",
  "postcard",
  "serde",
+ "tokio",
 ]
 
 [[package]]

@@ -60,8 +60,7 @@ pub struct MHPacket<const SIZE: usize> {
     // (DE)serialize is only available up to 32 bytes
     pub payload: Vec<u8, SIZE>,
     /// The amount of hops this package has been on
-    // TODO: Implement logic for this
-    pub hop_count: u8,
+    hop_count: u8,
     /// Amount of hops the current node has to GW
     pub hop_to_gw: u8,
 }

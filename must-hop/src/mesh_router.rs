@@ -4,7 +4,7 @@ use defmt::{error, trace};
 #[cfg(feature = "in_std")]
 use log::{error, trace};
 
-use crate::{PacketType, policy::MacPolicy};
+use crate::policy::MacPolicy;
 
 use super::{
     MHNode, MHPacket,
