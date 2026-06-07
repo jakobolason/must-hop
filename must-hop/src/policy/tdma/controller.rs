@@ -153,18 +153,18 @@ impl Controller {
         let err = gw_diff - predicted_elapsed as i64;
 
         // Only re-sync if the error is substantially large
-        let time_sync = if err.abs() > 70_000 {
-            // re-sync means the last error was not enough to put the controller onto the correct speed,
-            // to not fuck up the controller, adjust the stamp such that it doesn't get too out of sync
-            let adjustment = if err > 0 { -50_000 } else { 50_000 };
-            (
-                ((current_true_time + adjustment) as u64),
-                rx_pkt.rx_done_instant,
-            )
-        } else {
-            ((my_stamp), rx_pkt.rx_done_instant)
-        };
-        // let time_sync = Some(((my_stamp), sending_instant));
+        // let time_sync = if err.abs() > 70_000 {
+        //     // re-sync means the last error was not enough to put the controller onto the correct speed,
+        //     // to not fuck up the controller, adjust the stamp such that it doesn't get too out of sync
+        //     let adjustment = if err > 0 { -50_000 } else { 50_000 };
+        //     (
+        //         ((current_true_time + adjustment) as u64),
+        //         rx_pkt.rx_done_instant,
+        //     )
+        // } else {
+        //     ((my_stamp), rx_pkt.rx_done_instant)
+        // };
+        let time_sync = (current_true_time as u64, rx_pkt.rx_done_instant);
 
         // let delta_err = err - self.prev_err;
         let delay = hb.gps_time_us as i64 - my_stamp as i64;

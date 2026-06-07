@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any
 
 # EXPERIMENT 1: 6 different PI controllers
-KPKIs = [(40, 50), (10, 50), (13, 32), (13, 5), (1, 1), (100, 500)]
+# KPKIs = [(40, 50), (10, 50), (13, 32), (13, 5), (1, 1), (100, 500)]
+KPKIs = [(0, 0)]
 EXPERIMENTS = [
-    {"sf": 5, "bw": 125, "kp": kp, "ki": ki, "tau": 10, "times": 1}
+    {"sf": 5, "bw": 125, "kp": kp, "ki": ki, "tau": 10, "times": 5}
     for (kp, ki) in KPKIs
 ]
 
