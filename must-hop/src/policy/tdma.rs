@@ -499,6 +499,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                     self.time_manager.in_sync = true;
                 }
             }
+            self.time_manager.out_of_sync = true;
 
             // if we are GW, then we want to update out t3 deltas on this node
             let t3 = if let Some(stamps) = self.time_manager.time_sync {
