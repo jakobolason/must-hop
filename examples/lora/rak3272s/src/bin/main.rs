@@ -61,7 +61,6 @@ const DEFAULT_SOURCEID: u8 = 2;
 const DEFAULT_KI: i64 = 25;
 const DEFAULT_KP: i64 = 20;
 const DEFAULT_TAU: u8 = 10;
-const DEFAULT_ALT_MDLTN: bool = false;
 
 bind_interrupts!(struct Irqs{
     SUBGHZ_RADIO => InterruptHandler;
@@ -222,17 +221,22 @@ pub async fn lora_task(
     // For experiment 2: Set bool such that it uses other SF for Rx
     // (GW) <-> (A) <-> (B)
     //          A is the only one who should use this here
-    let should_have_alt_mdltn_params: bool = ALT_MDLTN.unwrap_or(DEFAULT_ALT_MDLTN);
-    let alt_mdltn = if should_have_alt_mdltn_params {
-        Some(RatioModParams {
-            sf: SpreadingFactor::_7,
-            bw,
-            cr,
-            lora_hz: LORA_FREQUENCY_IN_HZ,
-        })
-    } else {
-        None
-    };
+    // let alt_mdltn = match ALT_SF {
+    //     Some(alt_sf) => Some(RatioModParams {
+    //         sf: SpreadingFactor::_7,
+    //         bw,
+    //         cr,
+    //         lora_hz: LORA_FREQUENCY_IN_HZ,
+    //     }),
+    //     None => None,
+    // };
+
+    let alt_mdltn = ALT_SF.map(|alt_sf| RatioModParams {
+        sf: alt_sf,
+        bw,
+        cr,
+        lora_hz: LORA_FREQUENCY_IN_HZ,
+    });
     let timeout = 3;
     let max_retries = 3;
     let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp, mp, alt_mdltn) {
@@ -248,7 +252,7 @@ pub async fn lora_task(
     let kp = KP.unwrap_or(DEFAULT_KP);
     let tau = TAU.unwrap_or(DEFAULT_TAU);
     let mac = TdmaMac::default()
-        .set_controller(-10_000, kp, ki)
+        .set_controller(/*-10_000*/ 0, kp, ki)
         .set_debug_pin(debug_pin)
         .set_node_id(source_id)
         .set_max_toa(MAX_TOA_MS)

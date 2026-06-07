@@ -113,7 +113,7 @@ where
         // Short circuit if no packets received
         let received_pkts = match received_pkts {
             Some(pkts) => pkts,
-            None => Vec::new(),
+            None => return Ok(Vec::new()),
         };
         // trace!("Got packets to send or receiving");
         let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;

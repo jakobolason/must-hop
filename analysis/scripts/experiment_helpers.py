@@ -42,9 +42,6 @@ def get_pct_in_low(df):
     return (false_time / total_time, first_index)
 
 
-# ── Data crunching ────────────────────────────────────────────────────────────
-
-
 def analyze_runs(runs, min_entries=10):
     """
     Takes a list of run dicts and returns a list of result dicts, one per run.
@@ -77,6 +74,17 @@ def analyze_runs(runs, min_entries=10):
         mean = float(hw_delay.mean())
         std = float(hw_delay.std())
         pct_in_low, first_index = get_pct_in_low(stats)
+        # Controller's own belief about its sync error — should hover near 0 ms
+        # if the PI loop is steady (per-packet values from the [SYNC] event).
+        believed_err = (
+            stats["err_ms"] if "err_ms" in stats.columns else pd.Series(dtype=float)
+        )
+        mean_believed_err = (
+            float(believed_err.mean()) if not believed_err.empty else float("nan")
+        )
+        std_believed_err = (
+            float(believed_err.std()) if not believed_err.empty else float("nan")
+        )
 
         # Pull params from the filename so fields not present in the run dict
         # (notably `tau` in older manifests) are still available downstream.
@@ -92,6 +100,8 @@ def analyze_runs(runs, min_entries=10):
                 "nodes": len(run.get("nodes", [])) or fname_params.get("nodes"),
                 "mean_hw_delay": mean,
                 "std_hw_delay": std,
+                "mean_believed_err": mean_believed_err,
+                "std_believed_err": std_believed_err,
                 "pct_in_low": float(pct_in_low),
                 "settling_index": first_index,
                 "main_stats": run["main_stats"],
@@ -128,8 +138,19 @@ def aggregate_group(group):
     settles = np.array(
         [r["settling_index"] for r in group if r["settling_index"] is not None]
     )
+    beliefs = np.array(
+        [r["mean_believed_err"] for r in group if "mean_believed_err" in r]
+    )
+    beliefs = beliefs[np.isfinite(beliefs)]
 
     q25, q75 = np.percentile(means, [25, 75])
+    if beliefs.size > 0:
+        b_q25, b_q75 = np.percentile(beliefs, [25, 75])
+        median_belief = float(np.median(beliefs))
+        belief_iqr = float(b_q75 - b_q25)
+    else:
+        median_belief = float("nan")
+        belief_iqr = 0.0
 
     return {
         "sf": first["sf"],
@@ -151,23 +172,35 @@ def aggregate_group(group):
         # Settle: median ± std across runs
         "settling_index": int(np.median(settles)) if len(settles) > 0 else None,
         "settling_sd": float(np.std(settles, ddof=1)) if len(settles) > 1 else 0.0,
+        # Believed error: median ± IQR across runs of each run's mean err_ms
+        "mean_believed_err": median_belief,
+        "mean_believed_err_iqr": belief_iqr,
     }
 
 
-# ── Printing ──────────────────────────────────────────────────────────────────
-
 _COL_W = dict(
-    run=4, sf=4, bw=5, kp=4, ki=4, nodes=5, mean=18, std=14, pct=13, settle=11
+    run=4,
+    sf=4,
+    bw=5,
+    kp=4,
+    ki=4,
+    nodes=5,
+    mean=18,
+    std=14,
+    pct=13,
+    settle=11,
+    belief=18,
 )
 
 
-def _table_header(aggregate=False):
+def _table_header(aggregate=False, include_believed_err=False):
     cw = _COL_W
     center_label = "Median(µs)" if aggregate else "Mean(µs)"
     std_label = "Std(µs)" if aggregate else "Std(µs)"
     pct_label = "%InLow"
     settle_label = "Settle"
-    return (
+    belief_label = "Belief(ms)"
+    head = (
         f"{'#':>{cw['run']}}  "
         f"{'SF':>{cw['sf']}}  "
         f"{'BW':>{cw['bw']}}  "
@@ -179,9 +212,12 @@ def _table_header(aggregate=False):
         f"{std_label:>{cw['std']}}  "
         f"{pct_label:>{cw['pct']}}  "
     )
+    if include_believed_err:
+        head += f"{belief_label:>{cw['belief']}}  "
+    return head
 
 
-def _table_row(i, r, aggregate=False):
+def _table_row(i, r, aggregate=False, include_believed_err=False):
     cw = _COL_W
     settle_val = r["settling_index"]
 
@@ -198,14 +234,28 @@ def _table_row(i, r, aggregate=False):
         settle_str = (
             f"${settle_val * 10} ±{s_sd * 10:.0f}$," if settle_val is not None else "—"
         )
+        belief_iqr = r.get("mean_believed_err_iqr", 0.0)
+        belief_val = r.get("mean_believed_err", float("nan"))
+        belief_str = (
+            f"${belief_val:.2f} ±{belief_iqr:.2f}i q r$,"
+            if belief_val == belief_val  # not NaN
+            else "—"
+        )
     else:
         sd_tag = f" $±{r['mean_hw_delay_sd']:.2f}$," if "mean_hw_delay_sd" in r else ""
         mean_str = f"${r['mean_hw_delay']:.3f}{sd_tag}$,"
         std_str = f"${r['std_hw_delay']:.3f}$,"
         plow_str = f"${r['pct_in_low'] * 100:.1f}%$,"
         settle_str = str(settle_val) if settle_val is not None else "—"
+        belief_val = r.get("mean_believed_err", float("nan"))
+        belief_std = r.get("std_believed_err", float("nan"))
+        if belief_val == belief_val:  # not NaN
+            sd_tag = f" ±{belief_std:.3f}" if belief_std == belief_std else ""
+            belief_str = f"${belief_val:.3f}{sd_tag}$,"
+        else:
+            belief_str = "—"
 
-    return (
+    row = (
         f"{i:>{cw['run']}}  "
         f"{str(r['sf']):>{cw['sf']}}  "
         f"{str(r['bw']):>{cw['bw']}}  "
@@ -217,11 +267,16 @@ def _table_row(i, r, aggregate=False):
         f"{std_str:>{cw['std']}}  "
         f"{plow_str:>{cw['pct']}}  "
     )
+    if include_believed_err:
+        row += f"{belief_str:>{cw['belief']}}  "
+    return row
 
 
-def print_run_results(results, title=None, aggregate=False):
+def print_run_results(results, title=None, aggregate=False, include_believed_err=False):
     """Pretty-print a flat list of result dicts as a table."""
-    header = _table_header(aggregate=aggregate)
+    header = _table_header(
+        aggregate=aggregate, include_believed_err=include_believed_err
+    )
     sep = "─" * len(header)
     if title:
         print(f"\n{'── ' + title + ' ':─<{len(header)}}")
@@ -230,10 +285,16 @@ def print_run_results(results, title=None, aggregate=False):
     print(header)
     print(sep)
     for i, r in enumerate(results, start=1):
-        print(_table_row(i, r, aggregate=aggregate))
+        print(
+            _table_row(
+                i, r, aggregate=aggregate, include_believed_err=include_believed_err
+            )
+        )
 
 
-def print_grouped_results(results, by=("sf", "bw"), aggregate=True):
+def print_grouped_results(
+    results, by=("sf", "bw"), aggregate=True, include_believed_err=False
+):
     """
     Group results by `by`, then print each configuration as a titled block.
 
@@ -241,6 +302,9 @@ def print_grouped_results(results, by=("sf", "bw"), aggregate=True):
                     median ±IQR for the per-run mean (robust to outliers),
                     mean ±std across runs for Std, %InLow, and Settle.
     aggregate=False — show every individual run inside each group.
+    include_believed_err=True — append a Belief(ms) column showing the mean
+                    of `err_ms` from main_stats (the controller's own view of
+                    its sync error). A steady loop should land near 0.
     """
     grouped = group_results(results, by=by)
     for key, group in grouped.items():
@@ -250,13 +314,214 @@ def print_grouped_results(results, by=("sf", "bw"), aggregate=True):
                 [aggregate_group(group)],
                 title=f"{label}  (n={len(group)})",
                 aggregate=True,
+                include_believed_err=include_believed_err,
             )
         else:
-            print_run_results(group, title=label)
+            print_run_results(
+                group, title=label, include_believed_err=include_believed_err
+            )
         # print()
 
 
-# ── Plotting ──────────────────────────────────────────────────────────────────
+# ── 2-node experiments ────────────────────────────────────────────────────────
+
+
+def analyze_two_node_runs(runs, follower_node_id, min_entries=10):
+    """
+    For 2-node experiments: `follower_node_id` is the solely-follower (leaf).
+    The other node in each run's main_stats is the relayer (follower of GW,
+    leader to the solely-follower).
+
+    Per-run metrics:
+      err_to_gw_*    — median / std of the follower's err_ms. The user's
+                       convention is to treat this as the follower's error
+                       relative to the GW reference.
+      err_between_*  — median / std of (follower.err_ms − relayer.err_ms),
+                       row-aligned by index and truncated to the shorter
+                       series. This is the residual error between the two
+                       nodes.
+
+    `follower_node_id` is matched against the `node_id` column in main_stats
+    (e.g. "node-7" for new CSVs, "node A" for older ones).
+    """
+    results = []
+    for run in runs:
+        label = (
+            f"SF={run.get('sf')} BW={run.get('bw')} "
+            f"started={str(run.get('started_at', '?'))[:16]}"
+        )
+        try:
+            stats = pd.read_csv(run["main_stats"])
+        except (pd.errors.EmptyDataError, FileNotFoundError) as e:
+            print(f"  skip {label}: {e}")
+            continue
+
+        if "node_id" not in stats.columns or "err_ms" not in stats.columns:
+            print(f"  skip {label}: missing node_id/err_ms columns")
+            continue
+
+        follower = stats[stats["node_id"] == follower_node_id]
+        relayer = stats[stats["node_id"] != follower_node_id]
+
+        if follower.empty:
+            print(
+                f"  skip {label}: no rows for follower {follower_node_id!r}; "
+                f"got {sorted(stats['node_id'].unique())}"
+            )
+            continue
+        other_ids = sorted(relayer["node_id"].unique())
+        if len(other_ids) != 1:
+            print(f"  skip {label}: expected exactly one relayer, got {other_ids}")
+            continue
+        if len(follower) < min_entries or len(relayer) < min_entries:
+            print(
+                f"  skip {label}: too few rows "
+                f"(follower={len(follower)}, relayer={len(relayer)}, need >{min_entries})"
+            )
+            continue
+
+        err_to_gw = follower["err_ms"].to_numpy()
+        n = min(len(follower), len(relayer))
+        err_between = (
+            follower["err_ms"].iloc[:n].to_numpy()
+            - relayer["err_ms"].iloc[:n].to_numpy()
+        )
+
+        fname_params = parse_params_from_filename(run["main_stats"])
+
+        results.append(
+            {
+                "sf": run.get("sf", fname_params.get("sf")),
+                "bw": run.get("bw", fname_params.get("bw")),
+                "kp": run.get("kp", fname_params.get("kp")),
+                "ki": run.get("ki", fname_params.get("ki")),
+                "tau": run.get("tau", fname_params.get("tau")),
+                "nodes": len(run.get("nodes", [])) or fname_params.get("nodes"),
+                "follower_node_id": follower_node_id,
+                "relayer_node_id": other_ids[0],
+                "err_to_gw_median": float(np.median(err_to_gw)),
+                "err_to_gw_std": (
+                    float(np.std(err_to_gw, ddof=1)) if len(err_to_gw) > 1 else 0.0
+                ),
+                "err_between_median": float(np.median(err_between)),
+                "err_between_std": (
+                    float(np.std(err_between, ddof=1)) if len(err_between) > 1 else 0.0
+                ),
+                "main_stats": run["main_stats"],
+            }
+        )
+    return results
+
+
+def _aggregate_two_node_group(group):
+    """Collapse repeated 2-node runs to median ±IQR across runs."""
+    first = group[0]
+
+    def _summary(key):
+        arr = np.array([r[key] for r in group if np.isfinite(r[key])])
+        if arr.size == 0:
+            return float("nan"), 0.0
+        q25, q75 = np.percentile(arr, [25, 75])
+        return float(np.median(arr)), float(q75 - q25)
+
+    err_gw_med, err_gw_iqr = _summary("err_to_gw_median")
+    err_gw_std_med, _ = _summary("err_to_gw_std")
+    err_bt_med, err_bt_iqr = _summary("err_between_median")
+    err_bt_std_med, _ = _summary("err_between_std")
+
+    return {
+        "sf": first["sf"],
+        "bw": first["bw"],
+        "kp": first["kp"],
+        "ki": first["ki"],
+        "tau": first.get("tau"),
+        "nodes": first["nodes"],
+        "n_runs": len(group),
+        "follower_node_id": first["follower_node_id"],
+        "relayer_node_id": first["relayer_node_id"],
+        # Across-runs robust center + spread
+        "err_to_gw_median": err_gw_med,
+        "err_to_gw_median_iqr": err_gw_iqr,
+        "err_to_gw_std": err_gw_std_med,
+        "err_between_median": err_bt_med,
+        "err_between_median_iqr": err_bt_iqr,
+        "err_between_std": err_bt_std_med,
+    }
+
+
+_TN_COL_W = dict(run=4, sf=4, bw=5, kp=4, ki=4, tau=5, err=22)
+
+
+def _two_node_header():
+    cw = _TN_COL_W
+    return (
+        f"{'#':>{cw['run']}}  "
+        f"{'SF':>{cw['sf']}}  "
+        f"{'BW':>{cw['bw']}}  "
+        f"{'KP':>{cw['kp']}}  "
+        f"{'KI':>{cw['ki']}}  "
+        f"{'Tau':>{cw['tau']}}  "
+        f"{'Err→GW(ms)':>{cw['err']}}  "
+        f"{'Err Δ leaf−relay(ms)':>{cw['err']}}  "
+    )
+
+
+def _two_node_row(i, r, aggregate=False):
+    cw = _TN_COL_W
+    if aggregate:
+        gw_iqr = r.get("err_to_gw_median_iqr", 0.0)
+        bt_iqr = r.get("err_between_median_iqr", 0.0)
+        gw_str = f"${r['err_to_gw_median']:.3f} ±{gw_iqr:.3f}i q r$,"
+        bt_str = f"${r['err_between_median']:.3f} ±{bt_iqr:.3f}i q r$,"
+    else:
+        gw_str = (
+            f"${r['err_to_gw_median']:.3f} ±{r['err_to_gw_std']:.3f}$,"
+        )
+        bt_str = (
+            f"${r['err_between_median']:.3f} ±{r['err_between_std']:.3f}$,"
+        )
+    return (
+        f"{i:>{cw['run']}}  "
+        f"{str(r['sf']):>{cw['sf']}}  "
+        f"{str(r['bw']):>{cw['bw']}}  "
+        f"{str(r['kp']):>{cw['kp']}}  "
+        f"{str(r['ki']):>{cw['ki']}}  "
+        f"{str(r.get('tau', '—')):>{cw['tau']}}  "
+        f"{gw_str:>{cw['err']}}  "
+        f"{bt_str:>{cw['err']}}  "
+    )
+
+
+def print_two_node_results(results, by=("sf", "bw"), aggregate=True):
+    """
+    Group 2-node results by `by` and print each configuration as a titled block.
+
+    Columns:
+      Err→GW(ms)            — solely-follower's err_ms (median ± spread)
+      Err Δ leaf−relay(ms)  — row-aligned (follower − relayer) err_ms
+
+    aggregate=True  — one summary row per group: median ±IQR across runs of
+                      each run's median; std column shows the median of
+                      per-run stds.
+    aggregate=False — one row per run inside each group: per-run median ± std.
+    """
+    grouped = group_results(results, by=by)
+    if not grouped:
+        print("No results to print.")
+        return
+    for key, group in grouped.items():
+        label = "  ".join(f"{k.upper()}={v}" for k, v in zip(by, key))
+        header = _two_node_header()
+        sep = "─" * len(header)
+        title = f"{label}  (n={len(group)})" if aggregate else label
+        print(f"\n{'── ' + title + ' ':─<{len(header)}}")
+        print(header)
+        print(sep)
+        if aggregate:
+            print(_two_node_row(1, _aggregate_two_node_group(group), aggregate=True))
+        else:
+            for i, r in enumerate(group, start=1):
+                print(_two_node_row(i, r, aggregate=False))
 
 
 def plot_grouped_results(

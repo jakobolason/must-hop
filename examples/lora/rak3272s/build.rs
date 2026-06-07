@@ -28,7 +28,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=SOURCEID");
     println!("cargo:rerun-if-env-changed=KP");
     println!("cargo:rerun-if-env-changed=KI");
-    println!("cargo:rerun-if-env-changed=ALT_MDLTN");
+    println!("cargo:rerun-if-env-changed=ALT_SF");
     println!("cargo:rerun-if-env-changed=SF");
     println!("cargo:rerun-if-env-changed=BW");
     println!("cargo:rerun-if-env-changed=TAU");
@@ -41,19 +41,21 @@ fn main() {
     let kp_code: String = parse_env_var::<i64>("KP");
     let ki_code: String = parse_env_var::<i64>("KI");
     let tau_code: String = parse_env_var::<u8>("TAU");
-    let alt_mdltn: String = parse_env_var::<bool>("ALT_MDLTN");
+    // let alt_mdltn: String = parse_env_var::<bool>("ALT_MDLTN");
 
-    let (sf_code, sf_num) = match env::var("SF") {
+    let sf_parsing = |key: &str| match env::var(key) {
         Ok(val) => {
-            let num: u8 = val.parse().expect("SF must be a valid integer (5-12)");
+            let num: u8 = val.parse().expect("{key} must be a valid integer (5-12)");
             if !(5..=12).contains(&num) {
-                panic!("SF must be between 5 and 12");
+                panic!("{key} must be between 5 and 12");
             }
             let variant = format!("Some(SpreadingFactor::_{num})");
             (variant.to_string(), num)
         }
         Err(_) => ("None".to_string(), 7u8),
     };
+    let (sf_code, sf_num) = sf_parsing("SF");
+    let (alt_sf_code, alt_sf_num) = sf_parsing("ALT_SF");
 
     let (bw_code, bw_khz) = match env::var("BW") {
         Ok(val) => {
@@ -79,12 +81,20 @@ fn main() {
             const KP: Option<i64> = {};\n\
             const KI: Option<i64> = {};\n\
             const TAU: Option<u8> = {};\n\
-            const ALT_MDLTN: Option<bool> = {};\n\
+            const ALT_SF: Option<SpreadingFactor> = {};\n\
             const SF: Option<SpreadingFactor> = {};\n\
             const SF_NUM: u8 = {};\n\
             const BW: Option<Bandwidth> = {};\n\
             const BW_KHZ: u32 = {};\n",
-            source_id_code, kp_code, ki_code, tau_code, alt_mdltn, sf_code, sf_num, bw_code, bw_khz
+            source_id_code,
+            kp_code,
+            ki_code,
+            tau_code,
+            alt_sf_code,
+            sf_code,
+            sf_num,
+            bw_code,
+            bw_khz
         )
     )
     .unwrap();

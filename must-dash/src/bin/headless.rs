@@ -3,10 +3,10 @@ use must_dash::app::NodeConfig;
 use must_dash::{
     app::AppEvent, init_logger, shutdown_processes, spawn_log_processes, spawn_pty_reader,
 };
-use strip_ansi_escapes::strip_str;
 use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
+use strip_ansi_escapes::strip_str;
 use tokio::sync::mpsc;
 
 /// A `node_id:probe_id` pair passed as a positional argument.
@@ -52,6 +52,10 @@ struct Args {
     #[arg(long, default_value = "10")]
     tau: String,
 
+    /// Alternate receive SF
+    #[arg(long, default_value = "None")]
+    alt_sf: String,
+
     /// Run duration in seconds
     #[arg(long, default_value_t = 600)]
     duration: u64,
@@ -70,8 +74,8 @@ async fn main() {
 
     let args = Args::parse();
     eprintln!(
-        "[headless] SF={} BW={} KP={} KI={} nodes={:?} tau={} duration={}s",
-        args.sf, args.bw, args.kp, args.ki, args.nodes, args.tau, args.duration,
+        "[headless] SF={} BW={} KP={} KI={} nodes={:?} tau={} alt_sf={} duration={}s",
+        args.sf, args.bw, args.kp, args.ki, args.nodes, args.tau, args.alt_sf, args.duration,
     );
 
     let mut app = must_dash::app::App::new(false, DIN_MAP);
@@ -86,6 +90,7 @@ async fn main() {
             sf: args.sf.clone(),
             bw: args.bw.clone(),
             tau: args.tau.clone(),
+            alt_sf: args.alt_sf.clone(),
         });
     }
     app.defaults.sf = args.sf;
@@ -110,11 +115,17 @@ async fn main() {
     let mut last_hw = String::new();
     let mut prev_lines: usize = 0;
 
-    let term_cols = crossterm::terminal::size().map(|(w, _)| w as usize).unwrap_or(200);
+    let term_cols = crossterm::terminal::size()
+        .map(|(w, _)| w as usize)
+        .unwrap_or(200);
     let truncate = |s: &str, prefix_len: usize| -> String {
         let max = term_cols.saturating_sub(prefix_len);
         let s = s.trim_end();
-        if s.chars().count() > max { s.chars().take(max).collect() } else { s.to_owned() }
+        if s.chars().count() > max {
+            s.chars().take(max).collect()
+        } else {
+            s.to_owned()
+        }
     };
 
     loop {

@@ -256,7 +256,7 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
         TdmaMac::new(
             Duration::from_secs(2),
             // The SlotManager can only hold 5 nodes, so this should default to that max
-            NonZeroU8::new(2).unwrap(),
+            NonZeroU8::new(5).unwrap(),
             None,
             None,
         )
@@ -699,6 +699,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
         {
             self.sync_epoch(&pkts, &rx_pkt);
+
             Some((pkts, rx_pkt))
         } else {
             // Check to see if we haven't heard from *leader* in some time
@@ -806,14 +807,11 @@ where
                 .rx(node, rx_buffer, Some(CoreDuration::from_secs(10)))
                 .await
             {
-                // Check for being heartbeat
-                // self.sync_epoch(&pkts, &rx_pkt);
-                // TODO: Wait 200ms, then transmit HB yourself
-                Timer::after(Duration::from_millis(200)).await;
-
                 if self.time_manager.hbt_pkt.is_some()
                     && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
                 {
+                    // Wait 200ms, then transmit HB yourself
+                    Timer::after(Duration::from_millis(200)).await;
                     self.tx(node, tx_queue, my_tx_slot).await?;
                 }
 
@@ -870,6 +868,14 @@ where
                 .await
             {
                 received_packets = pkts;
+            }
+            if !self.time_manager.heard_by_leader
+                && self.time_manager.hbt_pkt.is_some()
+                && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
+            {
+                // Wait 200ms, then transmit HB yourself
+                Timer::after(Duration::from_millis(200)).await;
+                self.tx(node, tx_queue, my_tx_slot).await?;
             }
         }
         #[cfg(feature = "debug")]

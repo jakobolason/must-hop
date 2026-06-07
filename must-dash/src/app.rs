@@ -1,4 +1,5 @@
 use chrono::Local;
+use clap::builder::Str;
 use dotenv::dotenv;
 use log::info;
 use std::fs;
@@ -93,6 +94,7 @@ pub struct NodeConfig {
     pub sf: String,
     pub bw: String,
     pub tau: String,
+    pub alt_sf: String,
 }
 
 /// Which field is active in the ProbeConfig form. Defined here so both
@@ -206,6 +208,7 @@ impl App {
                 sf: self.defaults.sf.clone(),
                 bw: self.defaults.bw.clone(),
                 tau: self.defaults.tau.clone(),
+                alt_sf: String::new(),
             });
         }
     }
@@ -222,7 +225,8 @@ impl App {
                 source_id: node.source_id.clone(),
                 sf: node.sf.clone(),
                 bw: node.bw.clone(),
-                tau: self.defaults.tau.clone(),
+                tau: node.tau.clone(),
+                alt_sf: node.alt_sf.clone(),
             });
         }
     }
