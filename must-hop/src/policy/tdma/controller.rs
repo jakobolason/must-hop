@@ -54,7 +54,7 @@ impl Controller {
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
         // info!("LEADER IS IN {}", hb.tau_hb);
 
-        self.leader_skip_frames = hb.tau_hb;
+        self.leader_skip_frames = hb.skipped_frames;
         // Conditional integration anti-windup
         // let tentative_v_s = self.apply_pi_controller(error);
         // let delta_vs = tentative_v_s - self.v_s;

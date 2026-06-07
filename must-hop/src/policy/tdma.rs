@@ -33,7 +33,7 @@ pub(crate) struct SyncBeacon {
     /// Bit mask for known slots, meaning only 8 nodes can be known at a time
     known_slots: u8,
     // The tau_hb duration in secs, should be converted back to a Duration on followers
-    tau_hb: u8,
+    skipped_frames: u8,
     pub(crate) gps_time_us: u64,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP (leader)
     /// follower returns it's error value to it's leader for sync control
@@ -47,7 +47,7 @@ impl SyncBeacon {
         Self {
             my_slot: 1,
             known_slots: 0,
-            tau_hb: 10,
+            skipped_frames: 1,
             gps_time_us: 0,
             feedback_vec: Vec::new(),
         }
@@ -571,7 +571,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let dummy_allocation = SyncBeacon {
             my_slot: my_tx_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
-            tau_hb: self
+            skipped_frames: self
                 .slot_manager
                 .tau_hb
                 .skip_frames(self.slot_manager.tau_hb_high_skip),
@@ -670,7 +670,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         let allocation = SyncBeacon {
             my_slot,
             known_slots: self.slot_manager.known_slots_mask.into(),
-            tau_hb: self
+            skipped_frames: self
                 .slot_manager
                 .tau_hb
                 .skip_frames(self.slot_manager.tau_hb_high_skip),

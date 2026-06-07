@@ -260,7 +260,12 @@ def print_grouped_results(results, by=("sf", "bw"), aggregate=True):
 
 
 def plot_grouped_results(
-    results, by=("sf", "bw"), title="Per-run HW delay by modulation", n_cols=2
+    results,
+    by=("sf", "bw"),
+    title="Per-run HW delay by modulation",
+    y_label: str = "error [ms]",
+    n_cols=2,
+    sharey="row",
 ):
     """
     One subplot per modulation group. Each run is plotted as a point on the
@@ -278,7 +283,7 @@ def plot_grouped_results(
     n_cols = max(1, min(n_cols, n_groups))
     n_rows = int(np.ceil(n_groups / n_cols))
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(10, 4 * n_rows), sharey="row", squeeze=False
+        n_rows, n_cols, figsize=(10, 4 * n_rows), sharey=sharey, squeeze=False
     )
 
     for i, (key, group) in enumerate(grouped.items()):
@@ -314,7 +319,7 @@ def plot_grouped_results(
         ax.set_xticks(xs)
         ax.grid(True, linestyle="--", alpha=0.4)
     for row in range(n_rows):
-        axes[row, 0].set_ylabel("HW delay mean ± std (µs)")
+        axes[row, 0].set_ylabel(y_label)
 
     for i in range(n_groups, n_rows * n_cols):
         axes[i // n_cols, i % n_cols].set_visible(False)
@@ -329,8 +334,11 @@ def plot_oscillation_traces(
     results,
     by: tuple[str, str] = ("kp", "ki"),
     value_col: str = "hardware_delay",
+    y_label: str = "error [ms]",
+    figure_title: str = "",
     skip_initial: int = 3,
     n_cols: int = 2,
+    sharey="row",
 ):
     """
     One subplot per group. Overlays the per-sample time series of `value_col`
@@ -351,7 +359,7 @@ def plot_oscillation_traces(
     n_cols = max(1, min(n_cols, n_groups))
     n_rows = int(np.ceil(n_groups / n_cols))
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(11, 4 * n_rows), sharey="row", squeeze=False
+        n_rows, n_cols, figsize=(11, 4 * n_rows), sharey=sharey, squeeze=False
     )
 
     for i, (key, group) in enumerate(grouped.items()):
@@ -396,18 +404,87 @@ def plot_oscillation_traces(
             f"RMS={rms.mean():.2f}±{rms.std():.2f}\n  "
             f"sign-changes/run={sc.mean():.1f}±{sc.std():.1f}"
         )
+
         ax.set_xlabel("Sample index in run")
         ax.grid(True, linestyle="--", alpha=0.4)
 
     for row in range(n_rows):
-        axes[row, 0].set_ylabel(value_col)
+        axes[row, 0].set_ylabel(y_label)
 
     for i in range(n_groups, n_rows * n_cols):
         axes[i // n_cols, i % n_cols].set_visible(False)
 
-    fig.suptitle(
-        f"Oscillation traces: {value_col} per run, grouped by {by}", fontsize=12
+    fig.suptitle(figure_title, fontsize=12)
+    plt.tight_layout()
+    plt.show()
+    return fig
+
+
+def plot_delta_up_down(
+    results,
+    sf_bw_list,
+    title="Mean Δ-up / Δ-down per run",
+    n_cols=2,
+):
+    """
+    For each (sf, bw) in `sf_bw_list`, plot the per-run mean of `delta_up_ms`
+    and `delta_down_ms` (from each run's main_stats CSV).
+
+    One subplot per (sf, bw); x = run #, two series per panel.
+    """
+    grouped = group_results(results, by=("sf", "bw"))
+    selected = [(k, grouped[k]) for k in sf_bw_list if k in grouped]
+    missing = [k for k in sf_bw_list if k not in grouped]
+    for k in missing:
+        print(f"  no runs for SF={k[0]} BW={k[1]}")
+
+    n_groups = len(selected)
+    if n_groups == 0:
+        print("No matching results to plot.")
+        return
+
+    n_cols = max(1, min(n_cols, n_groups))
+    n_rows = int(np.ceil(n_groups / n_cols))
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(10, 4 * n_rows), sharey="row", squeeze=False
     )
+
+    for i, ((sf, bw), group) in enumerate(selected):
+        ax = axes[i // n_cols, i % n_cols]
+        letter_prefix = f"({chr(ord('a') + i)})    "
+
+        xs, ups, downs = [], [], []
+        for j, r in enumerate(group, start=1):
+            try:
+                df = pd.read_csv(r["main_stats"])
+            except FileNotFoundError, pd.errors.EmptyDataError:
+                continue
+            if "delta_up_ms" not in df.columns or "delta_down_ms" not in df.columns:
+                continue
+            xs.append(j)
+            ups.append(float(df["delta_up_ms"].mean()))
+            downs.append(float(df["delta_down_ms"].mean()))
+
+        if not xs:
+            ax.set_title(f"{letter_prefix}SF={sf} BW={bw}  (no data)")
+            continue
+
+        ax.plot(xs, ups, "o-", color="tab:blue", label="mean Δ-up (ms)")
+        ax.plot(xs, downs, "s-", color="tab:red", label="mean Δ-down (ms)")
+        ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
+        ax.set_title(f"{letter_prefix}SF={sf} BW={bw}  (n={len(xs)})")
+        ax.set_xlabel("Run #")
+        ax.set_xticks(xs)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(fontsize=8)
+
+    for row in range(n_rows):
+        axes[row, 0].set_ylabel("mean Δ per run (ms)")
+
+    for i in range(n_groups, n_rows * n_cols):
+        axes[i // n_cols, i % n_cols].set_visible(False)
+
+    fig.suptitle(title, fontsize=12)
     plt.tight_layout()
     plt.show()
     return fig
