@@ -252,7 +252,7 @@ pub async fn lora_task(
     let kp = KP.unwrap_or(DEFAULT_KP);
     let tau = TAU.unwrap_or(DEFAULT_TAU);
     let mac = TdmaMac::default()
-        .set_controller(/*-10_000*/ 0, kp, ki)
+        .set_controller(-10_000 0, kp, ki)
         .set_debug_pin(debug_pin)
         .set_node_id(source_id)
         .set_max_toa(MAX_TOA_MS)
