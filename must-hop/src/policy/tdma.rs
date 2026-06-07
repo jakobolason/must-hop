@@ -256,7 +256,7 @@ impl<P, const SIZE: usize> Default for TdmaMac<Builder, P, SIZE> {
         TdmaMac::new(
             Duration::from_secs(2),
             // The SlotManager can only hold 5 nodes, so this should default to that max
-            NonZeroU8::new(2).unwrap(),
+            NonZeroU8::new(3).unwrap(),
             None,
             None,
         )
