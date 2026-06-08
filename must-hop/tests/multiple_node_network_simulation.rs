@@ -157,9 +157,18 @@ async fn test_mesh_topology() {
         RandomAccessMac::new(NodePolicy {}),
     );
 
+    let mut router_d = MeshRouter::new(
+        MockRadio {
+            node_id: node_d,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        RandomAccessMac::new(NodePolicy {}),
+    );
+
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
 
-    router_a.queue_payload(msg1, node_c).unwrap();
+    router_a.queue_payload(msg1, node_d).unwrap();
     assert_eq!(router_a.get_pending_count(), 1);
     let res_a = router_a.tick(&mut ()).await.unwrap();
     assert_eq!(res_a.len(), 0);
@@ -180,11 +189,17 @@ async fn test_mesh_topology() {
     // And node A should've removed the package now
     assert_eq!(router_a.get_pending_count(), 0);
 
-    // Router C should've also received it, and since this is for it, it receives the data
+    // Router C should've also received it
     let res3 = router_c.tick(&mut ()).await.unwrap();
-    assert_eq!(res3.len(), 1);
+    assert_eq!(res3.len(), 0);
     // And does not send it on
-    assert_eq!(router_c.get_pending_count(), 0);
+    assert_eq!(router_c.get_pending_count(), 1);
+
+    // Router D should've also received it, and since this is for it, it receives the data
+    let res3 = router_d.tick(&mut ()).await.unwrap();
+    assert_eq!(res3.len(), 0);
+    // And does not send it on
+    assert_eq!(router_d.get_pending_count(), 0);
 }
 
 #[tokio::test]
