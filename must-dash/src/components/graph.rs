@@ -1,7 +1,7 @@
 use crate::app::App;
 use ratatui::{
     Frame,
-    layout::{Margin, Rect},
+    layout::{Constraint, Margin, Rect},
     style::{Color, Style},
     symbols,
     text::Span,
@@ -15,6 +15,11 @@ const MAX_VISIBLE_HBS: usize = 20;
 
 /// One distinct color per node for the error series overlay.
 const NODE_ERR_COLORS: [Color; 4] = [Color::Cyan, Color::Yellow, Color::Magenta, Color::LightBlue];
+
+const NODE_HW_COLORS: [Color; 2] = [Color::Green, Color::LightCyan];
+const NODE_HW_LIVE_COLORS: [Color; 2] = [Color::LightGreen, Color::Cyan];
+const NODE_UP_COLORS: [Color; 2] = [Color::LightMagenta, Color::Magenta];
+const NODE_DOWN_COLORS: [Color; 2] = [Color::LightRed, Color::Red];
 
 pub fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect, graph_scroll: usize) {
     let Some(primary) = app.node_stats.first() else {
@@ -85,39 +90,48 @@ pub fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect, graph_scroll: usiz
         );
     }
 
-    // Primary node delta up/down and HW scope (shared channel — same for all nodes).
-    datasets.extend([
-        Dataset::default()
-            .name("Δ Up")
-            .marker(symbols::Marker::Dot)
-            .graph_type(GraphType::Scatter)
-            .style(Style::default().fg(Color::LightMagenta))
-            .data(&primary_data.up),
-        Dataset::default()
-            .name("Δ Down")
-            .marker(symbols::Marker::Dot)
-            .graph_type(GraphType::Scatter)
-            .style(Style::default().fg(Color::LightRed))
-            .data(&primary_data.down),
-        Dataset::default()
-            .name("HW Scope")
-            .marker(symbols::Marker::Braille)
-            .graph_type(GraphType::Scatter)
-            .style(Style::default().fg(Color::Green))
-            .data(&primary_data.hw),
-        Dataset::default()
-            .name("HW Live")
-            .marker(symbols::Marker::Braille)
-            .graph_type(GraphType::Scatter)
-            .style(Style::default().fg(Color::LightGreen))
-            .data(&primary_data.hw_live),
+    // Per-node delta up/down and HW scope/live.
+    for (i, (ns, cd)) in app.node_stats.iter().zip(all_chart_data.iter()).enumerate() {
+        let hw_color = NODE_HW_COLORS.get(i).copied().unwrap_or(Color::Green);
+        let hw_live_color = NODE_HW_LIVE_COLORS.get(i).copied().unwrap_or(Color::LightGreen);
+        let up_color = NODE_UP_COLORS.get(i).copied().unwrap_or(Color::LightMagenta);
+        let down_color = NODE_DOWN_COLORS.get(i).copied().unwrap_or(Color::LightRed);
+        datasets.extend([
+            Dataset::default()
+                .name(format!("Δ Up {}", ns.node_label))
+                .marker(symbols::Marker::Dot)
+                .graph_type(GraphType::Scatter)
+                .style(Style::default().fg(up_color))
+                .data(&cd.up),
+            Dataset::default()
+                .name(format!("Δ Down {}", ns.node_label))
+                .marker(symbols::Marker::Dot)
+                .graph_type(GraphType::Scatter)
+                .style(Style::default().fg(down_color))
+                .data(&cd.down),
+            Dataset::default()
+                .name(format!("HW Scope {}", ns.node_label))
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Scatter)
+                .style(Style::default().fg(hw_color))
+                .data(&cd.hw),
+            Dataset::default()
+                .name(format!("HW Live {}", ns.node_label))
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Scatter)
+                .style(Style::default().fg(hw_live_color))
+                .data(&cd.hw_live),
+        ]);
+    }
+
+    datasets.push(
         Dataset::default()
             .name("0 ms ref")
             .marker(symbols::Marker::Braille)
             .graph_type(GraphType::Line)
             .style(Style::default().fg(Color::Gray))
             .data(&zero_ref_line),
-    ]);
+    );
 
     let chart = Chart::new(datasets)
         .block(
@@ -125,6 +139,7 @@ pub fn draw_dash_charts(f: &mut Frame, app: &App, area: Rect, graph_scroll: usiz
                 .title(" Timing & Deltas (ms) ")
                 .borders(Borders::ALL),
         )
+        .hidden_legend_constraints((Constraint::Percentage(100), Constraint::Percentage(100)))
         .x_axis(Axis::default().bounds(primary_data.x_bounds))
         .y_axis(Axis::default().bounds(y_bounds).labels(vec![
             Span::raw(format!("{:.3}", y_bounds[0])),
