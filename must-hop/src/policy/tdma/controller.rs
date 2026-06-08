@@ -113,7 +113,7 @@ impl Controller {
         let nw_delay = if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id)
         {
             // delta is our T3 - T2
-            let delta_down = hb.gps_time_us as i64 - my_stamp as i64;
+            let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
             // FIXME:
             // For some reason, this can be 5secs, so filter out those readings
             let delta_down = if delta_down > 1_000_000 {
