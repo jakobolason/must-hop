@@ -135,9 +135,9 @@ deploy-gw-pi: build-gw-pi
 run-gw: deploy-gw-pi
     @echo "Running GW on pi"
     ssh -tt {{ PI_USER }}@{{ PI_HOST }} 'chmod +x {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw \
-      && sudo RUST_LOG=trace,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
+      && sudo RUST_LOG=info,must_hop=trace,loragw=info RUST_LOG_STYLE=always \
          SF={{ GW_SF }} BW={{ GW_BW }} TAU={{ GW_TAU }} \
-       chrt -f 90 {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
+       chrt -f 99 {{ PI_TARGET_DIR }}/target/aarch64-unknown-linux-gnu/release/must-gw'
 
 [group('Dashboard')]
 dash:

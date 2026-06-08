@@ -595,18 +595,12 @@ impl App {
                         let hw_samples: Vec<f32> = self.node_stats[idx].hardware_delay
                             [self.node_stats[idx].last_hw_idx..]
                             .to_vec();
-                        let hw_mean = {
-                            let valid: Vec<f32> = hw_samples
-                                .iter()
-                                .copied()
-                                .filter(|v| v.is_finite())
-                                .collect();
-                            if valid.is_empty() {
-                                f32::NAN
-                            } else {
-                                valid.iter().sum::<f32>() / valid.len() as f32
-                            }
-                        };
+                        let hw_mean = hw_samples
+                            .iter()
+                            .copied()
+                            .filter(|v| v.is_finite())
+                            .next_back()
+                            .unwrap_or(f32::NAN);
                         let new_hw_idx = self.node_stats[idx].hardware_delay.len();
                         self.node_stats[idx].last_hw_idx = new_hw_idx;
                         self.node_stats[idx]

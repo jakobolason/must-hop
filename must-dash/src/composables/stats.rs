@@ -12,7 +12,7 @@ pub struct MainCsvRow {
     pub new_speed: f32,
     pub delta_up_ms: Option<f32>,
     pub delta_down_ms: Option<f32>,
-    pub mean_hw_delay_ms: f32,
+    pub last_hw_delay_ms: f32,
     pub node_time_us: Option<u64>,
     pub node_bytes: Option<usize>,
     pub tau_hb_high: bool,
@@ -44,7 +44,7 @@ pub struct PacketEntry {
     /// None when `[DELTAS]` was absent or REJECTED this cycle
     pub delta_up_ms: Option<f32>,
     pub delta_down_ms: Option<f32>,
-    pub mean_hw_delay_ms: f32,
+    pub last_hw_delay_ms: f32,
     /// Raw hardware-delay samples collected since the previous SYNC
     pub hw_samples: Vec<f32>,
     /// tau_hb mode at transmit time: true = High, false = Low
@@ -122,7 +122,7 @@ impl DashStats {
 
     /// Returns the most recent `max_lines` packets formatted for the history table.
     ///
-    /// Columns: Pkt | HW Avg | Err | Delay | Δ Up | Δ Down | Speed | τ_hb
+    /// Columns: Pkt | HW Last | Err | Delay | Δ Up | Δ Down | Speed | τ_hb
     pub fn get_history_lines(&self, max_lines: usize, scroll: usize) -> Vec<Vec<String>> {
         let len = self.packets.len();
         let end = len.saturating_sub(scroll);
@@ -138,7 +138,7 @@ impl DashStats {
                 let i = start + offset;
                 vec![
                     format!("{:02}", i),
-                    fmt_ms(p.mean_hw_delay_ms),
+                    fmt_ms(p.last_hw_delay_ms),
                     fmt_ms(p.err_ms),
                     fmt_ms(p.delay_ms),
                     fmt_opt_ms(p.delta_up_ms),
@@ -293,7 +293,7 @@ impl DashStats {
                 new_speed: p.new_speed,
                 delta_up_ms: p.delta_up_ms,
                 delta_down_ms: p.delta_down_ms,
-                mean_hw_delay_ms: p.mean_hw_delay_ms,
+                last_hw_delay_ms: p.last_hw_delay_ms,
                 node_time_us: nd.map(|d| d.time_us),
                 node_bytes: nd.map(|d| d.bytes),
                 tau_hb_high: p.tau_hb_high,
@@ -335,7 +335,7 @@ impl DashStats {
             new_speed,
             delta_up_ms: pending.delta_up_ms,
             delta_down_ms: pending.delta_down_ms,
-            mean_hw_delay_ms: hw_mean,
+            last_hw_delay_ms: hw_mean,
             hw_samples,
             tau_hb_high: pending.tau_hb_high,
             pkt_loss,

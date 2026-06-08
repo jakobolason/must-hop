@@ -125,7 +125,7 @@ fn draw_history_panels(
     };
 
     let header = Row::new(vec![
-        "Pkt", "HW Avg", "Err", "Delay", "Δ Up", "Δ Down", "Speed", "τ_hb",
+        "Pkt", "HW Last", "Err", "Delay", "Δ Up", "Δ Down", "Speed", "τ_hb",
     ])
     .style(
         Style::default()
@@ -136,7 +136,7 @@ fn draw_history_panels(
 
     let widths = [
         Constraint::Length(4),      // Pkt
-        Constraint::Percentage(13), // HW Avg
+        Constraint::Percentage(13), // HW Last
         Constraint::Percentage(13), // Err
         Constraint::Percentage(13), // Delay
         Constraint::Percentage(14), // Δ Up
