@@ -46,7 +46,7 @@ impl Controller {
             Some(stamps) => stamps,
             None => {
                 info!("[SYNC] Initial epoch set");
-                return (hb.gps_time_us, rx_pkt.rx_done_instant);
+                return (hb.leader_time_us, rx_pkt.rx_done_instant);
             }
         };
         // Now calculate the error the controller can use
@@ -113,7 +113,7 @@ impl Controller {
         let nw_delay = if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id)
         {
             // delta is our T3 - T2
-            let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
+            let delta_down = my_stamp as i64 - hb.leader_time_us as i64;
             // FIXME:
             // For some reason, this can be 5secs, so filter out those readings
             let delta_down = if delta_down > 1_000_000 {
@@ -145,7 +145,7 @@ impl Controller {
         // let avg_delay = (self.prev_delay + nw_delay) / 2;
 
         // Use the network delay to make up for transmission time, etc.
-        let current_true_time = hb.gps_time_us as i64 + nw_delay;
+        let current_true_time = hb.leader_time_us as i64 + nw_delay;
 
         // Now update drift
         let gw_diff = current_true_time - old_gps as i64;
@@ -167,7 +167,7 @@ impl Controller {
         // let time_sync = (current_true_time as u64, rx_pkt.rx_done_instant);
 
         // let delta_err = err - self.prev_err;
-        let delay = hb.gps_time_us as i64 - my_stamp as i64;
+        let delay = hb.leader_time_us as i64 - my_stamp as i64;
         (time_sync, err, delay)
     }
 
@@ -194,7 +194,7 @@ mod controller_tests {
 
     fn make_alloc(time: u64) -> SyncBeacon {
         let mut alloc = SyncBeacon::new();
-        alloc.gps_time_us = time;
+        alloc.leader_time_us = time;
         alloc
     }
 

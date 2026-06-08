@@ -34,7 +34,7 @@ pub(crate) struct SyncBeacon {
     known_slots: u8,
     // The tau_hb duration in secs, should be converted back to a Duration on followers
     skipped_frames: u8,
-    pub(crate) gps_time_us: u64,
+    pub(crate) leader_time_us: u64,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP (leader)
     /// follower returns it's error value to it's leader for sync control
     pub(crate) feedback_vec: VecFB,
@@ -48,7 +48,7 @@ impl SyncBeacon {
             my_slot: 1,
             known_slots: 0,
             skipped_frames: 1,
-            gps_time_us: 0,
+            leader_time_us: 0,
             feedback_vec: Vec::new(),
         }
     }
@@ -504,7 +504,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             let t3 = if let Some(stamps) = self.time_manager.time_sync {
                 // Cast to i64 to not panic at my_time < alloc
                 let time_at_rx = self.gps_time_at(stamps, rx_pkt.rx_done_instant) as i64;
-                (time_at_rx - alloc.gps_time_us as i64) as i32
+                (time_at_rx - alloc.leader_time_us as i64) as i32
             } else {
                 0
             };
@@ -575,7 +575,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 .slot_manager
                 .tau_hb
                 .skip_frames(self.slot_manager.tau_hb_high_skip),
-            gps_time_us: 1, // Value doesn't matter for size, only the type (u64)
+            leader_time_us: 1, // Value doesn't matter for size, only the type (u64)
             feedback_vec,
         };
         let alloc_size = serialize_with_flavor(&dummy_allocation, Size::default()).unwrap();
@@ -674,7 +674,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 .slot_manager
                 .tau_hb
                 .skip_frames(self.slot_manager.tau_hb_high_skip),
-            gps_time_us: adjusted_timestamp,
+            leader_time_us: adjusted_timestamp,
             feedback_vec,
         };
         let mut buf = [0u8; SIZE];
