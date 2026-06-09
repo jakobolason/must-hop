@@ -218,7 +218,8 @@ where
             Some(timeout) => {
                 match embassy_time::with_timeout(
                     embassy_time::Duration::from_micros(timeout.as_micros() as u64),
-                    self.lora.rx(&self.rx_pkt_params, rec_buf, get_done_instant),
+                    self.lora
+                        .rx(&self.rx_pkt_params, rec_buf /*, *get_done_instant*/),
                 )
                 .await
                 {
@@ -228,7 +229,7 @@ where
             }
             None => Ok(self
                 .lora
-                .rx(&self.rx_pkt_params, rec_buf, get_done_instant)
+                .rx(&self.rx_pkt_params, rec_buf /*, get_done_instant*/)
                 .await),
         }
     }
