@@ -8,6 +8,7 @@ use must_hop::{
 };
 use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, time::Duration};
+use tokio::time::sleep;
 
 const SIZE: usize = 40;
 const LEN: usize = 5;
@@ -20,6 +21,8 @@ pub struct SimulationEnv<const SIZE: usize> {
     /// Each node's personal receiving buffer (their "inbox")
     pub inboxes: HashMap<u8, std::vec::Vec<MHPacket<SIZE>>>,
 }
+
+type Senv = Arc<Mutex<SimulationEnv<SIZE>>>;
 
 impl<const SIZE: usize> Default for SimulationEnv<SIZE> {
     fn default() -> Self {
@@ -618,5 +621,147 @@ async fn complex_gw_communication() {
     assert_eq!(router_b.get_packet_loss_ratio(), 0.0);
     assert_eq!(router_c.get_packet_loss_ratio(), 0.0);
     assert_eq!(router_d.get_packet_loss_ratio(), 0.0);
+    assert_eq!(gw_router.get_packet_loss_ratio(), 0.0);
+}
+
+#[tokio::test]
+async fn packet_loss() {
+    let env = Arc::new(Mutex::new(SimulationEnv::new()));
+    let node_a = 2;
+    let node_b = 3;
+    let node_c = 4;
+    let node_d = 5;
+    let gw = 1;
+
+    {
+        let mut e = env.lock().unwrap();
+        //
+        // (A) <-> (B) <-> (C) <-> (D) <-> (GW)
+        //
+        e.add_bidi_link(node_a, node_b);
+        e.add_bidi_link(node_b, node_c);
+        e.add_bidi_link(node_c, node_d);
+        e.add_bidi_link(node_d, gw);
+    }
+
+    let mut router_a = MeshRouter::new(
+        MockRadio {
+            node_id: node_a,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_a, 1, 3),
+        RandomAccessMac::new(NodePolicy {}),
+    );
+
+    let mut router_b = MeshRouter::new(
+        MockRadio {
+            node_id: node_b,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_b, 1, 3),
+        RandomAccessMac::new(NodePolicy {}),
+    );
+
+    let mut router_c = MeshRouter::new(
+        MockRadio {
+            node_id: node_c,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_c, 1, 3),
+        RandomAccessMac::new(NodePolicy {}),
+    );
+
+    let mut router_d = MeshRouter::new(
+        MockRadio {
+            node_id: node_d,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(node_d, 1, 3),
+        RandomAccessMac::new(NodePolicy {}),
+    );
+
+    let mut gw_router = MeshRouter::new(
+        MockRadio {
+            node_id: gw,
+            env: env.clone(),
+        },
+        NetworkManager::<SIZE, LEN>::new(gw, 1, 3),
+        RandomAccessMac::new(GatewayPolicy::new(10)),
+    );
+    // First GW sends out Bootup
+    gw_router.tick(&mut ()).await.unwrap();
+    // Two ticks, one for receiving, one for sending
+    router_d.tick(&mut ()).await.unwrap();
+    router_d.tick(&mut ()).await.unwrap();
+
+    router_c.tick(&mut ()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
+
+    router_b.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
+
+    router_a.tick(&mut ()).await.unwrap();
+
+    let tx_failure = |env: Senv, node_id: &u8| {
+        let mut e = env.lock().unwrap();
+        if let Some(inbox) = e.inboxes.get_mut(node_id) {
+            inbox.clear();
+        }
+    };
+
+    let msg1 = Vec::from_slice(&[0x01]).unwrap();
+
+    router_a.queue_payload(msg1, gw).unwrap();
+    assert_eq!(router_a.get_pending_count(), 1);
+    let resa = router_a.tick(&mut ()).await.unwrap();
+    assert_eq!(resa.len(), 0);
+    tx_failure(env.clone(), &node_b);
+    sleep(Duration::from_millis(2)).await;
+    let _ = router_a.tick(&mut ()).await.unwrap();
+    // Now A can see a retransmission is necessary, which bumps the ratio
+    assert_eq!(router_a.get_packet_loss_ratio(), 1.0);
+
+    // both nodes B and C are in range of A, so they both receive the packet
+    let res2 = router_b.tick(&mut ()).await.unwrap();
+    assert_eq!(res2.len(), 0);
+    // And since it is not for node B, then it sends it on
+    assert_eq!(router_b.get_pending_count(), 1);
+    router_b.tick(&mut ()).await.unwrap();
+    router_a.tick(&mut ()).await.unwrap();
+    assert_eq!(router_a.get_packet_loss_ratio(), 0.5);
+    tx_failure(env.clone(), &node_c);
+    sleep(Duration::from_millis(2)).await;
+    router_b.tick(&mut ()).await.unwrap();
+
+    let res3 = router_c.tick(&mut ()).await.unwrap();
+    assert_eq!(res3.len(), 0);
+    assert_eq!(router_c.get_pending_count(), 1);
+    router_c.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
+
+    tx_failure(env.clone(), &node_d);
+    sleep(Duration::from_millis(2)).await;
+    router_c.tick(&mut ()).await.unwrap();
+
+    let d = router_d.tick(&mut ()).await.unwrap();
+    assert_eq!(d.len(), 0);
+    assert_eq!(router_d.get_pending_count(), 1);
+    router_d.tick(&mut ()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
+
+    tx_failure(env.clone(), &gw);
+    sleep(Duration::from_millis(2)).await;
+    router_d.tick(&mut ()).await.unwrap();
+
+    let res4 = gw_router.tick(&mut ()).await.unwrap();
+    assert_eq!(res4.len(), 1);
+    assert_eq!(gw_router.get_pending_count(), 0);
+    gw_router.tick(&mut ()).await.unwrap();
+    router_d.tick(&mut ()).await.unwrap();
+
+    assert_eq!(router_a.get_packet_loss_ratio(), 0.5);
+    assert_eq!(router_b.get_packet_loss_ratio(), 0.5);
+    assert_eq!(router_c.get_packet_loss_ratio(), 0.5);
+    assert_eq!(router_d.get_packet_loss_ratio(), 0.5);
     assert_eq!(gw_router.get_packet_loss_ratio(), 0.0);
 }

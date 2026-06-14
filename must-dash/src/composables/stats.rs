@@ -67,6 +67,7 @@ pub struct SliceDiff {
     pub bytes: usize,
 }
 
+#[derive(Default)]
 pub struct DashStats {
     /// One entry per completed SYNC cycle
     pub packets: Vec<PacketEntry>,
@@ -82,25 +83,13 @@ pub struct DashStats {
     pending: PendingPacket,
     last_node_slice_us: u64,
     last_node_slice_size: usize,
-}
-
-impl Default for DashStats {
-    fn default() -> Self {
-        Self::new()
-    }
+    last_pkt_loss: f32,
 }
 
 impl DashStats {
     pub fn new() -> Self {
         Self {
-            packets: Vec::new(),
-            node_diff: Vec::new(),
-            pkt_received: 0,
-            pkt_skipped: 0,
-            pkt_last_id: None,
-            pending: PendingPacket::default(),
-            last_node_slice_us: 0,
-            last_node_slice_size: 0,
+            ..Default::default()
         }
     }
 
@@ -309,6 +298,10 @@ impl DashStats {
 
     pub fn on_state_sync(&mut self, mode: &str) {
         self.pending.tau_hb_high = mode == "High";
+    }
+
+    pub fn on_packet_loss(&mut self, pkt_loss: f32) {
+        self.last_pkt_loss = pkt_loss
     }
 
     /// `hw_mean` and `hw_samples` are provided by the caller from the global HW buffer,

@@ -96,7 +96,7 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
     gw_hops: u8,
     /// Configurations for the manager
     source_id: u8,
-    timeout: u8,
+    timeout_ms: u32,
     pkts_sent: u32,
     pkts_acked: u32,
     pkts_lost: u32,
@@ -105,24 +105,25 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
 }
 
 impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
-    pub fn new(source_id: u8, timeout: u8, max_retries: u8) -> Self {
+    pub fn new(source_id: u8, timeout_ms: u32, max_retries: u8) -> Self {
         Self {
             pending_acks: Vec::new(),
             recent_seen: RecentSeen::default(),
             // Default to max, only have a reasonable count if GW present
             gw_hops: 255,
             source_id,
-            timeout,
+            timeout_ms,
             _max_retries: max_retries,
             ..Default::default()
         }
     }
 
     pub fn packet_loss_ratio(&self) -> f32 {
-        if self.pkts_sent == 0 {
+        let total = self.pkts_sent + self.pkts_retx + self.pkts_lost;
+        if total == 0 {
             0_f32
         } else {
-            (self.pkts_sent as f32 - self.pkts_acked as f32) / (self.pkts_sent) as f32
+            (total as f32 - self.pkts_acked as f32) / (total) as f32
         }
     }
 
@@ -166,19 +167,16 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         self.pkts_lost += (prev_len - self.pending_acks.len()) as u32;
 
         // Look into packages with expired timeouts,
-        // let pendings_len = self.pending_acks.len() as u8;
-        // trace!("pendings len: {}", pendings_len);
         let to_send: Vec<MHPacket<SIZE>, LEN> = self
             .pending_acks
             .iter_mut()
             .filter(|p| p.timeout < curr_time)
             .map(|p| {
                 p.retries += 1;
-                p.timeout = curr_time + Duration::from_secs(self.timeout as u64);
+                p.timeout = curr_time + Duration::from_millis(self.timeout_ms as u64);
                 p.packet.clone()
             })
             .collect();
-
         self.pkts_retx += to_send.len() as u32;
 
         to_send
@@ -186,8 +184,8 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
 
     /// Adds the packet to the internal list
     fn add_packet(&mut self, packet: MHPacket<SIZE>) -> Result<(), NetworkManagerError> {
-        let curr_time = Instant::now(); // + Instant::from_secs(self.timeout as u64);
-        let pkt_timout = curr_time + Duration::from_secs(self.timeout as u64);
+        let curr_time = Instant::now();
+        let pkt_timout = curr_time + Duration::from_millis(self.timeout_ms as u64);
         // First add this package to our vec
         let pend_pkt = PendingPacket {
             packet,

@@ -109,6 +109,7 @@ where
         };
         let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;
         self.mac_policy.set_gw_hops(self.manager.get_gw_hops());
+        trace!("[PKT_LOSS]|{}|", self.manager.packet_loss_ratio());
 
         for pkt in to_forward {
             // If buffer is full, break adding packets to it.

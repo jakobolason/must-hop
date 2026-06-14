@@ -237,7 +237,7 @@ pub async fn lora_task(
         cr,
         lora_hz: LORA_FREQUENCY_IN_HZ,
     });
-    let timeout = 3;
+    let timeout: u32 = 3_000;
     let max_retries = 3;
     let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp, mp, alt_mdltn) {
         Ok(node) => node,

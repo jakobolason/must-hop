@@ -633,6 +633,11 @@ impl App {
                 {
                     log::info!("Got post size: {size}");
                     self.node_stats[idx].stats.on_node_slice_post(ts, size);
+                } else if tag.contains("[PKT_LOSS]")
+                    && parts.len() == 2
+                    && let Ok(pct) = extract::<f32>(parts[1])
+                {
+                    self.node_stats[idx].stats.on_packet_loss(pct);
                 }
             }
             LogRole::Gateway => {
