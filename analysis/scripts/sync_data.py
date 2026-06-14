@@ -78,7 +78,17 @@ def collect_csv_paths() -> list[Path]:
 # ── Sync ──────────────────────────────────────────────────────────────────────
 
 
-def sync(remote_base: str, host: str, dry_run: bool) -> None:
+def sync(remote_base: str, host: str, run_path: str | None, dry_run: bool) -> None:
+    if run_path:
+        print("in here!")
+        res = subprocess.run(
+            ["scp", f"{host}:{run_path}", "../data/experiments/"],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode != 0:
+            sys.exit(f"[error] Could not resolve remote home dir: {res.stderr.strip()}")
+
     csv_paths = collect_csv_paths()
     print(f"[info] {len(csv_paths)} CSV path(s) referenced across all experiment runs")
 
@@ -96,7 +106,9 @@ def sync(remote_base: str, host: str, dry_run: bool) -> None:
     rel_paths = [str(p.relative_to(REPO_ROOT)) for p in missing]
 
     if dry_run:
-        print(f"[dry-run] Would rsync {len(rel_paths)} file(s) from {host}:{remote_base}/")
+        print(
+            f"[dry-run] Would rsync {len(rel_paths)} file(s) from {host}:{remote_base}/"
+        )
         for p in rel_paths:
             print(f"  {p}")
         return
@@ -108,7 +120,9 @@ def sync(remote_base: str, host: str, dry_run: bool) -> None:
     # used, so resolve it explicitly with one fast SSH call first.
     abs_remote_base = remote_base
     if remote_base.startswith("~"):
-        res = subprocess.run(["ssh", host, "echo $HOME"], capture_output=True, text=True)
+        res = subprocess.run(
+            ["ssh", host, "echo $HOME"], capture_output=True, text=True
+        )
         if res.returncode != 0:
             sys.exit(f"[error] Could not resolve remote home dir: {res.stderr.strip()}")
         abs_remote_base = remote_base.replace("~", res.stdout.strip(), 1)
@@ -125,8 +139,10 @@ def sync(remote_base: str, host: str, dry_run: bool) -> None:
         print(f"[fetch] rsync {len(rel_paths)} file(s) via single SSH connection...")
         result = subprocess.run(
             [
-                "rsync", "-avz",
-                "--files-from", str(tmpfile),
+                "rsync",
+                "-avz",
+                "--files-from",
+                str(tmpfile),
                 f"{host}:{abs_remote_base}/",
                 str(REPO_ROOT) + "/",
             ],
@@ -162,22 +178,29 @@ def main() -> None:
         default="jakobolason.dk",
         help="Override HOST_URL from .env",
     )
-    _ = parser.add_argument(
-        "--run",
-        help="A possible run-*.json file to scp first"
-    )
+    _ = parser.add_argument("--run", help="A possible run-*.json file to scp first")
 
     args = parser.parse_args()
 
     env = load_env(REPO_ROOT)
-    host = args.host or env.get("HOST_URL") or sys.exit("[error] HOST_URL not set in .env")
+    host = (
+        args.host or env.get("HOST_URL") or sys.exit("[error] HOST_URL not set in .env")
+    )
 
     print(f"[info] Remote: {host}:{args.remote_base}")
     print(f"[info] Local repo root: {REPO_ROOT}")
 
+    if args.run:
+        run_prefix = "/analysis/data/experiments/"
+        run_path = args.remote_base + run_prefix + args.run
+        print(f"[info] run json file given: {run_path}")
+    else:
+        run_path = None
+
     sync(
         remote_base=args.remote_base,
         host=host,
+        run_path=run_path,
         dry_run=args.dry_run,
     )
 

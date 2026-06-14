@@ -111,46 +111,45 @@ impl Controller {
         let my_stamp = predicted_elapsed + old_gps;
 
         // Check if a t3 delta is availale for us
-        // let nw_delay = if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id)
-        // {
-        //     // delta is our T3 - T2
-        //     let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
-        //     // FIXME:
-        //     // For some reason, this can be 5secs, so filter out those readings
-        //     let delta_down = if delta_down > 1_000_000 {
-        //         0
-        //     } else {
-        //         delta_down
-        //     };
-        //     let up_ms = *delta_up as f32 / 1000.0;
-        //     let down_ms = delta_down as f32 / 1000.0;
-        //     // if delta_down.abs() > 20_000 || delta_up.abs() > 30_000 {
-        //     //     info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
-        //     //     0
-        //     // } else {
-        //     let nw_delay = (delta_down + *delta_up as i64) / 2;
-        //     info!(
-        //         "[DELTAS]|{}|{}|{}|",
-        //         up_ms,
-        //         down_ms,
-        //         nw_delay as f32 / 1000.0
-        //     );
-        //     nw_delay
-        //     // (*delta_up / 2) as i64
-        //     // }
-        // } else {
-        //     0
-        // };
+        let nw_delay = if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id)
+        {
+            // delta is our T3 - T2
+            let delta_down =
+                my_stamp as i64 - hb.gps_time_us as i64 + self.calc_drift_duration(my_diff);
+            let delta_down = if delta_down > 1_000_000 {
+                0
+            } else {
+                delta_down
+            };
+            let up_ms = *delta_up as f32 / 1000.0;
+            let down_ms = delta_down as f32 / 1000.0;
+            // if delta_down.abs() > 20_000 || delta_up.abs() > 30_000 {
+            //     info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
+            //     0
+            // } else {
+            let nw_delay = (delta_down + *delta_up as i64) / 2;
+            info!(
+                "[DELTAS]|{}|{}|{}|",
+                up_ms,
+                down_ms,
+                nw_delay as f32 / 1000.0
+            );
+            nw_delay
+            // (*delta_up / 2) as i64
+        } else {
+            0
+        };
 
         // Simple filter ofr now
         // let avg_delay = (self.prev_delay + nw_delay) / 2;
 
         // Use the network delay to make up for transmission time, etc.
-        let current_true_time = hb.gps_time_us as i64; // + nw_delay;
+        let current_true_time = hb.gps_time_us as i64 + nw_delay;
 
         // Now update drift
         let gw_diff = current_true_time - old_gps as i64;
 
+        // error ms - drift ms
         let err = (gw_diff - predicted_elapsed as i64) - self.calc_drift_duration(my_diff);
 
         // Only re-sync if the error is substantially large
