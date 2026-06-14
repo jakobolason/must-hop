@@ -2,9 +2,9 @@ use super::{MHPacket, PacketType};
 use core::cmp::{max, min};
 
 #[cfg(not(feature = "in_std"))]
-use defmt::{error, trace};
+use defmt::{error, trace, warn};
 #[cfg(feature = "in_std")]
-use log::{error, trace};
+use log::{error, trace, warn};
 
 use embassy_time::{Duration, Instant};
 use heapless::Vec;
@@ -119,6 +119,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     }
 
     pub fn packet_loss_ratio(&self) -> f32 {
+        warn!(
+            "PKT LOSS sent: {} retx: {} acks: {} lost: {}",
+            self.pkts_sent, self.pkts_retx, self.pkts_acked, self.pkts_lost
+        );
         let total = self.pkts_sent + self.pkts_retx + self.pkts_lost;
         if total == 0 {
             0_f32

@@ -17,6 +17,7 @@ pub struct MainCsvRow {
     pub node_bytes: Option<usize>,
     pub tau_hb_high: bool,
     pub pkt_loss: f32,
+    pub toa_sum: u64,
 }
 
 pub struct ChartData {
@@ -50,6 +51,7 @@ pub struct PacketEntry {
     /// tau_hb mode at transmit time: true = High, false = Low
     pub tau_hb_high: bool,
     pub pkt_loss: f32,
+    pub toa_sum: u64,
 }
 
 /// Accumulated state for the packet that is currently being built.
@@ -84,6 +86,7 @@ pub struct DashStats {
     last_node_slice_us: u64,
     last_node_slice_size: usize,
     last_pkt_loss: f32,
+    toa_sum: u64,
 }
 
 impl DashStats {
@@ -287,6 +290,7 @@ impl DashStats {
                 node_bytes: nd.map(|d| d.bytes),
                 tau_hb_high: p.tau_hb_high,
                 pkt_loss: p.pkt_loss,
+                toa_sum: p.toa_sum,
             }
         })
     }
@@ -304,6 +308,10 @@ impl DashStats {
         self.last_pkt_loss = pkt_loss
     }
 
+    pub fn on_toa(&mut self, toa_sum: u64) {
+        self.toa_sum = toa_sum;
+    }
+
     /// `hw_mean` and `hw_samples` are provided by the caller from the global HW buffer,
     /// sliced from this node's last consumed index to the current buffer length.
     pub fn on_sync(
@@ -316,11 +324,7 @@ impl DashStats {
         hw_samples: Vec<f32>,
     ) {
         let pending = std::mem::take(&mut self.pending);
-        let pkt_loss: f32 = if self.pkt_received > 0 || self.pkt_skipped > 0 {
-            self.pkt_skipped as f32 / (self.pkt_received + self.pkt_skipped) as f32
-        } else {
-            0_f32
-        };
+        let pkt_loss = self.last_pkt_loss;
         self.packets.push(PacketEntry {
             delay_ms,
             err_ms,
@@ -332,6 +336,7 @@ impl DashStats {
             hw_samples,
             tau_hb_high: pending.tau_hb_high,
             pkt_loss,
+            toa_sum: self.toa_sum,
         });
     }
 

@@ -175,7 +175,7 @@ async fn sensor_task(
 /// From the study, sensor data will likely be between 20-40 bytes per transmission
 const MAX_PACK_LEN: usize = 40;
 const MAX_RADIO_BUFFER: usize = 256; // kB
-const LEN: usize = 5; // floor(256/MAX_PACK_LEN)
+const LEN: usize = 8; // floor(256/MAX_PACK_LEN)
 
 const GW_ID: u8 = 1;
 
@@ -237,7 +237,7 @@ pub async fn lora_task(
         cr,
         lora_hz: LORA_FREQUENCY_IN_HZ,
     });
-    let timeout: u32 = 3_000;
+    let timeout: u32 = 20_000;
     let max_retries = 3;
     let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp, mp, alt_mdltn) {
         Ok(node) => node,

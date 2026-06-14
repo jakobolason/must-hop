@@ -8,7 +8,7 @@ use must_hop::{MHNode, MHPacket};
 use postcard::to_slice;
 
 const SIZE: usize = 128;
-const LEN: usize = 5; // Lets keep it the same as the nodes, make it simple
+const LEN: usize = 8; // Lets keep it the same as the nodes, make it simple
 const LORA_FREQ: usize = 868_700_000;
 // Max size that radio can send at all
 const TRANSMISSION_BUFFER: usize = 256;
@@ -86,6 +86,8 @@ pub struct GWNode {
     radio: Concentrator<Running>,
     fetched_packets: VecDeque<RxPacket>,
     pkt_params: PacketParams,
+    /// Used to check ToA for duty cycle req.
+    toa_sum: u64,
 }
 
 /// Calculated in calc_tau_spi
@@ -98,6 +100,7 @@ impl GWNode {
             radio: concentrator,
             fetched_packets: VecDeque::new(),
             pkt_params,
+            toa_sum: 0,
         }
     }
     fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<(TxPacket, usize), Error> {
@@ -157,6 +160,7 @@ impl MHNode<SIZE, LEN> for GWNode {
             payload_size
         );
         let toa = self.calc_toa(payload_size as u8);
+        self.toa_sum += toa.div_euclid(1000) as u64;
         embassy_time::Timer::after(Duration::from_micros(toa as u64)).await;
         Ok(())
     }

@@ -1,11 +1,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use log::error;
+use log::{error, info};
 use loragw::{Bandwidth, Spreading};
 use must_gw::{create_concentrator, node};
-use must_hop::{
-    PacketType, mesh_router::MeshRouter, network_manager::NetworkManager, policy::tdma::TdmaMac,
-};
+use must_hop::{mesh_router::MeshRouter, network_manager::NetworkManager, policy::tdma::TdmaMac};
 use rppal::gpio::Gpio;
 use std::io::Write;
 use tokio::time::Instant;
@@ -92,17 +90,13 @@ async fn run_concentrator_task() -> Result<(), Box<dyn std::error::Error + Send 
 
     // let mac = RandomAccessMac::new(GatewayPolicy::new(tau_hb));
     log::info!("Now making mesh router ...");
-    let mut router = MeshRouter::new(node, NetworkManager::new(gw_source_id, 10, 3), mac);
+    let mut router = MeshRouter::new(node, NetworkManager::new(gw_source_id, 10_000, 3), mac);
     log::info!("Now start loop..");
     loop {
         let mut rec_buf = None;
         match router.tick(&mut rec_buf).await {
             Ok(res) => {
-                for pkt in &res {
-                    if pkt.packet_type == PacketType::Data {
-                        log::info!("[GW_PKT] | node-{} | {} |", pkt.source_id, pkt.packet_id);
-                    }
-                }
+                info!("Got pkts: {}", res.len());
             }
             Err(e) => error!("Error in ticking: {:?}", e),
         }

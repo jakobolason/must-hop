@@ -638,6 +638,11 @@ impl App {
                     && let Ok(pct) = extract::<f32>(parts[1])
                 {
                     self.node_stats[idx].stats.on_packet_loss(pct);
+                } else if tag.contains("[TOA_SUM]")
+                    && parts.len() == 2
+                    && let Ok(toa_sum) = extract::<u64>(parts[1])
+                {
+                    self.node_stats[idx].stats.on_toa(toa_sum);
                 }
             }
             LogRole::Gateway => {

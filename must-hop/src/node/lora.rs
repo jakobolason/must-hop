@@ -78,6 +78,8 @@ where
     bb_mod: BaseBandModulationParams,
     pa_len: Option<u8>,
     explicit_header: bool,
+    /// To compare against duty cycle
+    toa_sum: u64,
 }
 
 /// Calculated in calc_tau_spi
@@ -144,11 +146,9 @@ where
             now_sending.as_micros(),
             used_slice.len()
         );
-        trace!(
-            "ToA for node: {}",
-            after_sending.as_millis() - before.as_millis()
-        );
-        // NOTE: This might create a delay between transmitting something and being able to receive
+        self.toa_sum += after_sending.as_millis() - before.as_millis();
+        trace!("[NODE_TOA]|{}|", self.toa_sum);
+        //TODO: This might create a delay between transmitting something and being able to receive
         // again
         // lora.sleep(false).await?;
         // info!("Sleep successful");
@@ -306,6 +306,7 @@ where
             bb_mod,
             pa_len: Some(pack_params.pre_amp as u8),
             explicit_header: !pack_params.imp_hed,
+            toa_sum: 0,
         })
     }
 
