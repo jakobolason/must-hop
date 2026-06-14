@@ -85,6 +85,7 @@ pub enum PayloadType {
 
 /// Maintains record of packages sent, to ensure that they are received.
 /// Also handles that packets from other nodes should be sent on
+#[derive(Default)]
 pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
     pending_acks: Vec<PendingPacket<SIZE>, LEN>,
     // TODO: This should be more random, so each node doesn't start at 0
@@ -96,6 +97,10 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
     /// Configurations for the manager
     source_id: u8,
     timeout: u8,
+    pkts_sent: u32,
+    pkts_acked: u32,
+    pkts_lost: u32,
+    pkts_retx: u32,
     _max_retries: u8,
 }
 
@@ -103,13 +108,21 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     pub fn new(source_id: u8, timeout: u8, max_retries: u8) -> Self {
         Self {
             pending_acks: Vec::new(),
-            next_packet_id: 0,
             recent_seen: RecentSeen::default(),
             // Default to max, only have a reasonable count if GW present
             gw_hops: 255,
             source_id,
             timeout,
             _max_retries: max_retries,
+            ..Default::default()
+        }
+    }
+
+    pub fn packet_loss_ratio(&self) -> f32 {
+        if self.pkts_sent == 0 {
+            0_f32
+        } else {
+            (self.pkts_sent as f32 - self.pkts_acked as f32) / (self.pkts_sent) as f32
         }
     }
 
@@ -120,7 +133,6 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     ) -> Result<MHPacket<SIZE>, PostError> {
         // let payload_bytes = Vec::from_slice(payload).map_err(|_| PostError::SerializeBufferFull)?;
         self.next_packet_id += 1;
-        trace!("[TX_PKT]|{}|", self.next_packet_id);
         Ok(MHPacket {
             destination_id: destination,
             packet_type: PacketType::Data,
@@ -137,18 +149,21 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         self.pending_acks.len()
     }
 
+    pub fn get_pending_transmissions(&mut self) -> Vec<MHPacket<SIZE>, LEN> {
+        self.get_pending_transmissions_at(Instant::now())
+    }
+
     /// This removes retried packets, and checks the pending acks list. Given the data payload in bytes, it is made into a MHPacket
     /// and added to internal acks list. It returns a list of packets to send, which includes the packet with the payload provided.
     /// But it also returns all packets which haven't been ACK'ed before it's timeout.
-    pub fn get_pending_transmissions(
-        &mut self,
-    ) -> Result<Vec<MHPacket<SIZE>, LEN>, NetworkManagerError> {
+    pub fn get_pending_transmissions_at(&mut self, curr_time: Instant) -> Vec<MHPacket<SIZE>, LEN> {
         // Clean up packets with too many retries
         // TODO: Shuold switch SF if this happens
-        let curr_time = Instant::now();
+        let prev_len = self.pending_acks.len();
         self.pending_acks.retain(
             |p| p.retries < self._max_retries, /*|| p.timeout < curr_time*/
         );
+        self.pkts_lost += (prev_len - self.pending_acks.len()) as u32;
 
         // Look into packages with expired timeouts,
         // let pendings_len = self.pending_acks.len() as u8;
@@ -164,12 +179,9 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             })
             .collect();
 
-        // NOTE: Only for debug purposes:
-        to_send
-            .iter()
-            .for_each(|p| trace!("[RETRY_PKT]|{}|", p.packet_id));
+        self.pkts_retx += to_send.len() as u32;
 
-        Ok(to_send)
+        to_send
     }
 
     /// Adds the packet to the internal list
@@ -185,6 +197,8 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         if self.pending_acks.push(pend_pkt).is_err() {
             return Err(NetworkManagerError::BufferFull);
         }
+        // We [only] add it here, because this is called for queueing or receiving a packet
+        self.pkts_sent += 1;
         Ok(())
     }
 
@@ -212,7 +226,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                         && pkt.destination_id == p.packet.source_id))
         }) {
             // Then remove it from our vec, and return
-            trace!("[ACK_PKT]|{}|", pkt.packet_id);
+            self.pkts_acked += 1;
             self.pending_acks.remove(our_packet_index);
             self.recent_seen.push((pkt.source_id, pkt.packet_id));
             return true;
@@ -409,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn test_packet_creation() {
+    fn packet_creation() {
         let mut manager = setup_manager();
         let payload = [0xAB, 0xCD];
         let vec = Vec::from_slice(&payload).expect("Could not get vec from slice");
@@ -423,18 +437,20 @@ mod tests {
     }
 
     #[test]
-    fn test_queueing_and_ack_handling() {
+    fn queueing_and_ack_handling() {
         let mut manager = setup_manager();
         let payload = Vec::from_slice(&[1, 2, 3]).unwrap();
 
-        // Queue a new packet bound for node 2
+        // Queue a new packet bound for node 3
         manager
-            .queue_new_payload(payload, 2)
+            .queue_new_payload(payload, 3)
             .expect("Should queue payload");
 
         // It should now be in the pending list awaiting an ACK
         assert_eq!(manager.get_pending_count(), 1);
-
+        // It has registered a sent packet
+        assert_eq!(manager.pkts_sent, 1);
+        assert_eq!(manager.pkts_acked, 0);
         // Simulate receiving an ACK from node 2
         let ack_pkt = MHPacket {
             destination_id: 2, // Back to us
@@ -454,15 +470,20 @@ mod tests {
         // The manager should consume the ACK and return None
         assert!(result.is_none());
 
+        assert_eq!(manager.pkts_acked, 1);
+        assert_eq!(manager.pkts_lost, 0);
+        assert_eq!(manager.pkts_retx, 0);
+
         // Our pending list should now be empty because the packet was ACK'd
         assert_eq!(manager.get_pending_count(), 0);
     }
 
     #[test]
-    fn test_forwarding_logic() {
+    fn forwarding_logic() {
         let mut manager = setup_manager();
         // Simulate that we are 2 hops away from the gateway (GW is ID 1)
         manager.gw_hops = 2;
+        assert_eq!(manager.pkts_sent, 0);
 
         // Simulate a packet coming from node 3, bound for the GW
         let incoming_pkt = MHPacket {
@@ -487,40 +508,103 @@ mod tests {
         // It should update the hop_to_gw to our current knowledge (2)
         assert_eq!(forward_pkt.hop_to_gw, 2);
 
+        assert_eq!(manager.pkts_sent, 1);
+        assert_eq!(manager.pkts_acked, 0);
+        assert_eq!(manager.pkts_lost, 0);
+        assert_eq!(manager.pkts_retx, 0);
+
         // It should also add this to pending_acks since we are forwarding it and expect an ACK
         assert_eq!(manager.get_pending_count(), 1);
     }
 
-    // Cannot be used anymore, because forwarding a hbt packet
-    // is dependent on the MAC layer now
+    #[test]
+    fn packet_loss_ratio() {
+        // use timeout of 5 to test retx out
+        let mut manager = NetworkManager::<40, 5>::new(4, 0, 5);
+        let payload = Vec::from_slice(&[1, 2, 3]).unwrap();
+        manager.gw_hops = 2;
 
-    // #[test]
-    // fn test_heartbeat_updates_gw_hops() {
-    //     let mut manager = setup_manager();
-    //     // Start with default unknown hops
-    //     assert_eq!(manager.get_gw_hops(), 255);
-    //
-    //     // Simulate a heartbeat from a node that is 1 hop from the GW
-    //     let heartbeat_pkt = MHPacket {
-    //         destination_id: 0,
-    //         packet_type: PacketType::HeartBeat,
-    //         packet_id: 100,
-    //         source_id: 3,
-    //         payload: Vec::new(),
-    //         hop_count: 1,
-    //         hop_to_gw: 1,
-    //     };
-    //
-    //     let result = manager
-    //         .receive_packet(heartbeat_pkt)
-    //         .expect("Should process packet");
-    //
-    //     // We should forward the heartbeat
-    //     assert!(result.is_some());
-    //     let (_, payload_type) = result.unwrap();
-    //     assert_eq!(payload_type, PayloadType::HeartBeat);
-    //
-    //     // Our manager should have updated its own distance to the GW (hop_count + 1)
-    //     assert_eq!(manager.get_gw_hops(), 2);
-    // }
+        // Queue a new packet bound for node 2
+        manager
+            .queue_new_payload(payload, 1)
+            .expect("Should queue payload");
+
+        // It should now be in the pending list awaiting an ACK
+        assert_eq!(manager.get_pending_count(), 1);
+        // It has registered a sent packet
+        assert_eq!(manager.pkts_sent, 1);
+        assert_eq!(manager.pkts_acked, 0);
+        // Simulate receiving an ACK from node 2
+        let ack_pkt = MHPacket {
+            destination_id: 1, // Back to us
+            packet_type: PacketType::Data,
+            packet_id: 1, // Matches the ID of the packet we just sent
+            source_id: 4, // From the node we sent it to
+            payload: Vec::from_slice(&[0]).unwrap(),
+            hop_count: 1,
+            hop_to_gw: 1,
+        };
+
+        // Process the ACK
+        let result = manager
+            .receive_packet(ack_pkt)
+            .expect("Should process packet");
+
+        // The manager should consume the ACK and return None
+        assert!(result.is_none());
+        assert_eq!(manager.get_pending_count(), 0);
+        assert_eq!(manager.pkts_acked, 1);
+
+        // now simulate another packet coming downstream
+        let incoming_pkt = MHPacket {
+            destination_id: 1, // GW Bound
+            packet_type: PacketType::Data,
+            packet_id: 42,
+            source_id: 3,
+            payload: Vec::from_slice(&[9, 9]).unwrap(),
+            hop_count: 1,
+            hop_to_gw: 3, // Node 3 thinks it is 4 hops away. We are 2 hops away, so we should forward.
+        };
+
+        let result = manager
+            .receive_packet(incoming_pkt)
+            .expect("Should process packet");
+        assert!(result.is_some());
+        assert_eq!(manager.pkts_acked, 1);
+        assert_eq!(manager.pkts_lost, 0);
+        assert_eq!(manager.pkts_retx, 0);
+        assert_eq!(manager.pkts_sent, 2);
+        assert_eq!(manager.get_pending_count(), 1);
+
+        // SCENARIO: Upstream neighbour doesn't get relayed packet
+        let res = manager.get_pending_transmissions_at(Instant::now() + Duration::from_millis(1));
+        // should need a retransmission here
+        assert_eq!(res.len(), 1);
+        assert_eq!(manager.pkts_retx, 1);
+        assert_eq!(manager.pkts_lost, 0);
+        assert_eq!(manager.pkts_sent, 2);
+        assert_eq!(manager.pkts_acked, 1);
+
+        // And now, upstream neighbour hears us
+        let ack_pkt = MHPacket {
+            destination_id: 1, // Back to us
+            packet_type: PacketType::Data,
+            packet_id: 42, // Matches the ID of the packet we just sent
+            source_id: 3,  // From the node we sent it to
+            payload: Vec::from_slice(&[0]).unwrap(),
+            hop_count: 1,
+            hop_to_gw: 1,
+        };
+        let result = manager
+            .receive_packet(ack_pkt)
+            .expect("Should process packet");
+
+        // The manager should consume the ACK and return None
+        assert!(result.is_none());
+        assert_eq!(manager.pkts_acked, 2);
+        assert_eq!(manager.get_pending_count(), 0);
+        let pkt_loss = (manager.pkts_acked as f32)
+            / (manager.pkts_sent + manager.pkts_retx + manager.pkts_lost) as f32;
+        assert_eq!(pkt_loss, 2.0 / 3.0);
+    }
 }

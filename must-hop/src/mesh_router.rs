@@ -92,7 +92,7 @@ where
             self.mac_policy.tx_heartbeat(self.manager.add_heartbeat()?);
         }
 
-        let retransmission = self.manager.get_pending_transmissions()?;
+        let retransmission = self.manager.get_pending_transmissions();
         for pkt in retransmission {
             self.push_queue(pkt)?;
         }
@@ -124,5 +124,9 @@ where
     #[doc(hidden)]
     pub fn get_pending_count(&self) -> usize {
         self.manager.get_pending_count()
+    }
+    #[doc(hidden)]
+    pub fn get_packet_loss_ratio(&self) -> f32 {
+        self.manager.packet_loss_ratio()
     }
 }

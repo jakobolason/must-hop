@@ -115,7 +115,7 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
 }
 
 #[tokio::test]
-async fn test_mesh_topology() {
+async fn mesh_topology() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
     let node_a = 2;
     let node_b = 3;
@@ -192,18 +192,29 @@ async fn test_mesh_topology() {
     // Router C should've also received it
     let res3 = router_c.tick(&mut ()).await.unwrap();
     assert_eq!(res3.len(), 0);
-    // And does not send it on
+    // And does send it on, because its meant for node d
     assert_eq!(router_c.get_pending_count(), 1);
+    let _ = router_c.tick(&mut ()).await.unwrap();
+    let _ = router_b.tick(&mut ()).await.unwrap();
+    assert_eq!(router_b.get_pending_count(), 0);
 
     // Router D should've also received it, and since this is for it, it receives the data
     let res3 = router_d.tick(&mut ()).await.unwrap();
-    assert_eq!(res3.len(), 0);
+    assert_eq!(res3.len(), 1);
     // And does not send it on
     assert_eq!(router_d.get_pending_count(), 0);
+    // Node D sends an ACK
+    let _ = router_d.tick(&mut ()).await.unwrap();
+    let _ = router_c.tick(&mut ()).await.unwrap();
+
+    assert_eq!(router_a.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_b.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_c.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_d.get_packet_loss_ratio(), 0.0);
 }
 
 #[tokio::test]
-async fn test_node_b_to_node_c() {
+async fn node_b_to_node_c() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
     let node_a = 2;
     let node_b = 3;
@@ -263,10 +274,18 @@ async fn test_node_b_to_node_c() {
     assert_eq!(res3.len(), 1);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
+
+    // Node c sends ACK
+    let _ = router_c.tick(&mut ()).await.unwrap();
+    let _ = router_b.tick(&mut ()).await.unwrap();
+
+    assert_eq!(router_a.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_b.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_c.get_packet_loss_ratio(), 0.0);
 }
 
 #[tokio::test]
-async fn testing_multiple_nodes_can_hear_a() {
+async fn multiple_nodes_can_hear_a() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
     let node_a = 2;
     let node_b = 3;
@@ -333,6 +352,8 @@ async fn testing_multiple_nodes_can_hear_a() {
     assert_eq!(res2.len(), 0);
     // And since it is not for node B, then it sends it on
     assert_eq!(router_b.get_pending_count(), 1);
+    let _ = router_b.tick(&mut ()).await.unwrap();
+    let _ = router_a.tick(&mut ()).await.unwrap();
 
     // Router C should've also received it, and since this is for it, it receives the data
     let res3 = router_c.tick(&mut ()).await.unwrap();
@@ -340,11 +361,14 @@ async fn testing_multiple_nodes_can_hear_a() {
     assert_eq!(res3.len(), 1);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
+    let _ = router_c.tick(&mut ()).await.unwrap();
+    let _ = router_b.tick(&mut ()).await.unwrap();
 
     // Now because C < D, D is not in between sender and reciever
     let d = router_d.tick(&mut ()).await.unwrap();
     assert_eq!(d.len(), 0);
     assert_eq!(router_d.get_pending_count(), 0);
+    let _ = router_d.tick(&mut ()).await.unwrap();
 
     // Router C should've also received it, and since this is for it, it receives the data
     let res3 = router_c.tick(&mut ()).await.unwrap();
@@ -352,10 +376,15 @@ async fn testing_multiple_nodes_can_hear_a() {
     assert_eq!(res3.len(), 0);
     // And does not send it on
     assert_eq!(router_c.get_pending_count(), 0);
+
+    assert_eq!(router_a.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_b.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_c.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_d.get_packet_loss_ratio(), 0.0);
 }
 
 #[tokio::test]
-async fn testing_gw_communication() {
+async fn gw_communication() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
     let node_a = 2;
     let node_b = 3;
@@ -444,22 +473,36 @@ async fn testing_gw_communication() {
     assert_eq!(res2.len(), 0);
     // And since it is not for node B, then it sends it on
     assert_eq!(router_b.get_pending_count(), 1);
+    router_b.tick(&mut ()).await.unwrap();
+    router_a.tick(&mut ()).await.unwrap();
 
     let res3 = router_c.tick(&mut ()).await.unwrap();
     assert_eq!(res3.len(), 0);
-    assert_eq!(router_c.get_pending_count(), 0);
+    assert_eq!(router_c.get_pending_count(), 1);
+    router_c.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
 
     let d = router_d.tick(&mut ()).await.unwrap();
     assert_eq!(d.len(), 0);
-    assert_eq!(router_d.get_pending_count(), 0);
+    assert_eq!(router_d.get_pending_count(), 1);
+    router_d.tick(&mut ()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
 
     let res4 = gw_router.tick(&mut ()).await.unwrap();
-    assert_ne!(res4.len(), 1);
+    assert_eq!(res4.len(), 1);
     assert_eq!(gw_router.get_pending_count(), 0);
+    gw_router.tick(&mut ()).await.unwrap();
+    router_d.tick(&mut ()).await.unwrap();
+
+    assert_eq!(router_a.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_b.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_c.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_d.get_packet_loss_ratio(), 0.0);
+    assert_eq!(gw_router.get_packet_loss_ratio(), 0.0);
 }
 
 #[tokio::test]
-async fn testing_complex_gw_communication() {
+async fn complex_gw_communication() {
     let env = Arc::new(Mutex::new(SimulationEnv::new()));
     let node_a = 2;
     let node_b = 3;
@@ -550,16 +593,30 @@ async fn testing_complex_gw_communication() {
     assert_eq!(res2.len(), 0);
     // And since it is not for node B, then it sends it on
     assert_eq!(router_b.get_pending_count(), 1);
-
     let res3 = router_c.tick(&mut ()).await.unwrap();
     assert_eq!(res3.len(), 0);
     assert_eq!(router_c.get_pending_count(), 1);
+    router_b.tick(&mut ()).await.unwrap();
+    router_a.tick(&mut ()).await.unwrap();
+
+    router_c.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
 
     let d = router_d.tick(&mut ()).await.unwrap();
     assert_eq!(d.len(), 0);
     assert_eq!(router_d.get_pending_count(), 0);
+    router_d.tick(&mut ()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
 
     let res4 = gw_router.tick(&mut ()).await.unwrap();
-    assert_ne!(res4.len(), 1);
+    assert_eq!(res4.len(), 1);
     assert_eq!(gw_router.get_pending_count(), 0);
+    gw_router.tick(&mut ()).await.unwrap();
+    router_d.tick(&mut ()).await.unwrap();
+
+    assert_eq!(router_a.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_b.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_c.get_packet_loss_ratio(), 0.0);
+    assert_eq!(router_d.get_packet_loss_ratio(), 0.0);
+    assert_eq!(gw_router.get_packet_loss_ratio(), 0.0);
 }
