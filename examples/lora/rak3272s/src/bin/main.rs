@@ -177,7 +177,7 @@ const MAX_PACK_LEN: usize = 40;
 const MAX_RADIO_BUFFER: usize = 256; // kB
 const LEN: usize = 8; // floor(256/MAX_PACK_LEN)
 
-const GW_ID: u8 = 1;
+const GW_ID: u16 = 1;
 
 // Compute the MAX TOA MS as a const, such that it is evaluted at build time instead of runtime
 const MAX_TOA_MS: u32 = {
