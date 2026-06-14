@@ -39,7 +39,7 @@ impl Controller {
         hb: &SyncBeacon,
         rx_pkt: &RxPacket,
         time_sync: Option<(u64, Instant)>,
-        node_id: u8,
+        node_id: u16,
     ) -> (u64, Instant) {
         // Unpack this to see if we have anything to compare to
         let some_stamps = match time_sync {
@@ -102,7 +102,7 @@ impl Controller {
         rx_pkt: &RxPacket,
         old_gps: u64,
         last_stamp: Instant,
-        node_id: u8,
+        node_id: u16,
     ) -> ((u64, Instant), i64, i64) {
         // Calculate skews
         let my_diff = (rx_pkt.rx_done_instant - last_stamp).as_micros();

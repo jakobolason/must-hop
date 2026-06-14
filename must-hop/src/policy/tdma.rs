@@ -25,7 +25,7 @@ use core::time::Duration as CoreDuration;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
 
-type VecFB = Vec<(u8, i32), 7>;
+type VecFB = Vec<(u16, i32), 7>;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SyncBeacon {
@@ -146,7 +146,7 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     }
 
     /// Set the node id this should have, to be used for finding the slot
-    pub fn set_node_id(self, node_id: u8) -> Self {
+    pub fn set_node_id(self, node_id: u16) -> Self {
         Self {
             slot_manager: SlotManager {
                 node_id,
@@ -302,9 +302,9 @@ pub(crate) struct SlotManager {
     known_slots_mask: SlotMask,
     /// Used for the slot allocation. You should convert the MAC address into a u32 with the
     /// biggest chance of two nodes not having the same u32 representation
-    node_id: u8,
+    node_id: u16,
     gw_hops: u8,
-    leader_id: Option<u8>,
+    leader_id: Option<u16>,
 }
 
 const ERR_THRESHOLD: u32 = 5_000;
@@ -535,7 +535,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             match self.slot_manager.known_slots_mask.slot_assignment_strat(
                 self.slot_manager.slots_per_frame,
                 alloc.known_slots,
-                self.slot_manager.node_id,
+                self.slot_manager.node_id as u8,
             ) {
                 Some(free_slot) => {
                     info!("Found my slot to be {}", free_slot);

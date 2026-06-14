@@ -4,7 +4,7 @@ use super::MHPacket;
 
 use heapless::Vec;
 
-const GATEWAY_ID: u8 = 1;
+const GATEWAY_ID: u16 = 1;
 
 pub mod ra;
 pub mod tdma;

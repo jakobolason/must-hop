@@ -51,7 +51,7 @@ pub struct RandomAccessMac<const SIZE: usize, NR: NodeRole> {
     hbt_pkt: Option<MHPacket<SIZE>>,
     node_role: NR,
     gw_hops: u8,
-    recent_seen_hb: [(u8, u16); 5],
+    recent_seen_hb: [(u16, u16); 5],
     cursor: usize,
 }
 

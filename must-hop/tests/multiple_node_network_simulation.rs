@@ -16,10 +16,10 @@ const LEN: usize = 5;
 pub struct SimulationEnv<const SIZE: usize> {
     /// Maps a Node ID to a list of Node IDs that can hear its transmissions.
     /// E.g., Node 1 -> [2, 3] means if 1 transmits, 2 and 3 receive it.
-    pub topology: HashMap<u8, std::vec::Vec<u8>>,
+    pub topology: HashMap<u16, std::vec::Vec<u16>>,
 
     /// Each node's personal receiving buffer (their "inbox")
-    pub inboxes: HashMap<u8, std::vec::Vec<MHPacket<SIZE>>>,
+    pub inboxes: HashMap<u16, std::vec::Vec<MHPacket<SIZE>>>,
 }
 
 type Senv = Arc<Mutex<SimulationEnv<SIZE>>>;
@@ -39,19 +39,19 @@ impl<const SIZE: usize> SimulationEnv<SIZE> {
     }
 
     /// Define that `receiver` is within radio range of `sender`
-    pub fn add_link(&mut self, sender: u8, receiver: u8) {
+    pub fn add_link(&mut self, sender: u16, receiver: u16) {
         self.topology.entry(sender).or_default().push(receiver);
         // Make sure the receiver has an inbox ready
         self.inboxes.entry(receiver).or_default();
     }
-    pub fn add_bidi_link(&mut self, node_a: u8, node_b: u8) {
+    pub fn add_bidi_link(&mut self, node_a: u16, node_b: u16) {
         self.add_link(node_a, node_b);
         self.add_link(node_b, node_a);
     }
 }
 
 struct MockRadio<const SIZE: usize> {
-    pub node_id: u8,
+    pub node_id: u16,
     pub env: Arc<Mutex<SimulationEnv<SIZE>>>,
 }
 
@@ -702,7 +702,7 @@ async fn packet_loss() {
 
     router_a.tick(&mut ()).await.unwrap();
 
-    let tx_failure = |env: Senv, node_id: &u8| {
+    let tx_failure = |env: Senv, node_id: &u16| {
         let mut e = env.lock().unwrap();
         if let Some(inbox) = e.inboxes.get_mut(node_id) {
             inbox.clear();

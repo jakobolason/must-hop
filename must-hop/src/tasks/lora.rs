@@ -23,7 +23,7 @@ const TRANSMISSION_BUFFER: usize = 256; // The radio can receive 256 bytes to tr
 pub async fn lora_task<Node, T, M, const SIZE: usize, const LEN: usize>(
     node: Node,
     channel: channel::Receiver<'static, M, T, 3>,
-    source_id: u8,
+    source_id: u16,
     timeout: u32,
     max_retries: u8,
     mac: impl MacPolicy<Node, SIZE, LEN>,

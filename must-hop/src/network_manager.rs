@@ -46,7 +46,7 @@ impl From<PostError> for NetworkManagerError {
 
 /// Ring buffer to hold recently seen messages, to avoid retransmitting them
 pub struct RecentSeen<const N: usize> {
-    buffer: [Option<(u8, u16)>; N],
+    buffer: [Option<(u16, u16)>; N],
     cursor: usize,
 }
 
@@ -58,13 +58,13 @@ impl<const N: usize> RecentSeen<N> {
         }
     }
     /// Takes tuple (source_id, packet_id)
-    pub fn push(&mut self, pid: (u8, u16)) {
+    pub fn push(&mut self, pid: (u16, u16)) {
         self.buffer[self.cursor] = Some(pid);
         self.cursor = (self.cursor + 1) % N;
     }
 
     /// Checks if an entry matches (source_id, packet_id)
-    pub fn contains(&self, pid: (u8, u16)) -> bool {
+    pub fn contains(&self, pid: (u16, u16)) -> bool {
         self.buffer.contains(&Some(pid))
     }
 }
@@ -95,7 +95,7 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
     /// Hops to gateway, handled by manager
     gw_hops: u8,
     /// Configurations for the manager
-    source_id: u8,
+    source_id: u16,
     timeout_ms: u32,
     pkts_sent: u32,
     pkts_acked: u32,
@@ -105,7 +105,7 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
 }
 
 impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
-    pub fn new(source_id: u8, timeout_ms: u32, max_retries: u8) -> Self {
+    pub fn new(source_id: u16, timeout_ms: u32, max_retries: u8) -> Self {
         Self {
             pending_acks: Vec::new(),
             recent_seen: RecentSeen::default(),
@@ -134,7 +134,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     fn new_packet(
         &mut self,
         payload: Vec<u8, SIZE>,
-        destination: u8,
+        destination: u16,
     ) -> Result<MHPacket<SIZE>, PostError> {
         // let payload_bytes = Vec::from_slice(payload).map_err(|_| PostError::SerializeBufferFull)?;
         self.next_packet_id += 1;
@@ -207,7 +207,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     pub fn queue_new_payload(
         &mut self,
         payload: Vec<u8, SIZE>,
-        destination: u8,
+        destination: u16,
     ) -> Result<MHPacket<SIZE>, NetworkManagerError> {
         let new_pkt = self.new_packet(payload, destination)?;
         self.add_packet(new_pkt.clone())?;

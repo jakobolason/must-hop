@@ -52,10 +52,10 @@ pub enum PacketType {
 pub struct MHPacket<const SIZE: usize> {
     /// Destination identifier
     // TODO: Perhaps bigger than u8?
-    pub destination_id: u8,
+    pub destination_id: u16,
     pub packet_type: PacketType,
     pub packet_id: u16,
-    pub source_id: u8,
+    pub source_id: u16,
     /// Your specificed data wanting to send
     // (DE)serialize is only available up to 32 bytes
     pub payload: Vec<u8, SIZE>,

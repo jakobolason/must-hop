@@ -68,7 +68,7 @@ where
     pub fn queue_payload(
         &mut self,
         payload: Vec<u8, SIZE>,
-        destination: u8,
+        destination: u16,
     ) -> Result<(), MeshRouterError<Node::Error>> {
         trace!("Queing payload ...");
         let pkt = self.manager.queue_new_payload(payload, destination)?;
