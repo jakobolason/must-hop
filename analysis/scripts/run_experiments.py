@@ -15,12 +15,11 @@ from pathlib import Path
 from typing import Any
 
 # EXPERIMENT 1: 6 different PI controllers
-# KPKIs = [(40, 50), (10, 50), (13, 32), (13, 5), (1, 1), (100, 500)]
-# KPKIs = [(0, 0)]
-# EXPERIMENTS = [
-#     {"sf": 5, "bw": 125, "kp": kp, "ki": ki, "tau": 10, "times": 5}
-#     for (kp, ki) in KPKIs
-# ]
+KPKIs = [(40, 50), (10, 50), (13, 32), (13, 5), (1, 1), (100, 500), (0, 0)]
+EXPERIMENTS = [
+    {"sf": 5, "bw": 125, "kp": kp, "ki": ki, "tau": 10, "times": 5}
+    for (kp, ki) in KPKIs
+]
 
 # EXPERIMENT 2: Test controller with different spreading factors
 # SFs = [5, 6, 7, 8, 9, 10, 11]
@@ -29,18 +28,18 @@ from typing import Any
 # ]
 
 # EXPERIMENT 3: Test different heartbeat intervals
-TAUS = [20, 25, 30]
-EXPERIMENTS = [
-    {
-        "sf": 12,
-        "bw": 125,
-        "kp": int(4 / (tau / 100)),
-        "ki": int(5 / (tau / 100)),
-        "tau": tau,
-        "times": 10,
-    }
-    for tau in TAUS
-]
+# TAUS = [20, 25, 30]
+# EXPERIMENTS = [
+#     {
+#         "sf": 12,
+#         "bw": 125,
+#         "kp": int(4 / (tau / 100)),
+#         "ki": int(5 / (tau / 100)),
+#         "tau": tau,
+#         "times": 10,
+#     }
+#     for tau in TAUS
+# ]
 
 
 # Nodes: list of {"node_id": "<source id>", "probe_id": "<probe serial>"}
