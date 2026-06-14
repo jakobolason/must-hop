@@ -17,7 +17,7 @@ from typing import Any
 # EXPERIMENT 1: 6 different PI controllers
 KPKIs = [(40, 50), (10, 50), (13, 32), (13, 5), (1, 1), (100, 500), (0, 0)]
 EXPERIMENTS = [
-    {"sf": 5, "bw": 125, "kp": kp, "ki": ki, "tau": 10, "times": 5}
+    {"sf": 5, "bw": 125, "kp": kp, "ki": ki, "tau": 10, "times": 2}
     for (kp, ki) in KPKIs
 ]
 
@@ -51,7 +51,7 @@ NODES = [
 
 
 # Seconds per experiment run (~10 min default)
-DURATION = 1200
+DURATION = 100
 
 # Seconds to wait between runs for radio settling
 INTER_RUN_DELAY = 30
