@@ -144,24 +144,29 @@ def sync(remote_base: str, host: str, dry_run: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    _ = parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--remote-base",
         default="~/code/must-hop",
         help="Base directory of the repo on the remote host (default: ~/code/must-hop)",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would be fetched without actually copying anything",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--host",
         default="jakobolason.dk",
         help="Override HOST_URL from .env",
     )
+    _ = parser.add_argument(
+        "--run",
+        help="A possible run-*.json file to scp first"
+    )
+
     args = parser.parse_args()
 
     env = load_env(REPO_ROOT)

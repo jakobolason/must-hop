@@ -1,5 +1,4 @@
 use chrono::Local;
-use clap::builder::Str;
 use dotenv::dotenv;
 use log::info;
 use std::fs;

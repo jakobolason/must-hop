@@ -307,7 +307,7 @@ pub(crate) struct SlotManager {
     leader_id: Option<u8>,
 }
 
-const ERR_THRESHOLD: u32 = 30_000;
+const ERR_THRESHOLD: u32 = 5_000;
 // If received 10 synced messages, then go up into high tau mode
 const IN_SYNC_THRESHOLD: u8 = 5;
 // How long it takes, before a node goes back into full listening mode

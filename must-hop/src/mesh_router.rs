@@ -35,12 +35,6 @@ impl<E: fmt::Debug> fmt::Display for MeshRouterError<E> {
 // We bound E to also implement Error so the inner error is valid too.
 impl<E: fmt::Debug + core::error::Error> core::error::Error for MeshRouterError<E> {}
 
-// impl<E> From<E> for MeshRouterError<E> {
-//     fn from(err: E) -> Self {
-//         MeshRouterError::Node(err)
-//     }
-// }
-
 /// Mesh Router(MR) handles the user defined radio which implements MHNode, and a Network Manager,
 /// managing the logic necessary to send and receive packets, but the user does not have to think
 /// about how packets are received and sent on, if they are not for them.
@@ -86,7 +80,6 @@ where
         self.tx_queue
             .push(pkt)
             .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
-        // trace!("Pusing to queue, len: {}", self.tx_queue.len());
         Ok(())
     }
 
@@ -104,7 +97,6 @@ where
             self.push_queue(pkt)?;
         }
 
-        // trace!("now running mac ...");
         let received_pkts = self
             .mac_policy
             .run_mac(&mut self.node, &mut self.tx_queue, rx_buf)
@@ -115,16 +107,10 @@ where
             Some(pkts) => pkts,
             None => return Ok(Vec::new()),
         };
-        // trace!("Got packets to send or receiving");
         let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;
         self.mac_policy.set_gw_hops(self.manager.get_gw_hops());
 
         for pkt in to_forward {
-            // if pkt.packet_type == PacketType::HeartBeat {
-            //     self.mac_policy.tx_heartbeat(pkt);
-            //     continue;
-            // }
-            // trace!("Pusing to tx queue:  {}", self.tx_queue.len());
             // If buffer is full, break adding packets to it.
             if self.tx_queue.push(pkt).is_err() {
                 error!("Tx queue is full, dropping packets ...");
@@ -134,84 +120,9 @@ where
         Ok(to_me)
     }
 
-    /// Use to await another node's communication, and can be used in a select or join
-    pub async fn listen(
-        &mut self,
-        rec_buf: &mut Node::ReceiveBuffer,
-    ) -> Result<Node::Connection, MeshRouterError<Node::Error>> {
-        trace!("listening ...");
-        self.node
-            .listen(rec_buf, None)
-            .await
-            .map_err(MeshRouterError::Node)
-    }
-
-    // TODO: If an error like buffer overflow occurs, then this should be handled by the NM. I
-    // think the payload received should be dropped, and the current packages retransmitted
-    // Use to send data over the network
-    // pub async fn send_payload(
-    //     &mut self,
-    //     payload: Vec<u8, SIZE>,
-    //     destination: u8,
-    // ) -> Result<(), MeshRouterError<Node::Error>> {
-    //     let timeouted_pkts = self.manager.payload_to_send(payload, destination)?;
-    //     trace!("Sending {} packets!", timeouted_pkts.len());
-    //     self.send_packets(&timeouted_pkts).await
-    // }
-
-    // async fn send_packets(
-    //     &mut self,
-    //     // pkts: Vec<MHPacket<SIZE>, LEN>,
-    //     pkts: &[MHPacket<SIZE>],
-    // ) -> Result<(), MeshRouterError<Node::Error>> {
-    //     self.node
-    //         .transmit(pkts)
-    //         .await
-    //         .map_err(MeshRouterError::Node)?;
-    //     Ok(())
-    // }
-
-    // /// Handles that when receiving, the packet type can be stream, therefore this keeps on
-    // /// listening. Then adds packets to be sent on via the NetworkManager. Lastly, those packets
-    // /// are sent again if not meant for this node
-    // pub async fn receive(
-    //     &mut self,
-    //     conn: Node::Connection,
-    //     receiving_buffer: &Node::ReceiveBuffer,
-    // ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
-    //     // TODO: should be able to receieve multiple packets
-    //     let (pkts, rx_hw_timestamp) = self
-    //         .node
-    //         .receive(conn, receiving_buffer)
-    //         .await
-    //         .map_err(MeshRouterError::Node)?;
-    //     trace!("Done receiving, handling {} pkts", pkts.len());
-    //
-    //     let (to_send, my_pkt) = self.manager.handle_packets(pkts)?;
-    //     trace!("GOT {} packets for me!", my_pkt.len());
-    //     trace!("GOT {} packets which should be sent on!", to_send.len());
-    //     if !to_send.is_empty() {
-    //         self.send_packets(&to_send).await?;
-    //     }
-    //     Ok(my_pkt)
-    // }
-
     // only for tests
     #[doc(hidden)]
     pub fn get_pending_count(&self) -> usize {
         self.manager.get_pending_count()
     }
 }
-
-// impl<Node, Mac, const SIZE: usize, const LEN: usize> MeshRouter<Node, Mac, GatewayPolicy, SIZE, LEN>
-// where
-//     Node: MHNode<SIZE, LEN>,
-//     Mac: MacPolicy<Node, SIZE, LEN>,
-// {
-//     /// When gateway starts up, it should annonce itself, such that the nodes know their distance
-//     /// to GW and retransmits messages if they are closer.
-//     pub async fn bootup(&mut self) -> Result<(), MeshRouterError<Node::Error>> {
-//         let bootup_pkt = self.manager.handle_bootup()?;
-//         self.send_packets(&[bootup_pkt]).await
-//     }
-// }

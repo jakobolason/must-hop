@@ -120,6 +120,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     ) -> Result<MHPacket<SIZE>, PostError> {
         // let payload_bytes = Vec::from_slice(payload).map_err(|_| PostError::SerializeBufferFull)?;
         self.next_packet_id += 1;
+        trace!("[TX_PKT]|{}|", self.next_packet_id);
         Ok(MHPacket {
             destination_id: destination,
             packet_type: PacketType::Data,
@@ -149,12 +150,6 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             |p| p.retries < self._max_retries, /*|| p.timeout < curr_time*/
         );
 
-        // NOTE: Only for debug purposes:
-        // debug!(" LIST OF PEND ACKS: ");
-        // self.pending_acks
-        //     .iter()
-        //     .for_each(|p| debug!("{:?}, {}", p.packet.packet_type, p.packet.packet_id));
-
         // Look into packages with expired timeouts,
         // let pendings_len = self.pending_acks.len() as u8;
         // trace!("pendings len: {}", pendings_len);
@@ -168,6 +163,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 p.packet.clone()
             })
             .collect();
+
+        // NOTE: Only for debug purposes:
+        to_send
+            .iter()
+            .for_each(|p| trace!("[RETRY_PKT]|{}|", p.packet_id));
 
         Ok(to_send)
     }
@@ -212,10 +212,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                         && pkt.destination_id == p.packet.source_id))
         }) {
             // Then remove it from our vec, and return
-            trace!(
-                "RECEIVED KNOWN PACKAGE, REMOVING FROM LIST {}",
-                pkt.packet_id
-            );
+            trace!("[ACK_PKT]|{}|", pkt.packet_id);
             self.pending_acks.remove(our_packet_index);
             self.recent_seen.push((pkt.source_id, pkt.packet_id));
             return true;
