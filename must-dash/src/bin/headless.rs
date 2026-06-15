@@ -98,8 +98,9 @@ async fn main() {
             alt_sf: alt_sf.clone(),
         });
     }
-    app.defaults.sf = args.sf;
-    app.defaults.bw = args.bw;
+    app.gateway_config.sf = args.sf.clone();
+    app.gateway_config.bw = args.bw.clone();
+    app.gateway_config.tau = args.tau.clone();
 
     let (tx, mut rx) = mpsc::channel(100);
     let descriptors = app.build_descriptors();
