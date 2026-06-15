@@ -77,6 +77,11 @@ async fn main() {
         "[headless] SF={} BW={} KP={} KI={} nodes={:?} tau={} alt_sf={} duration={}s",
         args.sf, args.bw, args.kp, args.ki, args.nodes, args.tau, args.alt_sf, args.duration,
     );
+    let alt_sf = if args.alt_sf == "None" {
+        String::new()
+    } else {
+        args.alt_sf
+    };
 
     let mut app = must_dash::app::App::new(false, DIN_MAP);
     for (i, node) in args.nodes.iter().enumerate() {
@@ -90,7 +95,7 @@ async fn main() {
             sf: args.sf.clone(),
             bw: args.bw.clone(),
             tau: args.tau.clone(),
-            alt_sf: args.alt_sf.clone(),
+            alt_sf: alt_sf.clone(),
         });
     }
     app.defaults.sf = args.sf;
