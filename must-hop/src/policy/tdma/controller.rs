@@ -1,3 +1,5 @@
+use core::ops::Add;
+
 use crate::RxPacket;
 use crate::policy::tdma::SyncBeacon;
 
@@ -8,6 +10,102 @@ use log::info;
 
 use embassy_time::Instant;
 
+const N: u16 = 10;
+#[derive(Default)]
+struct Avg {
+    sum: u64,
+    n: u16,
+}
+
+impl Avg {
+    fn entry(&mut self, val: u32) {
+        if self.n < N {
+            self.n += 1;
+        } else {
+            // If at capacity, remove avg and add new
+            self.sum -= self.get();
+        }
+        self.sum += val as u64;
+    }
+
+    fn get(&self) -> u64 {
+        if self.n == 0 {
+            0
+        } else {
+            self.sum / self.n as u64
+        }
+    }
+}
+
+impl Add for &Avg {
+    type Output = u64;
+    fn add(self, rhs: Self) -> Self::Output {
+        self.get() + rhs.get()
+    }
+}
+
+pub struct BlueOs {
+    v1: u32,
+    u1: u32,
+    v_bar: Avg,
+    u_bar: Avg,
+}
+
+impl Default for BlueOs {
+    fn default() -> Self {
+        BlueOs::new()
+    }
+}
+
+impl BlueOs {
+    pub fn new() -> Self {
+        Self {
+            v1: u32::MAX,
+            u1: u32::MAX,
+            v_bar: Avg::default(),
+            u_bar: Avg::default(),
+        }
+    }
+
+    pub fn add_uv(&mut self, u: u32, v: u32) {
+        if v < self.v1 {
+            self.v1 = v;
+        }
+        if u < self.u1 {
+            self.u1 = u;
+        }
+        self.v_bar.entry(v);
+        self.u_bar.entry(u);
+    }
+
+    pub fn parameter_estimation(&self) -> (f32, f32, f32) {
+        if self.u_bar.n < 2 {
+            info!("Shorting out! {}, {}", self.u1, self.v1);
+            return (0.0, 0.0, 0.0);
+        }
+        info!(
+            "Calculating *BLUE_OS*: v1={}, u1={}, bv={}, bu={}",
+            self.v1,
+            self.u1,
+            self.v_bar.get(),
+            self.u_bar.get()
+        );
+        let u1pv1 = self.u1 + self.v1;
+        let bars_u1pv1 = &self.v_bar + &self.u_bar;
+        let n = self.u_bar.n as u64;
+        let scalar: f32 = 1.0 / (2 * (n - 1)) as f32;
+        info!(
+            "Scalar={}, u1pv1={}, bars={}, n={}",
+            scalar, u1pv1, bars_u1pv1, n
+        );
+        let delay = scalar * (n * u1pv1 as u64 - bars_u1pv1) as f32;
+        let offset = ((self.u1 as i64 - self.v1 as i64) as f32) / 2.0;
+        let bias = scalar * (n * (bars_u1pv1 - u1pv1 as u64)) as f32;
+
+        (delay, offset, bias)
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Controller {
     /// speed of clock drift, used to try and mitigate clock drift at nodes with no HSE
@@ -16,6 +114,7 @@ pub(crate) struct Controller {
     kp: i64,
     pub prev_err: i64,
     leader_skip_frames: u8,
+    blue_os: BlueOs,
 }
 impl Controller {
     pub(crate) fn new(v_s: i64, kp: i64, ki: i64) -> Self {
@@ -54,6 +153,11 @@ impl Controller {
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
         // info!("LEADER IS IN {}", hb.tau_hb);
 
+        let (b_delay, b_offset, b_bias) = self.blue_os.parameter_estimation();
+        info!(
+            "BLUE_OS: d: {}, offset: {}, bias: {}",
+            b_delay, b_offset, b_bias
+        );
         self.leader_skip_frames = hb.skipped_frames;
         // Conditional integration anti-windup
         // let tentative_v_s = self.apply_pi_controller(error);
@@ -97,7 +201,7 @@ impl Controller {
     /// Calculates the error this node has from it's follower, using given parameters to approximate
     /// the timestamp
     fn calc_error(
-        &self,
+        &mut self,
         hb: &SyncBeacon,
         rx_pkt: &RxPacket,
         old_gps: u64,
@@ -106,16 +210,15 @@ impl Controller {
     ) -> ((u64, Instant), i64, i64) {
         // Calculate skews
         let my_diff = (rx_pkt.rx_done_instant - last_stamp).as_micros();
-        // let predicted_elapsed = (my_diff as i64 + self.calc_drift_duration(my_diff)) as u64;
-        let predicted_elapsed = my_diff;
+        let predicted_elapsed = (my_diff as i64 + self.calc_drift_duration(my_diff)) as u64;
+        // let predicted_elapsed = my_diff;
         let my_stamp = predicted_elapsed + old_gps;
 
         // Check if a t3 delta is availale for us
         let nw_delay = if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id)
         {
             // delta is our T3 - T2
-            let delta_down =
-                my_stamp as i64 - hb.gps_time_us as i64 + self.calc_drift_duration(my_diff);
+            let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
             let delta_down = if delta_down > 1_000_000 {
                 0
             } else {
@@ -123,10 +226,7 @@ impl Controller {
             };
             let up_ms = *delta_up as f32 / 1000.0;
             let down_ms = delta_down as f32 / 1000.0;
-            // if delta_down.abs() > 20_000 || delta_up.abs() > 30_000 {
-            //     info!("[DELTAS]|{}|{}| status: REJECTED", up_ms, down_ms);
-            //     0
-            // } else {
+
             let nw_delay = (delta_down + *delta_up as i64) / 2;
             info!(
                 "[DELTAS]|{}|{}|{}|",
@@ -134,6 +234,10 @@ impl Controller {
                 down_ms,
                 nw_delay as f32 / 1000.0
             );
+            let v = (my_diff + old_gps) as i64 - hb.gps_time_us as i64;
+            if v > 0 && *delta_up > 0 {
+                self.blue_os.add_uv(*delta_up as u32, v as u32);
+            }
             nw_delay
             // (*delta_up / 2) as i64
         } else {
@@ -150,7 +254,7 @@ impl Controller {
         let gw_diff = current_true_time - old_gps as i64;
 
         // error ms - drift ms
-        let err = (gw_diff - predicted_elapsed as i64) - self.calc_drift_duration(my_diff);
+        let err = gw_diff - predicted_elapsed as i64;
 
         // Only re-sync if the error is substantially large
         let time_sync = if err.abs() > 70_000 {
