@@ -7,6 +7,7 @@ pub mod ui;
 
 use crate::mpsc::Sender;
 use crate::navigator::Navigator;
+use app::GatewayConfigFocus;
 use app::{App, AppEvent, ProcessDescriptor};
 use crossterm::event::{self, Event as CEvent, KeyCode};
 use navigator::{DashFocus, LandingSection, LandingSubView, NavigatorView};
@@ -233,6 +234,10 @@ pub async fn run_app(
                                         navigator.landing_sub_view = LandingSubView::ProbeConfig;
                                     }
                                 }
+                                LandingSection::Gateway => {
+                                    navigator.gateway_config_focus = GatewayConfigFocus::Sf;
+                                    navigator.landing_sub_view = LandingSubView::GatewayConfig;
+                                }
                                 LandingSection::Nodes => {
                                     let cursor = navigator.node_list_cursor;
                                     if cursor < app.configured_nodes.len() {
@@ -246,7 +251,7 @@ pub async fn run_app(
                                 use navigator::LandingSection;
                                 let idx = match navigator.landing_section {
                                     LandingSection::Nodes => navigator.node_list_cursor,
-                                    LandingSection::Probes => {
+                                    LandingSection::Probes | LandingSection::Gateway => {
                                         app.configured_nodes.len().saturating_sub(1)
                                     }
                                 };
@@ -290,18 +295,36 @@ pub async fn run_app(
                             KeyCode::Tab | KeyCode::Down => navigator.next_config_focus(),
                             KeyCode::BackTab | KeyCode::Up => navigator.prev_config_focus(),
                             KeyCode::Enter => {
-                                if navigator.probe_config_focus == app::ProbeConfigFocus::Confirm {
-                                    app.confirm_pending_node();
-                                    navigator.landing_sub_view = LandingSubView::ProbeList;
-                                } else {
-                                    navigator.next_config_focus();
-                                }
+                                // if navigator.probe_config_focus == app::ProbeConfigFocus::Confirm {
+                                app.confirm_pending_node();
+                                navigator.landing_sub_view = LandingSubView::ProbeList;
+                                // } else {
+                                //     navigator.next_config_focus();
+                                // }
                             }
                             KeyCode::Backspace => {
                                 app.backspace_pending(navigator.probe_config_focus);
                             }
                             KeyCode::Char(c) => {
                                 app.type_char_pending(c, navigator.probe_config_focus);
+                            }
+                            _ => {}
+                        },
+                        LandingSubView::GatewayConfig => match key_code {
+                            KeyCode::Esc => {
+                                navigator.landing_sub_view = LandingSubView::ProbeList;
+                            }
+                            KeyCode::Tab | KeyCode::Down => navigator.next_gateway_focus(),
+                            KeyCode::BackTab | KeyCode::Up => navigator.prev_gateway_focus(),
+                            KeyCode::Enter => {
+                                navigator.landing_sub_view = LandingSubView::ProbeList;
+                                navigator.landing_section = LandingSection::Gateway;
+                            }
+                            KeyCode::Backspace => {
+                                app.backspace_gateway(navigator.gateway_config_focus);
+                            }
+                            KeyCode::Char(c) => {
+                                app.type_char_gateway(c, navigator.gateway_config_focus);
                             }
                             _ => {}
                         },

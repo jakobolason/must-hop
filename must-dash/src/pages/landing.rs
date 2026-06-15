@@ -1,4 +1,4 @@
-use crate::app::{App, ProbeConfigFocus};
+use crate::app::{App, GatewayConfigFocus, ProbeConfigFocus};
 use crate::navigator::{LandingSection, LandingSubView, Navigator};
 use ratatui::{
     Frame,
@@ -14,6 +14,7 @@ pub fn draw_landing(f: &mut Frame, app: &App, navigator: &Navigator) {
     match navigator.landing_sub_view {
         LandingSubView::ProbeList => draw_probe_list(f, app, navigator),
         LandingSubView::ProbeConfig => draw_probe_config(f, app, navigator),
+        LandingSubView::GatewayConfig => draw_gateway_config(f, app, navigator),
     }
 }
 
@@ -36,7 +37,8 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(50),
+            Constraint::Percentage(45),
+            Constraint::Length(3),
             Constraint::Min(0),
             Constraint::Length(help_height),
         ])
@@ -55,6 +57,7 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
     };
 
     let probes_focused = navigator.landing_section == LandingSection::Probes;
+    let gw_focused = navigator.landing_section == LandingSection::Gateway;
     let nodes_focused = navigator.landing_section == LandingSection::Nodes;
 
     let probe_list = List::new(probe_items)
@@ -80,6 +83,31 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
         probe_state.select(Some(navigator.probe_list_cursor));
     }
     f.render_stateful_widget(probe_list, chunks[0], &mut probe_state);
+
+    // Gateway config section
+    let gw = &app.gateway_config;
+    let gw_summary = format!(
+        "  SF={}  BW={}kHz  TAU={}s    [Enter to edit]",
+        gw.sf, gw.bw, gw.tau
+    );
+    let gw_block_style = if gw_focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let gw_widget = Paragraph::new(gw_summary)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Gateway Config ")
+                .style(gw_block_style),
+        )
+        .style(if gw_focused {
+            Style::default().fg(Color::White)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        });
+    f.render_widget(gw_widget, chunks[1]);
 
     let node_items: Vec<ListItem> = if app.configured_nodes.is_empty() {
         vec![ListItem::new(Span::styled(
@@ -136,7 +164,7 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
     if nodes_focused && !app.configured_nodes.is_empty() {
         node_state.select(Some(navigator.node_list_cursor));
     }
-    f.render_stateful_widget(node_list, chunks[1], &mut node_state);
+    f.render_stateful_widget(node_list, chunks[2], &mut node_state);
 
     let mut help_parts = vec![
         Span::styled(
@@ -193,7 +221,7 @@ fn draw_probe_list(f: &mut Frame, app: &App, navigator: &Navigator) {
     ]);
 
     let help = Paragraph::new(Line::from(help_parts)).alignment(Alignment::Center);
-    f.render_widget(help, chunks[2]);
+    f.render_widget(help, chunks[3]);
 }
 
 fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
@@ -234,6 +262,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
             Constraint::Length(3), // KI
             Constraint::Length(3), // Source ID
             Constraint::Length(3), // SF
+            Constraint::Length(3), // Alt SF
             Constraint::Length(3), // BW
             Constraint::Length(3), // TAU
             Constraint::Length(1), // spacer
@@ -301,6 +330,21 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
         .style(style_for(ProbeConfigFocus::Sf));
     f.render_widget(sf, chunks[3]);
 
+    // Alt SF field
+    let alt_sf_val = node.map_or("", |n| n.alt_sf.as_str());
+    let sf = Paragraph::new(alt_sf_val)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(
+                    Line::from(" Alternate Rx Spreading Factor (leave empty for None)")
+                        .left_aligned(),
+                )
+                .title(Line::from("[5–12]").right_aligned()),
+        )
+        .style(style_for(ProbeConfigFocus::AltSf));
+    f.render_widget(sf, chunks[4]);
+
     // BW field
     let bw_val = node.map_or("", |n| n.bw.as_str());
     let bw = Paragraph::new(bw_val)
@@ -311,7 +355,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
                 .title(Line::from("[125 / 250 / 500]").right_aligned()),
         )
         .style(style_for(ProbeConfigFocus::Bw));
-    f.render_widget(bw, chunks[4]);
+    f.render_widget(bw, chunks[5]);
 
     // TAU field
     let tau_val = node.map_or("", |n| n.tau.as_str());
@@ -323,7 +367,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
                 .title(Line::from("[10-100]").right_aligned()),
         )
         .style(style_for(ProbeConfigFocus::Tau));
-    f.render_widget(tau, chunks[5]);
+    f.render_widget(tau, chunks[6]);
 
     // Confirm button
     let confirm_label = if focus == ProbeConfigFocus::Confirm {
@@ -339,7 +383,7 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
         )
         .style(style_for(ProbeConfigFocus::Confirm))
         .alignment(Alignment::Center);
-    f.render_widget(confirm, chunks[7]);
+    f.render_widget(confirm, chunks[8]);
 
     // Help line
     let help = Paragraph::new(
@@ -347,7 +391,94 @@ fn draw_probe_config(f: &mut Frame, app: &App, navigator: &Navigator) {
     )
     .style(Style::default().fg(Color::DarkGray))
     .alignment(Alignment::Center);
-    f.render_widget(help, chunks[8]);
+    f.render_widget(help, chunks[9]);
+}
+
+fn draw_gateway_config(f: &mut Frame, app: &App, navigator: &Navigator) {
+    let area = centered_rect(55, 60, f.area());
+    f.render_widget(Clear, area);
+
+    let outer = Block::default()
+        .title(" Configure Gateway ")
+        .borders(Borders::ALL)
+        .style(Style::default().fg(Color::Cyan));
+    f.render_widget(outer, area);
+
+    let inner = area.inner(Margin {
+        vertical: 1,
+        horizontal: 3,
+    });
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // SF
+            Constraint::Length(3), // BW
+            Constraint::Length(3), // TAU
+            Constraint::Length(1), // spacer
+            Constraint::Length(3), // Confirm button
+            Constraint::Min(0),    // rest
+            Constraint::Length(1), // help
+        ])
+        .split(inner);
+
+    let focus = navigator.gateway_config_focus;
+    let gw = &app.gateway_config;
+
+    let active = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let inactive = Style::default().fg(Color::DarkGray);
+    let style_for = |f: GatewayConfigFocus| if focus == f { active } else { inactive };
+
+    let sf = Paragraph::new(gw.sf.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Line::from(" Spreading Factor ").left_aligned())
+                .title(Line::from("[5–12]").right_aligned()),
+        )
+        .style(style_for(GatewayConfigFocus::Sf));
+    f.render_widget(sf, chunks[0]);
+
+    let bw = Paragraph::new(gw.bw.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Line::from(" Bandwidth (kHz) ").left_aligned())
+                .title(Line::from("[125 / 250 / 500]").right_aligned()),
+        )
+        .style(style_for(GatewayConfigFocus::Bw));
+    f.render_widget(bw, chunks[1]);
+
+    let tau = Paragraph::new(gw.tau.as_str())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Line::from(" Heartbeat duration (tau) [s] ").left_aligned())
+                .title(Line::from("[10-100]").right_aligned()),
+        )
+        .style(style_for(GatewayConfigFocus::Tau));
+    f.render_widget(tau, chunks[2]);
+
+    let confirm_label = if focus == GatewayConfigFocus::Confirm {
+        "[ CONFIRM ]"
+    } else {
+        "  CONFIRM  "
+    };
+    let confirm = Paragraph::new(confirm_label)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title_bottom("{ enter }"),
+        )
+        .style(style_for(GatewayConfigFocus::Confirm))
+        .alignment(Alignment::Center);
+    f.render_widget(confirm, chunks[4]);
+
+    let help = Paragraph::new("Tab/↓: Next field   Shift-Tab/↑: Prev   Enter: Save   Esc: Cancel")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    f.render_widget(help, chunks[5]);
 }
 
 impl crate::app::NodeConfig {

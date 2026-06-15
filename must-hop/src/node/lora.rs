@@ -311,8 +311,6 @@ where
     }
 
     pub async fn prepare_for_rx(&mut self, rx_mode: RxMode) -> Result<(), RadioError> {
-        // TODO: Is it a proble using single here? Should it be continouos to not get timeout
-        // errors all the time? Can this listening be timed and synchronized for a TDMA?
         let mdltn_params = match &self.alt_mdtln_params {
             Some(p) => p,
             None => &self.mdltn_params,

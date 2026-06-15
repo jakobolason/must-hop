@@ -55,7 +55,7 @@ fn main() {
         Err(_) => ("None".to_string(), 7u8),
     };
     let (sf_code, sf_num) = sf_parsing("SF");
-    let (alt_sf_code, alt_sf_num) = sf_parsing("ALT_SF");
+    let (alt_sf_code, _alt_sf_num) = sf_parsing("ALT_SF");
 
     let (bw_code, bw_khz) = match env::var("BW") {
         Ok(val) => {

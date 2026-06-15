@@ -105,9 +105,24 @@ pub enum ProbeConfigFocus {
     Ki,
     SourceId,
     Sf,
+    AltSf,
     Bw,
     Tau,
     Confirm,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum GatewayConfigFocus {
+    Sf,
+    Bw,
+    Tau,
+    Confirm,
+}
+
+pub struct GatewayConfig {
+    pub sf: String,
+    pub bw: String,
+    pub tau: String,
 }
 
 /// Defaults that persist across sessions, loaded from .env.
@@ -122,6 +137,7 @@ pub struct Defaults {
 
 pub struct App {
     pub defaults: Defaults,
+    pub gateway_config: GatewayConfig,
     pub available_probes: Vec<ProbeInfo>,
     pub probe_fetch_error: Option<String>,
     pub configured_nodes: Vec<NodeConfig>,
@@ -143,6 +159,11 @@ impl App {
         let tau = env::var("TAU").unwrap_or_else(|_| TAU_DEFAULT.to_string());
 
         let mut app = Self {
+            gateway_config: GatewayConfig {
+                sf: sf.clone(),
+                bw: bw.clone(),
+                tau: tau.clone(),
+            },
             defaults: Defaults {
                 kp,
                 ki,
@@ -268,6 +289,7 @@ impl App {
                 ProbeConfigFocus::Ki => node.ki.push(c),
                 ProbeConfigFocus::SourceId => node.source_id.push(c),
                 ProbeConfigFocus::Sf => node.sf.push(c),
+                ProbeConfigFocus::AltSf => node.alt_sf.push(c),
                 ProbeConfigFocus::Bw => node.bw.push(c),
                 ProbeConfigFocus::Tau => node.tau.push(c),
                 ProbeConfigFocus::Confirm => {}
@@ -290,6 +312,9 @@ impl App {
                 ProbeConfigFocus::Sf => {
                     node.sf.pop();
                 }
+                ProbeConfigFocus::AltSf => {
+                    node.alt_sf.pop();
+                }
                 ProbeConfigFocus::Bw => {
                     node.bw.pop();
                 }
@@ -298,6 +323,30 @@ impl App {
                 }
                 ProbeConfigFocus::Confirm => {}
             }
+        }
+    }
+
+    pub fn type_char_gateway(&mut self, c: char, focus: GatewayConfigFocus) {
+        match focus {
+            GatewayConfigFocus::Sf => self.gateway_config.sf.push(c),
+            GatewayConfigFocus::Bw => self.gateway_config.bw.push(c),
+            GatewayConfigFocus::Tau => self.gateway_config.tau.push(c),
+            GatewayConfigFocus::Confirm => {}
+        }
+    }
+
+    pub fn backspace_gateway(&mut self, focus: GatewayConfigFocus) {
+        match focus {
+            GatewayConfigFocus::Sf => {
+                self.gateway_config.sf.pop();
+            }
+            GatewayConfigFocus::Bw => {
+                self.gateway_config.bw.pop();
+            }
+            GatewayConfigFocus::Tau => {
+                self.gateway_config.tau.pop();
+            }
+            GatewayConfigFocus::Confirm => {}
         }
     }
 
@@ -352,20 +401,9 @@ impl App {
             ]
         };
 
-        // Gateway mirrors the first node's SF/BW so they communicate on the same channel.
-        let first = self.configured_nodes.first();
-        let gw_sf = first
-            .map(|n| n.sf.as_str())
-            .unwrap_or(&self.defaults.sf)
-            .to_string();
-        let gw_bw = first
-            .map(|n| n.bw.as_str())
-            .unwrap_or(&self.defaults.bw)
-            .to_string();
-        let gw_tau = first
-            .map(|n| n.tau.as_str())
-            .unwrap_or(&self.defaults.tau)
-            .to_string();
+        let gw_sf = self.gateway_config.sf.clone();
+        let gw_bw = self.gateway_config.bw.clone();
+        let gw_tau = self.gateway_config.tau.clone();
         let mut gw_envs = color_envs();
         gw_envs.extend([
             ("SF".to_string(), gw_sf),
@@ -393,6 +431,9 @@ impl App {
                 ("TAU".to_string(), node.tau.clone()),
                 ("PROBE".to_string(), node.probe_id.clone()),
             ]);
+            if !node.alt_sf.is_empty() {
+                envs.extend([("ALT_SF".to_string(), node.alt_sf.clone())]);
+            }
             descs.push(ProcessDescriptor {
                 source_id: format!("node-{}", node.source_id),
                 role: LogRole::Node,
@@ -468,12 +509,12 @@ impl App {
     pub fn save_data(&self) -> (Option<String>, Option<String>) {
         let timestamp = Local::now().format("%d-%m:%H.%M").to_string();
         let first = self.configured_nodes.first();
-        let sf = first.map(|n| n.sf.as_str()).unwrap_or(&self.defaults.sf);
-        let bw = first.map(|n| n.bw.as_str()).unwrap_or(&self.defaults.bw);
+        let sf = &self.gateway_config.sf;
+        let bw = &self.gateway_config.bw;
+        let tau = &self.gateway_config.tau;
         let n_nodes = self.configured_nodes.len();
         let kp = first.map(|n| n.kp.as_str()).unwrap_or(&self.defaults.kp);
         let ki = first.map(|n| n.ki.as_str()).unwrap_or(&self.defaults.ki);
-        let tau = first.map(|n| n.tau.as_str()).unwrap_or(&self.defaults.tau);
         let meta = format!("SF{sf}_BW{bw}_KP{kp}_KI{ki}_TAU{tau}_{n_nodes}nodes");
 
         let prefix = "./analysis/data";
