@@ -224,19 +224,13 @@ impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
             .as_millis()
             .saturating_mul(self.slot_manager.slots_per_frame as u64);
         let tau_hb_ms = self.slot_manager.tau_hb_secs as u64 * 1000;
-        let tau_hb_high_skip = if tau_hb_ms > 0 && frame_dur_ms > 0 {
-            let skip = (tau_hb_ms / frame_dur_ms).max(1) as u8;
-            let actual_hb_ms = skip as u64 * frame_dur_ms;
-            if actual_hb_ms != tau_hb_ms {
-                warn!(
-                    "tau_hb {}ms is not achievable: frame_dur={}ms, high_skip={}, actual_hb={}ms",
-                    tau_hb_ms, frame_dur_ms, skip, actual_hb_ms
-                );
-            }
-            skip
-        } else {
-            3 // default: HB every 3 frames in High mode if set_tau_hb was never called
-        };
+        if tau_hb_ms > 0 && frame_dur_ms > 0 && tau_hb_ms != frame_dur_ms {
+            warn!(
+                "tau_hb {}ms is not achievable: frame_dur={}ms",
+                tau_hb_ms, frame_dur_ms
+            );
+        }
+        let tau_hb_high_skip = 3;
         TdmaMac::<Runner, P, SIZE> {
             _state: PhantomData,
             slot_manager: SlotManager {
@@ -310,9 +304,11 @@ pub(crate) struct SlotManager {
 
 const ERR_THRESHOLD: u32 = 5_000;
 // If received 10 synced messages, then go up into high tau mode
-const IN_SYNC_THRESHOLD: u8 = 5;
+const IN_SYNC_THRESHOLD: u8 = 8;
 // How long it takes, before a node goes back into full listening mode
 const HB_TIMEOUT: Duration = Duration::from_secs(120);
+// 20 ms
+const GUARD_BAND: u8 = 20;
 
 #[derive(Default)]
 pub(crate) struct TimeManager<const SIZE: usize> {
@@ -801,7 +797,6 @@ where
 
         // Don't transmit anything until you have a slot, which you only have once you've heard a
         // heartbeat.
-        // TODO: Go back into this, if not heard a heartbeat in some time
         let Some(timestamps) = self.time_manager.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             if let Some((pkts, _rx_pkt)) = self
@@ -812,7 +807,7 @@ where
                     && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
                 {
                     // Wait 200ms, then transmit HB yourself
-                    Timer::after(Duration::from_millis(200)).await;
+                    Timer::after(Duration::from_millis(GUARD_BAND as u64)).await;
                     self.tx(node, tx_queue, my_tx_slot).await?;
                 }
 
@@ -829,28 +824,28 @@ where
         // get current slot
         let slot = self.current_slot(self.current_gps_time(timestamps));
 
-        debug!("current slot: {}", slot);
         #[cfg(feature = "debug")]
         if let Some(pin) = self.debug_pin.as_mut() {
             let _ = pin.set_high();
         }
+        debug!("current slot: {}", slot);
 
         if let Some(my_tx_slot) = self.slot_manager.my_tx_slot
             && slot == my_tx_slot
             && self.time_manager.heard_by_leader
         {
-            // debug!(" !!!  MY SLOT !!! ");
+            debug!(" !!!  MY SLOT !!! ");
             // NOTE: Introduce a 100ms delay here, to ensure nodes are listening in your slot
-            Timer::after(Duration::from_millis(100)).await;
-
+            Timer::after(Duration::from_millis(GUARD_BAND as u64)).await;
+            let wait_after_hb = self.time_manager.hbt_pkt.is_some();
             self.tx(node, tx_queue, my_tx_slot).await?;
 
-            // TODO: Wait 100ms, then listen for 200ms for new nodes on network
-            // TODO: Shuoldn't this only be done after heartbeats?
-            Timer::after(Duration::from_millis(100)).await;
-            if let Some((pkts, _rx_pkt)) = self
-                .rx(node, rx_buffer, Some(CoreDuration::from_millis(200)))
-                .await
+            // NOTE: listen for 200ms for new nodes on network
+            // Shuold  only be done after heartbeats
+            if wait_after_hb
+                && let Some((pkts, _rx_pkt)) = self
+                    .rx(node, rx_buffer, Some(CoreDuration::from_millis(200)))
+                    .await
             {
                 info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts.len());
                 received_packets = pkts;
@@ -875,7 +870,7 @@ where
                 && let Some(my_tx_slot) = self.slot_manager.my_tx_slot
             {
                 // Wait 200ms, then transmit HB yourself
-                Timer::after(Duration::from_millis(200)).await;
+                Timer::after(Duration::from_millis(GUARD_BAND as u64)).await;
                 self.tx(node, tx_queue, my_tx_slot).await?;
             }
         }
@@ -905,38 +900,37 @@ mod build_tests {
 
     #[test]
     fn tau_binding_sets_slot_to_tau_over_spf() {
-        // Small TOA, tau=10s with 5 slots/frame: slot should be 2s, frame 10s, skip 1.
+        // Small TOA, tau=10s with 5 slots/frame: slot should be 2s, frame 10s.
         let built = default_builder().set_max_toa(300).set_tau_hb(10).build();
         assert_eq!(
             built.slot_manager.slot_duration,
             Duration::from_millis(2000)
         );
-        assert_eq!(built.slot_manager.tau_hb_high_skip, 1);
+        assert_eq!(built.slot_manager.tau_hb_high_skip, 3);
         assert_eq!(built.slot_manager.tau_hb_secs, 10);
     }
 
     #[test]
     fn tau_binding_non_multiple_of_frame_dur() {
-        // tau=15s with 5 slots/frame: slot becomes 3s, frame 15s, skip 1 — no warning.
+        // tau=15s with 5 slots/frame: slot becomes 3s, frame 15s.
         let built = default_builder().set_max_toa(300).set_tau_hb(15).build();
         assert_eq!(
             built.slot_manager.slot_duration,
             Duration::from_millis(3000)
         );
-        assert_eq!(built.slot_manager.tau_hb_high_skip, 1);
+        assert_eq!(built.slot_manager.tau_hb_high_skip, 3);
     }
 
     #[test]
     fn toa_binding_overrides_tau_at_high_sf() {
         // max_toa=3000ms forces slot to 3100ms (rx_window + 100 guard). tau=10s wants
-        // slot=2000ms, so TOA wins. frame_dur=15500ms > tau_hb_ms=10000ms, so the
-        // ceil-to-1 path fires and the warn is emitted (not asserted here).
+        // slot=2000ms, so TOA wins.
         let built = default_builder().set_max_toa(3000).set_tau_hb(10).build();
         assert_eq!(
             built.slot_manager.slot_duration,
             Duration::from_millis(3100)
         );
-        assert_eq!(built.slot_manager.tau_hb_high_skip, 1);
+        assert_eq!(built.slot_manager.tau_hb_high_skip, 3);
     }
 
     #[test]

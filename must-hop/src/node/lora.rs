@@ -165,7 +165,6 @@ where
             Some(ins) => ins,
             None => Instant::now(),
         };
-        trace!("received pkts!");
         let (len, _rx_pkt_status) = match conn {
             Ok((len, rx_pkt_status)) => (len, rx_pkt_status),
             Err(err) => match err {
@@ -187,7 +186,6 @@ where
                 return Err(RadioError::PayloadSizeUnexpected(0));
             }
         };
-        trace!("Got packet!");
         // let estimated_toa = self.calc_toa(len);
 
         let rx_pkt = RxPacket {

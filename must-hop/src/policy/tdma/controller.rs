@@ -80,13 +80,13 @@ impl<const N: usize> BlueOs<N> {
         }
         let u1 = self.u1();
         let v1 = self.v1();
-        info!(
-            "Calculating *BLUE_OS*: v1={}, u1={}, bv={}, bu={}",
-            v1,
-            u1,
-            self.v_bar.get(),
-            self.u_bar.get()
-        );
+        // info!(
+        //     "Calculating *BLUE_OS*: v1={}, u1={}, bv={}, bu={}",
+        //     v1,
+        //     u1,
+        //     self.v_bar.get(),
+        //     self.u_bar.get()
+        // );
         let u1pv1 = u1 as u64 + v1 as u64;
         let bars_u1pv1 = self.v_bar.get() + self.u_bar.get();
         let n = self.u_bar.len() as u64;
@@ -218,13 +218,13 @@ impl<const N: usize> Controller<N> {
                 (0, 0)
             };
         let (nw_delay, offset) = if let Some(offset_blue) = self.blue_os.calc_offset() {
-            let (_delay, _offset, bias) = self.blue_os.parameter_estimation();
+            // let (_delay, _offset, bias) = self.blue_os.parameter_estimation();
 
             let nw_delay = self.blue_os.avg_delay();
-            info!(
-                " !!!!! ---- USING BLUE OS = {},\tdelay={}, bias={}",
-                offset_blue, nw_delay, bias
-            );
+            // info!(
+            //     " !!!!! ---- USING BLUE OS = {},\tdelay={}, bias={}",
+            //     offset_blue, nw_delay, bias
+            // );
             (nw_delay as i64, offset_blue.max(0) as u64)
         } else {
             ((ddown + dup as i64) / 2, 0)
@@ -265,7 +265,7 @@ impl<const N: usize> Controller<N> {
         let kp_term = (self.kp * (err - self.prev_err)) / self.leader_skip_frames as i64;
 
         let ki_term = (self.ki * err) / self.leader_skip_frames as i64;
-        info!("Kp term: {}, Ki term: {}", kp_term, ki_term);
+        // info!("Kp term: {}, Ki term: {}", kp_term, ki_term);
         let delta_u = kp_term + ki_term;
         self.v_s + delta_u
         // (self.kp * err) / 10 + (self.ki * self.error_sum) / 100
