@@ -6,7 +6,7 @@ use defmt::info;
 #[cfg(feature = "in_std")]
 use log::info;
 
-use embassy_time::{Duration, Instant};
+use embassy_time::Instant;
 use heapless::Deque;
 
 struct Window<const N: usize> {
@@ -60,10 +60,6 @@ impl<const N: usize> Default for BlueOs<N> {
 }
 
 impl<const N: usize> BlueOs<N> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn add_uv(&mut self, u: u32, v: u32) {
         self.v_bar.add(v);
         self.u_bar.add(u);
@@ -103,7 +99,15 @@ impl<const N: usize> BlueOs<N> {
         let offset = ((u1 as i64 - v1 as i64) as f32) / 2.0;
         let bias = scalar * (n * (bars_u1pv1 - u1pv1)) as f32;
 
-        (delay as u32, offset as u32, bias as u32)
+        (
+            delay.max(0.0) as u32,
+            offset.max(0.0) as u32,
+            bias.max(0.0) as u32,
+        )
+    }
+
+    pub fn avg_delay(&self) -> u64 {
+        (self.u_bar.get() + self.v_bar.get()) / 2
     }
 
     pub fn calc_offset(&self) -> Option<i64> {
@@ -205,29 +209,24 @@ impl<const N: usize> Controller<N> {
         // Check if a t3 delta is availale for us
         let (dup, ddown) =
             if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id) {
-                let v = (my_diff + old_gps) as i64 - hb.gps_time_us as i64;
+                let v = my_stamp as i64 - hb.gps_time_us as i64;
                 if v > 0 && *delta_up > 0 {
                     self.blue_os.add_uv(*delta_up as u32, v as u32);
-                    (*delta_up, v)
-                } else {
-                    let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
-                    (*delta_up, delta_down)
                 }
+                (*delta_up, v)
             } else {
                 (0, 0)
             };
         let (nw_delay, offset) = if let Some(offset_blue) = self.blue_os.calc_offset() {
-            let (delay, _offset, bias) = self.blue_os.parameter_estimation();
+            let (_delay, _offset, bias) = self.blue_os.parameter_estimation();
 
+            let nw_delay = self.blue_os.avg_delay();
             info!(
                 " !!!!! ---- USING BLUE OS = {},\tdelay={}, bias={}",
-                offset_blue, delay, bias
+                offset_blue, nw_delay, bias
             );
-            (delay as i64, offset_blue.max(0) as u64)
-            // delay as i64
-            // (bias as i64, v)
+            (nw_delay as i64, offset_blue.max(0) as u64)
         } else {
-            // delta is our T3 - T2
             ((ddown + dup as i64) / 2, 0)
         };
         info!(
@@ -253,14 +252,16 @@ impl<const N: usize> Controller<N> {
                 rx_pkt.rx_done_instant,
             )
         } else {
-            let adjusted_instant = rx_pkt.rx_done_instant + Duration::from_micros(offset);
-            ((my_stamp + offset), adjusted_instant)
+            // let adjusted_instant = rx_pkt.rx_done_instant + Duration::from_micros(offset);
+            ((my_stamp + offset), rx_pkt.rx_done_instant)
         };
 
         (time_sync, err, nw_delay)
     }
 
     fn apply_pi_controller(&self, err: i64) -> i64 {
+        // to ms
+        // let err = err / 1000;
         let kp_term = (self.kp * (err - self.prev_err)) / self.leader_skip_frames as i64;
 
         let ki_term = (self.ki * err) / self.leader_skip_frames as i64;
