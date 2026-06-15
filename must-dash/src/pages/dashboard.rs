@@ -41,25 +41,27 @@ pub fn draw_dash(
 }
 
 fn draw_dash_header(f: &mut Frame, app: &App, area: Rect) {
-    let n = 10;
-    let fmt_ms = |v: Option<f32>| v.map_or("--".to_string(), |x| format!("{:.3}ms", x));
-    let fmt_ppb = |v: Option<f32>| v.map_or("--".to_string(), |x| format!("{}", x as i64));
-
-    let mut header_text = format!("  Medians (last {n})  ");
-    for ns in &app.node_stats {
-        let s = &ns.stats;
-        header_text.push_str(&format!(
-            "| [{}] Δ:{} Err:{} Spd:{} ppb  ",
-            ns.node_label,
-            fmt_ms(s.median_n(n, |p| p.delay_ms)),
-            fmt_ms(s.median_n(n, |p| p.err_ms)),
-            fmt_ppb(s.median_n(n, |p| p.new_speed)),
+    let mut param_text = String::new();
+    let mut first_node = true;
+    for ns in &app.configured_nodes {
+        param_text.push_str(&format!(
+            " [{}] SF:{} BW:{} tau:{} kp,ki:{},{}  ",
+            ns.source_id, ns.sf, ns.bw, ns.tau, ns.kp, ns.ki
         ));
+        if !first_node {
+            param_text.push('|');
+        } else {
+            first_node = false;
+        }
     }
-    header_text.push_str("[TAB: Focus | ESC: Back | Q: Quit]");
+    param_text.push_str("[TAB: Focus | ESC: Back | Q: Quit]");
 
-    let header = ratatui::widgets::Paragraph::new(header_text)
-        .block(Block::default().borders(Borders::ALL).title(" Metrics "))
+    let header = ratatui::widgets::Paragraph::new(param_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Experiment Parameters "),
+        )
         .style(
             Style::default()
                 .fg(Color::Yellow)
@@ -109,9 +111,8 @@ fn draw_history_panels(
         return;
     }
 
-    let panel_constraints: Vec<Constraint> = (0..n)
-        .map(|_| Constraint::Ratio(1, n as u32))
-        .collect();
+    let panel_constraints: Vec<Constraint> =
+        (0..n).map(|_| Constraint::Ratio(1, n as u32)).collect();
 
     let panels = Layout::default()
         .direction(Direction::Horizontal)
@@ -169,8 +170,7 @@ fn draw_history_panels(
             let scroll_pos = total
                 .saturating_sub(entries_visible)
                 .saturating_sub(clamped);
-            let mut scrollbar_state =
-                ScrollbarState::new(total).position(scroll_pos);
+            let mut scrollbar_state = ScrollbarState::new(total).position(scroll_pos);
             f.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight),
                 panel_area.inner(Margin {

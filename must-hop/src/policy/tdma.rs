@@ -65,6 +65,7 @@ impl<T> DebugPin for T {}
 
 /// The minimum amount of time(ms) that a node should listen, regardless of transmit parameters
 const MIN_RX_WINDOW: u32 = 500_u32;
+const BLUE_OS_WINDOW: usize = 10;
 impl<P, const SIZE: usize> TdmaMac<Builder, P, SIZE> {
     pub fn new(
         slot_duration: Duration,
@@ -322,7 +323,7 @@ pub(crate) struct TimeManager<const SIZE: usize> {
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     feedback_vec: VecFB,
     /// Handles error correction
-    controller: Controller,
+    controller: Controller<BLUE_OS_WINDOW>,
     /// The same type as from feedback_vec
     err_threshold: u32,
     /// Sync counter, if a node is out of sync, it adds one to this.

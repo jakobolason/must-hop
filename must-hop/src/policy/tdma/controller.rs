@@ -1,5 +1,3 @@
-use core::ops::Add;
-
 use crate::RxPacket;
 use crate::policy::tdma::SyncBeacon;
 
@@ -8,115 +6,127 @@ use defmt::info;
 #[cfg(feature = "in_std")]
 use log::info;
 
-use embassy_time::Instant;
+use embassy_time::{Duration, Instant};
+use heapless::Deque;
 
-const N: u16 = 10;
-#[derive(Default)]
-struct Avg {
-    sum: u64,
-    n: u16,
+struct Window<const N: usize> {
+    data: Deque<u32, N>,
 }
 
-impl Avg {
-    fn entry(&mut self, val: u32) {
-        if self.n < N {
-            self.n += 1;
-        } else {
-            // If at capacity, remove avg and add new
-            self.sum -= self.get();
+impl<const N: usize> Default for Window<N> {
+    fn default() -> Self {
+        Self { data: Deque::new() }
+    }
+}
+
+impl<const N: usize> Window<N> {
+    fn add(&mut self, val: u32) {
+        if self.data.len() == N {
+            self.data.pop_front();
         }
-        self.sum += val as u64;
+        let _ = self.data.push_back(val);
     }
 
     fn get(&self) -> u64 {
-        if self.n == 0 {
-            0
-        } else {
-            self.sum / self.n as u64
+        let n = self.data.len();
+        if n == 0 {
+            return 0;
         }
+        let sum: u64 = self.data.iter().map(|&x| x as u64).sum();
+        sum / n as u64
+    }
+
+    fn min(&self) -> u32 {
+        self.data.iter().copied().min().unwrap_or(u32::MAX)
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
     }
 }
 
-impl Add for &Avg {
-    type Output = u64;
-    fn add(self, rhs: Self) -> Self::Output {
-        self.get() + rhs.get()
-    }
+pub struct BlueOs<const N: usize> {
+    v_bar: Window<N>,
+    u_bar: Window<N>,
 }
 
-pub struct BlueOs {
-    v1: u32,
-    u1: u32,
-    v_bar: Avg,
-    u_bar: Avg,
-}
-
-impl Default for BlueOs {
+impl<const N: usize> Default for BlueOs<N> {
     fn default() -> Self {
-        BlueOs::new()
+        Self {
+            v_bar: Window::default(),
+            u_bar: Window::default(),
+        }
     }
 }
 
-impl BlueOs {
+impl<const N: usize> BlueOs<N> {
     pub fn new() -> Self {
-        Self {
-            v1: u32::MAX,
-            u1: u32::MAX,
-            v_bar: Avg::default(),
-            u_bar: Avg::default(),
-        }
+        Self::default()
     }
 
     pub fn add_uv(&mut self, u: u32, v: u32) {
-        if v < self.v1 {
-            self.v1 = v;
-        }
-        if u < self.u1 {
-            self.u1 = u;
-        }
-        self.v_bar.entry(v);
-        self.u_bar.entry(u);
+        self.v_bar.add(v);
+        self.u_bar.add(u);
     }
 
-    pub fn parameter_estimation(&self) -> (f32, f32, f32) {
-        if self.u_bar.n < 2 {
-            info!("Shorting out! {}, {}", self.u1, self.v1);
-            return (0.0, 0.0, 0.0);
+    fn v1(&self) -> u32 {
+        self.v_bar.min()
+    }
+
+    fn u1(&self) -> u32 {
+        self.u_bar.min()
+    }
+
+    pub fn parameter_estimation(&self) -> (u32, u32, u32) {
+        if self.u_bar.len() < 2 {
+            info!("Shorting out! {}, {}", self.u1(), self.v1());
+            return (0, 0, 0);
         }
+        let u1 = self.u1();
+        let v1 = self.v1();
         info!(
             "Calculating *BLUE_OS*: v1={}, u1={}, bv={}, bu={}",
-            self.v1,
-            self.u1,
+            v1,
+            u1,
             self.v_bar.get(),
             self.u_bar.get()
         );
-        let u1pv1 = self.u1 + self.v1;
-        let bars_u1pv1 = &self.v_bar + &self.u_bar;
-        let n = self.u_bar.n as u64;
+        let u1pv1 = u1 as u64 + v1 as u64;
+        let bars_u1pv1 = self.v_bar.get() + self.u_bar.get();
+        let n = self.u_bar.len() as u64;
         let scalar: f32 = 1.0 / (2 * (n - 1)) as f32;
         info!(
             "Scalar={}, u1pv1={}, bars={}, n={}",
             scalar, u1pv1, bars_u1pv1, n
         );
-        let delay = scalar * (n * u1pv1 as u64 - bars_u1pv1) as f32;
-        let offset = ((self.u1 as i64 - self.v1 as i64) as f32) / 2.0;
-        let bias = scalar * (n * (bars_u1pv1 - u1pv1 as u64)) as f32;
+        let delay = scalar * (n * u1pv1 - bars_u1pv1) as f32;
+        let offset = ((u1 as i64 - v1 as i64) as f32) / 2.0;
+        let bias = scalar * (n * (bars_u1pv1 - u1pv1)) as f32;
 
-        (delay, offset, bias)
+        (delay as u32, offset as u32, bias as u32)
+    }
+
+    pub fn calc_offset(&self) -> Option<i64> {
+        if self.u_bar.len() < 1 {
+            return None;
+        }
+        let u1 = self.u1() as i64;
+        let v1 = self.v1() as i64;
+        Some((u1 - v1) / 2)
     }
 }
 
 #[derive(Default)]
-pub(crate) struct Controller {
+pub(crate) struct Controller<const N: usize> {
     /// speed of clock drift, used to try and mitigate clock drift at nodes with no HSE
     pub v_s: i64,
     ki: i64,
     kp: i64,
     pub prev_err: i64,
     leader_skip_frames: u8,
-    blue_os: BlueOs,
+    blue_os: BlueOs<N>,
 }
-impl Controller {
+impl<const N: usize> Controller<N> {
     pub(crate) fn new(v_s: i64, kp: i64, ki: i64) -> Self {
         Self {
             v_s,
@@ -151,29 +161,9 @@ impl Controller {
         // Now calculate the error the controller can use
         let (time_sync, error, delay) =
             self.calc_error(hb, rx_pkt, some_stamps.0, some_stamps.1, node_id);
-        // info!("LEADER IS IN {}", hb.tau_hb);
 
-        let (b_delay, b_offset, b_bias) = self.blue_os.parameter_estimation();
-        info!(
-            "BLUE_OS: d: {}, offset: {}, bias: {}",
-            b_delay, b_offset, b_bias
-        );
         self.leader_skip_frames = hb.skipped_frames;
-        // Conditional integration anti-windup
-        // let tentative_v_s = self.apply_pi_controller(error);
-        // let delta_vs = tentative_v_s - self.v_s;
-        // let delta_err = error - self.prev_err;
-        // let should_sum_error =
-        //     delta_err == 0 || delta_vs == 0 || delta_vs.signum() == delta_err.signum();
-        //
-        // let v_s = if should_sum_error {
-        //     info!("ADDING TO SUM");
-        //     self.error_sum = (self.error_sum + error).clamp(-10_000, 10_000);
-        //     self.apply_pi_controller(error)
-        // } else {
-        //     info!("NOT ADDING TO SUM");
-        //     tentative_v_s
-        // };
+
         let v_s = self.apply_pi_controller(error);
         // Saturate the change of speed
         let diff = v_s - self.v_s;
@@ -208,51 +198,48 @@ impl Controller {
         last_stamp: Instant,
         node_id: u16,
     ) -> ((u64, Instant), i64, i64) {
-        // Calculate skews
         let my_diff = (rx_pkt.rx_done_instant - last_stamp).as_micros();
         let predicted_elapsed = (my_diff as i64 + self.calc_drift_duration(my_diff)) as u64;
-        // let predicted_elapsed = my_diff;
         let my_stamp = predicted_elapsed + old_gps;
 
         // Check if a t3 delta is availale for us
-        let nw_delay = if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id)
-        {
-            // delta is our T3 - T2
-            let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
-            let delta_down = if delta_down > 1_000_000 {
-                0
+        let (dup, ddown) =
+            if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id) {
+                let v = (my_diff + old_gps) as i64 - hb.gps_time_us as i64;
+                if v > 0 && *delta_up > 0 {
+                    self.blue_os.add_uv(*delta_up as u32, v as u32);
+                    (*delta_up, v)
+                } else {
+                    let delta_down = my_stamp as i64 - hb.gps_time_us as i64;
+                    (*delta_up, delta_down)
+                }
             } else {
-                delta_down
+                (0, 0)
             };
-            let up_ms = *delta_up as f32 / 1000.0;
-            let down_ms = delta_down as f32 / 1000.0;
+        let (nw_delay, offset) = if let Some(offset_blue) = self.blue_os.calc_offset() {
+            let (delay, _offset, bias) = self.blue_os.parameter_estimation();
 
-            let nw_delay = (delta_down + *delta_up as i64) / 2;
             info!(
-                "[DELTAS]|{}|{}|{}|",
-                up_ms,
-                down_ms,
-                nw_delay as f32 / 1000.0
+                " !!!!! ---- USING BLUE OS = {},\tdelay={}, bias={}",
+                offset_blue, delay, bias
             );
-            let v = (my_diff + old_gps) as i64 - hb.gps_time_us as i64;
-            if v > 0 && *delta_up > 0 {
-                self.blue_os.add_uv(*delta_up as u32, v as u32);
-            }
-            nw_delay
-            // (*delta_up / 2) as i64
+            (delay as i64, offset_blue.max(0) as u64)
+            // delay as i64
+            // (bias as i64, v)
         } else {
-            0
+            // delta is our T3 - T2
+            ((ddown + dup as i64) / 2, 0)
         };
-
-        // Simple filter ofr now
-        // let avg_delay = (self.prev_delay + nw_delay) / 2;
+        info!(
+            "[DELTAS]|{}|{}|{}|",
+            dup as f32 / 1000.0,
+            ddown as f32 / 1000.0,
+            nw_delay as f32 / 1000.0
+        );
 
         // Use the network delay to make up for transmission time, etc.
         let current_true_time = hb.gps_time_us as i64 + nw_delay;
-
-        // Now update drift
         let gw_diff = current_true_time - old_gps as i64;
-
         // error ms - drift ms
         let err = gw_diff - predicted_elapsed as i64;
 
@@ -266,13 +253,11 @@ impl Controller {
                 rx_pkt.rx_done_instant,
             )
         } else {
-            ((my_stamp), rx_pkt.rx_done_instant)
+            let adjusted_instant = rx_pkt.rx_done_instant + Duration::from_micros(offset);
+            ((my_stamp + offset), adjusted_instant)
         };
-        // let time_sync = (current_true_time as u64, rx_pkt.rx_done_instant);
 
-        // let delta_err = err - self.prev_err;
-        let delay = hb.gps_time_us as i64 - my_stamp as i64;
-        (time_sync, err, delay)
+        (time_sync, err, nw_delay)
     }
 
     fn apply_pi_controller(&self, err: i64) -> i64 {
@@ -292,7 +277,7 @@ mod controller_tests {
     use crate::policy::tdma::SyncBeacon;
     use embassy_time::{Duration, Instant};
 
-    fn make_controller(v_s: i64, kp: i64, ki: i64) -> Controller {
+    fn make_controller(v_s: i64, kp: i64, ki: i64) -> Controller<10> {
         Controller::new(v_s, kp, ki)
     }
 
