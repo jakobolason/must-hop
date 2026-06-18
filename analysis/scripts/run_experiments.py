@@ -22,26 +22,26 @@ from typing import Any
 # ]
 
 # EXPERIMENT 2: Test controller with different spreading factors
-# SFs = [5, 6, 7, 8, 9, 10, 11]
-# EXPERIMENTS = [
-#     {"sf": sf, "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 15} for sf in SFs
-# ]
+SFs = [5, 6, 7, 8, 9, 10, 11]
+EXPERIMENTS = [
+    {"sf": sf, "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 6} for sf in SFs
+]
 
 # EXPERIMENT 3: Test different heartbeat intervals
-TAUS = [15, 20, 25, 30]
-KPKIs = [(4, 5), (2, 3)]
-EXPERIMENTS = [
-    {
-        "sf": 9,
-        "bw": 125,
-        "kp": int(kp / (tau / 100)),
-        "ki": int(ki / (tau / 100)),
-        "tau": tau,
-        "times": 1,
-    }
-    for tau in TAUS
-    for kp, ki in KPKIs
-]
+# TAUS = [15, 20, 25, 30]
+# KPKIs = [(4, 5), (2, 3)]
+# EXPERIMENTS = [
+#     {
+#         "sf": 9,
+#         "bw": 125,
+#         "kp": int(kp / (tau / 100)),
+#         "ki": int(ki / (tau / 100)),
+#         "tau": tau,
+#         "times": 1,
+#     }
+#     for tau in TAUS
+#     for kp, ki in KPKIs
+# ]
 
 
 # Nodes: list of {"node_id": "<source id>", "probe_id": "<probe serial>"}
@@ -53,7 +53,7 @@ NODES = [
 
 
 # Seconds per experiment run (~10 min default)
-DURATION = 7200
+DURATION = 1000
 
 # Seconds to wait between runs for radio settling
 INTER_RUN_DELAY = 30
