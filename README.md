@@ -1,5 +1,23 @@
 # Multi hop networking implementation
 
+<div align="center">
+  <!-- Crates -->
+  <a href="https://crates.io/crates/must-hop">
+      <img src="https://img.shields.io/crates/v/must-hop.svg?style=flat-square"
+      alt="Crates.io version" />
+  </a>
+  <!-- Docs -->
+  <a href="https://docs.rs/must-hop">
+    <img src="https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square"
+      alt="docs.rs docs" />
+  </a>
+  <!-- Downloads -->
+  <a href="https://crates.io/crates/must-hop">
+    <img src="https://img.shields.io/crates/d/must-hop.svg?style=flat-square"
+      alt="Download" />
+  </a>
+</div>
+
 This project aims to create a multi hop network of multiple sensors in a chain topology sending sensor information to a GW who relays this information to a remote server.
 
 Meant as the source code for my bachelor's thesis, which explores the emerging world of LoRa, embedded Rust and a goal of creating a small device for a sensor network on power lines and reducing the gateway / sensor ratio.
