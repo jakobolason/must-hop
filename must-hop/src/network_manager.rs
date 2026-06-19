@@ -105,12 +105,12 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
 }
 
 impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
-    pub fn new(source_id: u16, timeout_ms: u32, max_retries: u8) -> Self {
+    pub fn new(source_id: u16, timeout_ms: u32, max_retries: u8, gw_hops: Option<u8>) -> Self {
         Self {
             pending_acks: Vec::new(),
             recent_seen: RecentSeen::default(),
             // Default to max, only have a reasonable count if GW present
-            gw_hops: 255,
+            gw_hops: gw_hops.unwrap_or(255),
             source_id,
             timeout_ms,
             _max_retries: max_retries,
@@ -256,9 +256,13 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 // If incoming route has the same length, then discard this
                 return Ok(None);
             }
-            // trace!("!!! SENDING HEARTBEAT ON {}", pkt.packet_id);
+            trace!(
+                "!!! SENDING HEARTBEAT ON {}, hops: {}",
+                pkt.packet_id, pkt.hop_to_gw
+            );
             // GW sends 0, first node has 1 hop, therefore:
-            self.gw_hops = pkt.hop_count + 1;
+            self.gw_hops = pkt.hop_to_gw.saturating_add(1);
+            trace!("My GW hops is now: {}", self.gw_hops);
             // Add to recent seen, to compare later
             self.recent_seen.push((pkt.source_id, pkt.packet_id));
             // Fire and forget
@@ -400,8 +404,6 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         //     "----------- Sending Heartbeat with packet id: {} -------------",
         //     self.next_packet_id
         // );
-        // If we are calling this, then we are a GW
-        // self.gw_hops = 0;
         Ok(MHPacket {
             destination_id: 0, // broadcast id
             packet_type: PacketType::HeartBeat,
@@ -409,7 +411,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             source_id: self.source_id,
             payload: Vec::from_slice(&[]).map_err(|_| NetworkManagerError::BufferFull)?,
             hop_count: 0,
-            hop_to_gw: 0,
+            hop_to_gw: self.gw_hops,
         })
     }
 }
@@ -421,7 +423,7 @@ mod tests {
 
     // A helper to make a dummy manager for testing
     fn setup_manager() -> NetworkManager<40, 5> {
-        NetworkManager::new(2, 10, 3)
+        NetworkManager::new(2, 10, 3, None)
     }
 
     #[test]
@@ -522,7 +524,7 @@ mod tests {
     #[test]
     fn packet_loss_ratio() {
         // use timeout of 5 to test retx out
-        let mut manager = NetworkManager::<40, 5>::new(4, 0, 5);
+        let mut manager = NetworkManager::<40, 5>::new(4, 0, 5, None);
         let payload = Vec::from_slice(&[1, 2, 3]).unwrap();
         manager.gw_hops = 2;
 

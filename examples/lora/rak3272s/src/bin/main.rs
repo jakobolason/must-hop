@@ -258,8 +258,12 @@ pub async fn lora_task(
         .set_max_toa(MAX_TOA_MS)
         .set_tau_hb(tau)
         .build();
-    let nm =
-        network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(source_id, timeout, max_retries);
+    let nm = network_manager::NetworkManager::<MAX_PACK_LEN, LEN>::new(
+        source_id,
+        timeout,
+        max_retries,
+        None,
+    );
     let mut router = mesh_router::MeshRouter::new(node, nm, mac);
 
     loop {

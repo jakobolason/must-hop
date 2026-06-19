@@ -138,7 +138,7 @@ async fn mesh_topology() {
             node_id: node_a,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -147,7 +147,7 @@ async fn mesh_topology() {
             node_id: node_b,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -156,7 +156,7 @@ async fn mesh_topology() {
             node_id: node_c,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -165,7 +165,7 @@ async fn mesh_topology() {
             node_id: node_d,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -237,7 +237,7 @@ async fn node_b_to_node_c() {
             node_id: node_a,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -246,7 +246,7 @@ async fn node_b_to_node_c() {
             node_id: node_b,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -255,7 +255,7 @@ async fn node_b_to_node_c() {
             node_id: node_c,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -312,7 +312,7 @@ async fn multiple_nodes_can_hear_a() {
             node_id: node_a,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -321,7 +321,7 @@ async fn multiple_nodes_can_hear_a() {
             node_id: node_b,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -330,7 +330,7 @@ async fn multiple_nodes_can_hear_a() {
             node_id: node_c,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -339,7 +339,7 @@ async fn multiple_nodes_can_hear_a() {
             node_id: node_d,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -411,7 +411,7 @@ async fn gw_communication() {
             node_id: node_a,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -420,7 +420,7 @@ async fn gw_communication() {
             node_id: node_b,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -429,7 +429,7 @@ async fn gw_communication() {
             node_id: node_c,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -438,7 +438,7 @@ async fn gw_communication() {
             node_id: node_d,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -447,7 +447,7 @@ async fn gw_communication() {
             node_id: gw,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(gw, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(gw, 5, 3, None),
         RandomAccessMac::new(GatewayPolicy::new(10)),
     );
     // First GW sends out Bootup
@@ -531,7 +531,7 @@ async fn complex_gw_communication() {
             node_id: node_a,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_a, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -540,7 +540,7 @@ async fn complex_gw_communication() {
             node_id: node_b,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_b, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -549,7 +549,7 @@ async fn complex_gw_communication() {
             node_id: node_c,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_c, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -558,7 +558,7 @@ async fn complex_gw_communication() {
             node_id: node_d,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(node_d, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -567,7 +567,7 @@ async fn complex_gw_communication() {
             node_id: gw,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(gw, 5, 3),
+        NetworkManager::<SIZE, LEN>::new(gw, 5, 3, Some(0)),
         RandomAccessMac::new(GatewayPolicy::new(10)),
     );
     // First GW sends out Bootup
@@ -649,7 +649,7 @@ async fn packet_loss() {
             node_id: node_a,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_a, 1, 3),
+        NetworkManager::<SIZE, LEN>::new(node_a, 1, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -658,7 +658,7 @@ async fn packet_loss() {
             node_id: node_b,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_b, 1, 3),
+        NetworkManager::<SIZE, LEN>::new(node_b, 1, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -667,7 +667,7 @@ async fn packet_loss() {
             node_id: node_c,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_c, 1, 3),
+        NetworkManager::<SIZE, LEN>::new(node_c, 1, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -676,7 +676,7 @@ async fn packet_loss() {
             node_id: node_d,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(node_d, 1, 3),
+        NetworkManager::<SIZE, LEN>::new(node_d, 1, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
 
@@ -685,7 +685,7 @@ async fn packet_loss() {
             node_id: gw,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(gw, 1, 3),
+        NetworkManager::<SIZE, LEN>::new(gw, 1, 3, Some(0)),
         RandomAccessMac::new(GatewayPolicy::new(10)),
     );
     // First GW sends out Bootup

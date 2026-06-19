@@ -432,6 +432,8 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             Some(tple) => tple,
             None => return,
         };
+        info!("Pkts hop: {}", pkt.hop_to_gw);
+        info!("My hops: {}", self.slot_manager.gw_hops);
 
         // Resync node to heartbeat's announced slot, if hb came closer to gw than me
         let should_use_pkt = match self.slot_manager.leader_id {
@@ -441,7 +443,6 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             }
         };
         let (src, val) = if should_use_pkt {
-            // self.time_manager.last_hb_instant = Some(Instant::now());
             // Controller updates internal drift, and returns adjusted stamps
             self.time_manager.time_sync = Some(self.time_manager.controller.run_transferfunction(
                 &alloc,
@@ -476,11 +477,6 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
                 // pkt.hop_to_gw
             }
 
-            // If this is leader, then we check if the tau_hb matches theirs
-            // if leader_id == pkt.source_id && alloc.tau_hb != self.slot_manager.tau_hb.as_secs() {
-            //     self.slot_manager.tau_hb = TauHbMode::from_secs(alloc.tau_hb);
-            //     info!("Swicthed Tau mode to {:?}", self.slot_manager.tau_hb);
-            // }
             (leader_id, self.time_manager.controller.prev_err as i32)
         } else {
             // If a follower's error is above threshold, increase out of sync counter

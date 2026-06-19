@@ -120,6 +120,10 @@ impl<const N: usize> BlueOs<N> {
     }
 }
 
+const VF_SATURATION: i64 = 100_000;
+// mu s
+const DELTA_MAX: i32 = 50_000;
+
 #[derive(Default)]
 pub(crate) struct Controller<const N: usize> {
     /// speed of clock drift, used to try and mitigate clock drift at nodes with no HSE
@@ -171,9 +175,9 @@ impl<const N: usize> Controller<N> {
         let v_s = self.apply_pi_controller(error);
         // Saturate the change of speed
         let diff = v_s - self.v_s;
-        let v_s = if diff.abs() > 2_000_000 {
+        let v_s = if diff.abs() > VF_SATURATION {
             info!("SATURATED!! sign is {}", diff.signum());
-            self.v_s + diff.signum() * 2_000_000
+            self.v_s + diff.signum() * VF_SATURATION
         } else {
             v_s
         };
@@ -207,16 +211,17 @@ impl<const N: usize> Controller<N> {
         let my_stamp = predicted_elapsed + old_gps;
 
         // Check if a t3 delta is availale for us
-        let (dup, ddown) =
-            if let Some((_, delta_up)) = hb.feedback_vec.iter().find(|t| t.0 == node_id) {
-                let v = my_stamp as i64 - hb.gps_time_us as i64;
-                if v > 0 && *delta_up > 0 {
-                    self.blue_os.add_uv(*delta_up as u32, v as u32);
-                }
-                (*delta_up, v)
-            } else {
-                (0, 0)
-            };
+        let (dup, ddown) = if let Some((_, delta_up)) =
+            hb.feedback_vec.iter().find(|t| t.0 == node_id)
+        {
+            let v = my_stamp as i64 - hb.gps_time_us as i64;
+            if v > 0 && v.abs() < DELTA_MAX as i64 && *delta_up > 0 && delta_up.abs() < DELTA_MAX {
+                self.blue_os.add_uv(*delta_up as u32, v as u32);
+            }
+            (*delta_up, v)
+        } else {
+            (0, 0)
+        };
         let (nw_delay, offset) = if let Some(offset_blue) = self.blue_os.calc_offset() {
             // let (_delay, _offset, bias) = self.blue_os.parameter_estimation();
 

@@ -32,7 +32,7 @@ pub async fn lora_task<Node, T, M, const SIZE: usize, const LEN: usize>(
     T: Into<Vec<u8, SIZE>> + Serialize + Copy,
     M: embassy_sync::blocking_mutex::raw::RawMutex,
 {
-    let nm = NetworkManager::<SIZE, LEN>::new(source_id, timeout, max_retries);
+    let nm = NetworkManager::<SIZE, LEN>::new(source_id, timeout, max_retries, None);
     let mut router = MeshRouter::new(node, nm, mac);
     info!("Waiting for packet or sensor data to send");
     loop {
