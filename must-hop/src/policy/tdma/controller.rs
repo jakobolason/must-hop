@@ -231,8 +231,10 @@ impl<const N: usize> Controller<N> {
             //     offset_blue, nw_delay, bias
             // );
             (nw_delay as i64, offset_blue.max(0) as u64)
-        } else {
+        } else if dup.abs() < DELTA_MAX && ddown.abs() < DELTA_MAX as i64 {
             ((ddown + dup as i64) / 2, 0)
+        } else {
+            (0, 0)
         };
         info!(
             "[DELTAS]|{}|{}|{}|",

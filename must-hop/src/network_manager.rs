@@ -250,7 +250,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         if pkt.packet_type == PacketType::HeartBeat {
             // trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
             // TODO: What about GW failure/node failure, altering this?
-            if pkt.hop_count >= self.gw_hops
+            if pkt.hop_to_gw >= self.gw_hops
                 || self.recent_seen.contains((pkt.source_id, pkt.packet_id))
             {
                 // If incoming route has the same length, then discard this

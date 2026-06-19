@@ -85,6 +85,16 @@ async fn main() {
 
     let mut app = must_dash::app::App::new(false, DIN_MAP);
     for (i, node) in args.nodes.iter().enumerate() {
+        let (curr_alt_sf, curr_sf) = if !alt_sf.is_empty() {
+            if i % 2 == 0 {
+                (args.sf.clone(), alt_sf.clone())
+            } else {
+                (alt_sf.clone(), args.sf.clone())
+            }
+        } else {
+            (alt_sf.clone(), args.sf.clone())
+        };
+        println!("SF: {}, ALT SF: {}", curr_sf, curr_alt_sf);
         app.configured_nodes.push(NodeConfig {
             probe_index: i,
             probe_name: format!("probe-{}", node.node_id),
@@ -92,16 +102,17 @@ async fn main() {
             kp: args.kp.clone(),
             ki: args.ki.clone(),
             source_id: node.node_id.clone(),
-            sf: args.sf.clone(),
+            sf: curr_sf,
             bw: args.bw.clone(),
             tau: args.tau.clone(),
-            alt_sf: alt_sf.clone(),
+            alt_sf: curr_alt_sf,
         });
     }
     app.gateway_config.sf = args.sf.clone();
     app.gateway_config.bw = args.bw.clone();
     app.gateway_config.tau = args.tau.clone();
 
+    println!("GW SF: {}", args.sf.clone());
     let (tx, mut rx) = mpsc::channel(100);
     let descriptors = app.build_descriptors();
     app.init_sources(&descriptors);

@@ -22,10 +22,10 @@ from typing import Any
 # ]
 
 # EXPERIMENT 2: Test controller with different spreading factors
-SFs = [5, 6, 7, 8, 9, 10, 11]
-EXPERIMENTS = [
-    {"sf": sf, "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 6} for sf in SFs
-]
+# SFs = [5, 6, 7, 8, 9, 10, 11]
+# EXPERIMENTS = [
+#     {"sf": sf, "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 6} for sf in SFs
+# ]
 
 # EXPERIMENT 3: Test different heartbeat intervals
 # TAUS = [15, 20, 25, 30]
@@ -43,6 +43,12 @@ EXPERIMENTS = [
 #     for kp, ki in KPKIs
 # ]
 
+# Experiment 4: Different SFs, to model topology (GW) <-> (A) <-> (B)
+PAIRS = [(5, 6), (7, 8), (9, 10)]
+EXPERIMENTS = [
+    {"sf": pair[0], "bw": 125, "kp": 40, "ki": 50, "tau": 10, "times": 1, "alt_sf": pair[1]} for pair in PAIRS 
+]
+
 
 # Nodes: list of {"node_id": "<source id>", "probe_id": "<probe serial>"}
 # Passed to headless as positional args in "node_id:probe_id" format.
@@ -53,7 +59,7 @@ NODES = [
 
 
 # Seconds per experiment run (~10 min default)
-DURATION = 1000
+DURATION = 120
 
 # Seconds to wait between runs for radio settling
 INTER_RUN_DELAY = 30
@@ -95,12 +101,28 @@ def run_experiment(
     kp: int,
     ki: int,
     tau: int,
+    alt_sf: str,
     nodes: list[dict[str, str]],
     duration: int,
 ) -> dict[str, Any]:
     node_args = [f"{n['node_id']}:{n['probe_id']}" for n in nodes]
     print(f"[runner] SF={sf} BW={bw} nodes={node_args} duration={duration}s")
-
+    print(str(HEADLESS_BIN),
+            "--sf",
+            str(sf),
+            "--bw",
+            str(bw),
+            "--kp",
+            str(kp),
+            "--ki",
+            str(ki),
+            "--tau",
+            str(tau),
+            "--alt_sf",
+            alt_sf,
+            "--duration",
+            str(duration),
+            *node_args,)
     start = datetime.now()
     proc = subprocess.Popen(
         [
@@ -115,6 +137,8 @@ def run_experiment(
             str(ki),
             "--tau",
             str(tau),
+            "--alt-sf",
+            alt_sf,
             "--duration",
             str(duration),
             *node_args,
@@ -178,11 +202,13 @@ def main() -> None:
     try:
         for i, exp in enumerate(expanded):
             print(f"== Experiment {i + 1}/{len(expanded)} ==")
+            alt_sf = str(exp["alt_sf"]) if exp.get("alt_sf") is not None else 'None'
             record = run_experiment(
                 sf=exp["sf"],
                 bw=exp["bw"],
                 kp=exp["kp"],
                 ki=exp["ki"],
+                alt_sf=alt_sf,
                 tau=exp["tau"],
                 nodes=NODES,
                 duration=DURATION,

@@ -411,7 +411,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         self.time_manager.controller.prev_err = 0;
     }
 
-    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: &RxPacket) {
+    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: &RxPacket, calc_feedback: bool) {
         // Look for a heartbeat and get allocation from byte slices
         let received_hb = pkts
             .iter()
@@ -480,10 +480,11 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             (leader_id, self.time_manager.controller.prev_err as i32)
         } else {
             // If a follower's error is above threshold, increase out of sync counter
-            if let Some((_, prev_err)) = alloc
-                .feedback_vec
-                .iter()
-                .find(|t| t.0 == self.slot_manager.node_id)
+            if calc_feedback
+                && let Some((_, prev_err)) = alloc
+                    .feedback_vec
+                    .iter()
+                    .find(|t| t.0 == self.slot_manager.node_id)
             {
                 if prev_err.unsigned_abs() > self.time_manager.err_threshold {
                     info!("Node out of sync ...{}", prev_err);
@@ -683,6 +684,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         node: &mut Node,
         rx_buffer: &mut Node::ReceiveBuffer,
         with_timeout: Option<CoreDuration>,
+        calc_feedback: bool,
     ) -> Option<(Vec<MHPacket<SIZE>, LEN>, RxPacket)>
     where
         Node: MHNode<SIZE, LEN>,
@@ -691,7 +693,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         if let Ok(conn) = conn
             && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
         {
-            self.sync_epoch(&pkts, &rx_pkt);
+            self.sync_epoch(&pkts, &rx_pkt, calc_feedback);
 
             Some((pkts, rx_pkt))
         } else {
@@ -796,7 +798,7 @@ where
         let Some(timestamps) = self.time_manager.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             if let Some((pkts, _rx_pkt)) = self
-                .rx(node, rx_buffer, Some(CoreDuration::from_secs(10)))
+                .rx(node, rx_buffer, Some(CoreDuration::from_secs(10)), false)
                 .await
             {
                 if self.time_manager.hbt_pkt.is_some()
@@ -840,7 +842,7 @@ where
             // Shuold  only be done after heartbeats
             if wait_after_hb
                 && let Some((pkts, _rx_pkt)) = self
-                    .rx(node, rx_buffer, Some(CoreDuration::from_millis(200)))
+                    .rx(node, rx_buffer, Some(CoreDuration::from_millis(200)), false)
                     .await
             {
                 info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts.len());
@@ -856,6 +858,7 @@ where
                     Some(CoreDuration::from_millis(
                         self.slot_manager.rx_window as u64,
                     )),
+                    true,
                 )
                 .await
             {
