@@ -213,6 +213,8 @@ impl<const N: usize> Controller<N> {
         // Check if a t3 delta is availale for us
         let (dup, ddown) = if let Some((_, delta_up)) =
             hb.feedback_vec.iter().find(|t| t.0 == node_id)
+        // Possible bug fix, 
+            && hb.gps_time_us != 0
         {
             let v = my_stamp as i64 - hb.gps_time_us as i64;
             if v > 0 && v.abs() < DELTA_MAX as i64 && *delta_up > 0 && delta_up.abs() < DELTA_MAX {
