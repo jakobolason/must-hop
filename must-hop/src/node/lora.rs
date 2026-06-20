@@ -62,7 +62,7 @@ pub enum RadioState {
 
 /// A node implementatino for lora, where a LoRa interface variant type has to be implemented to
 /// use. An IV for a SX126x is shown in `/examples`
-pub struct LoraNode<'a, RK, DLY, const SIZE: usize, const LEN: usize>
+pub struct LoraNode<'a, RK, DLY, const SIZE: usize, const LEN: usize, const OUTPUT_POWER: i32>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -86,7 +86,8 @@ where
 const INTERCEPT: u64 = 690;
 const SLOPE: u64 = 1;
 
-impl<'a, RK, DLY, const SIZE: usize, const LEN: usize> LoraNode<'a, RK, DLY, SIZE, LEN>
+impl<'a, RK, DLY, const SIZE: usize, const LEN: usize, const OUTPUT_POWER: i32>
+    LoraNode<'a, RK, DLY, SIZE, LEN, OUTPUT_POWER>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -102,14 +103,93 @@ where
     fn avg_slice_delay(&self, payload_len: u8) -> u64 {
         INTERCEPT + SLOPE * payload_len as u64
     }
+    // }
+    //
+    // impl<'a, RK, DLY, const N: usize, const LEN: usize> LoraNode<'a, RK, DLY, N, LEN>
+    // where
+    //     RK: RadioKind,
+    //     DLY: DelayNs,
+    // {
+    /// SF5 and SF6 require a minimum preamble of 12 symbols on the SX1262 for reliable
+    /// preamble detection. SF7–SF12 use the standard 8-symbol preamble.
+    fn min_preamble_for_sf(sf: SpreadingFactor, requested: u16) -> u16 {
+        match sf {
+            SpreadingFactor::_5 | SpreadingFactor::_6 => requested.max(12),
+            _ => requested,
+        }
+    }
+
+    /// Takes a LoRa radio, transmit parameters and optionally receive parameters. If receive
+    /// parameters are not given, then tp are used for both Tx and Rx
+    pub fn new(
+        lora: &'a mut LoRa<RK, DLY>,
+        pack_params: RadioPackParams,
+        tx_mod: RatioModParams,
+        rx_opt: Option<RatioModParams>,
+    ) -> Result<Self, RadioError> {
+        let mdltn_params =
+            lora.create_modulation_params(tx_mod.sf, tx_mod.bw, tx_mod.cr, tx_mod.lora_hz)?;
+
+        let tx_preamble = Self::min_preamble_for_sf(tx_mod.sf, pack_params.pre_amp);
+        let tx_pkt_params = lora.create_rx_packet_params(
+            tx_preamble,
+            pack_params.imp_hed,
+            pack_params.max_pack_len as u8,
+            pack_params.crc,
+            pack_params.iq,
+            &mdltn_params,
+        )?;
+
+        let alt_mdtln_params = if let Some(rx_mod) = rx_opt {
+            let rx_mdltn_params =
+                lora.create_modulation_params(rx_mod.sf, rx_mod.bw, rx_mod.cr, rx_mod.lora_hz)?;
+            Some(rx_mdltn_params)
+        } else {
+            None
+        };
+        let rx_mdltn_params = alt_mdtln_params.as_ref().unwrap_or(&mdltn_params);
+
+        // Derive RX preamble from the RX SF (may differ from TX if alt modulation is set)
+        let rx_sf = rx_opt.map(|r| r.sf).unwrap_or(tx_mod.sf);
+        let rx_preamble = Self::min_preamble_for_sf(rx_sf, pack_params.pre_amp);
+        let rx_pkt_params = lora.create_rx_packet_params(
+            rx_preamble,
+            pack_params.imp_hed,
+            pack_params.max_pack_len as u8,
+            pack_params.crc,
+            pack_params.iq,
+            rx_mdltn_params,
+        )?;
+
+        let bb_mod = BaseBandModulationParams::new(tx_mod.sf, tx_mod.bw, tx_mod.cr);
+
+        Ok(Self {
+            lora,
+            tx_pkt_params,
+            rx_pkt_params,
+            mdltn_params,
+            alt_mdtln_params,
+            done_instant: None,
+            bb_mod,
+            pa_len: Some(pack_params.pre_amp as u8),
+            explicit_header: !pack_params.imp_hed,
+            toa_sum: 0,
+        })
+    }
+
+    pub async fn prepare_for_rx(&mut self, rx_mode: RxMode) -> Result<(), RadioError> {
+        let mdltn_params = match &self.alt_mdtln_params {
+            Some(p) => p,
+            None => &self.mdltn_params,
+        };
+        self.lora
+            .prepare_for_rx(rx_mode, mdltn_params, &self.rx_pkt_params)
+            .await
+    }
 }
 
-// In dBm, in low power mode is clamped between [-17, 15]
-// in HighPowerPA, clamped between [-9, 22]
-const OUTPUT_POWER: i32 = 7;
-
-impl<RK, DLY, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN>
-    for LoraNode<'_, RK, DLY, SIZE, LEN>
+impl<RK, DLY, const SIZE: usize, const LEN: usize, const OUTPUT_POWER: i32> MHNode<SIZE, LEN>
+    for LoraNode<'_, RK, DLY, SIZE, LEN, OUTPUT_POWER>
 where
     RK: RadioKind,
     DLY: DelayNs,
@@ -233,88 +313,5 @@ where
 
     fn calc_tx_delay(&self, payload_len: usize) -> u64 {
         self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len as u8)
-    }
-}
-
-impl<'a, RK, DLY, const N: usize, const LEN: usize> LoraNode<'a, RK, DLY, N, LEN>
-where
-    RK: RadioKind,
-    DLY: DelayNs,
-{
-    /// SF5 and SF6 require a minimum preamble of 12 symbols on the SX1262 for reliable
-    /// preamble detection. SF7–SF12 use the standard 8-symbol preamble.
-    fn min_preamble_for_sf(sf: SpreadingFactor, requested: u16) -> u16 {
-        match sf {
-            SpreadingFactor::_5 | SpreadingFactor::_6 => requested.max(12),
-            _ => requested,
-        }
-    }
-
-    /// Takes a LoRa radio, transmit parameters and optionally receive parameters. If receive
-    /// parameters are not given, then tp are used for both Tx and Rx
-    pub fn new(
-        lora: &'a mut LoRa<RK, DLY>,
-        pack_params: RadioPackParams,
-        tx_mod: RatioModParams,
-        rx_opt: Option<RatioModParams>,
-    ) -> Result<Self, RadioError> {
-        let mdltn_params =
-            lora.create_modulation_params(tx_mod.sf, tx_mod.bw, tx_mod.cr, tx_mod.lora_hz)?;
-
-        let tx_preamble = Self::min_preamble_for_sf(tx_mod.sf, pack_params.pre_amp);
-        let tx_pkt_params = lora.create_rx_packet_params(
-            tx_preamble,
-            pack_params.imp_hed,
-            pack_params.max_pack_len as u8,
-            pack_params.crc,
-            pack_params.iq,
-            &mdltn_params,
-        )?;
-
-        let alt_mdtln_params = if let Some(rx_mod) = rx_opt {
-            let rx_mdltn_params =
-                lora.create_modulation_params(rx_mod.sf, rx_mod.bw, rx_mod.cr, rx_mod.lora_hz)?;
-            Some(rx_mdltn_params)
-        } else {
-            None
-        };
-        let rx_mdltn_params = alt_mdtln_params.as_ref().unwrap_or(&mdltn_params);
-
-        // Derive RX preamble from the RX SF (may differ from TX if alt modulation is set)
-        let rx_sf = rx_opt.map(|r| r.sf).unwrap_or(tx_mod.sf);
-        let rx_preamble = Self::min_preamble_for_sf(rx_sf, pack_params.pre_amp);
-        let rx_pkt_params = lora.create_rx_packet_params(
-            rx_preamble,
-            pack_params.imp_hed,
-            pack_params.max_pack_len as u8,
-            pack_params.crc,
-            pack_params.iq,
-            rx_mdltn_params,
-        )?;
-
-        let bb_mod = BaseBandModulationParams::new(tx_mod.sf, tx_mod.bw, tx_mod.cr);
-
-        Ok(Self {
-            lora,
-            tx_pkt_params,
-            rx_pkt_params,
-            mdltn_params,
-            alt_mdtln_params,
-            done_instant: None,
-            bb_mod,
-            pa_len: Some(pack_params.pre_amp as u8),
-            explicit_header: !pack_params.imp_hed,
-            toa_sum: 0,
-        })
-    }
-
-    pub async fn prepare_for_rx(&mut self, rx_mode: RxMode) -> Result<(), RadioError> {
-        let mdltn_params = match &self.alt_mdtln_params {
-            Some(p) => p,
-            None => &self.mdltn_params,
-        };
-        self.lora
-            .prepare_for_rx(rx_mode, mdltn_params, &self.rx_pkt_params)
-            .await
     }
 }

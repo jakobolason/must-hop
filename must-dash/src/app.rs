@@ -618,7 +618,7 @@ impl App {
         let tag = parts[0];
         match role {
             LogRole::Node => {
-                log::debug!("node({source_id}) | tag={tag:?} parts={:?}", &parts[1..]);
+                log::debug!("node({source_id}) | tag={tag:?} parts={:?}", &parts[1..],);
                 let idx = self
                     .node_stats
                     .iter()
@@ -675,7 +675,7 @@ impl App {
                     log::info!("Got post size: {size}");
                     self.node_stats[idx].stats.on_node_slice_post(ts, size);
                 } else if tag.contains("[PKT_LOSS]")
-                    && parts.len() == 2
+                    && parts.len() == 3
                     && let Ok(pct) = extract::<f32>(parts[1])
                 {
                     self.node_stats[idx].stats.on_packet_loss(pct);

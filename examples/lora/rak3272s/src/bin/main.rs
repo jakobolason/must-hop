@@ -88,24 +88,6 @@ async fn main(spawner: Spawner) {
         config.enable_debug_during_sleep = true;
     }
     let p = embassy_stm32::init(config);
-    info!("Checking this: {}", embassy_stm32::pac::RCC.cr().read());
-    let bdcr = embassy_stm32::pac::RCC.bdcr().read();
-    info!(
-        "BDCR: lseon={} lserdy={} rtcsel={}",
-        bdcr.lseon(),
-        bdcr.lserdy(),
-        bdcr.rtcsel() as u8
-    );
-    // confirm LSE is actually ready (this is the only documented precondition)
-    while !embassy_stm32::pac::RCC.bdcr().read().lserdy() {}
-    info!("LSE confirmed ready; attempting MSIPLLEN=1");
-
-    // write and read back immediately
-    embassy_stm32::pac::RCC
-        .cr()
-        .modify(|w| w.set_msipllen(true));
-    let after = embassy_stm32::pac::RCC.cr().read();
-    info!("after manual write: msipllen={}", after.msipllen());
 
     info!("config done...");
     let rx_pin = Output::new(p.PB8, Level::Low, Speed::VeryHigh);
@@ -178,6 +160,9 @@ const MAX_RADIO_BUFFER: usize = 256; // kB
 const LEN: usize = 8; // floor(256/MAX_PACK_LEN)
 
 const GW_ID: u16 = 1;
+// In dBm, in low power mode is clamped between [-17, 15]
+// in HighPowerPA, clamped between [-9, 22]
+const OUTPUT_POWER: i32 = 7;
 
 // Compute the MAX TOA MS as a const, such that it is evaluted at build time instead of runtime
 const MAX_TOA_MS: u32 = {
@@ -239,7 +224,9 @@ pub async fn lora_task(
     });
     let timeout: u32 = 20_000;
     let max_retries = 3;
-    let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN>::new(&mut lora, tp, mp, alt_mdltn) {
+    let node = match LoraNode::<_, _, MAX_PACK_LEN, LEN, OUTPUT_POWER>::new(
+        &mut lora, tp, mp, alt_mdltn,
+    ) {
         Ok(node) => node,
         Err(e) => {
             error!("Failed to initialize lora node: {:?}", e);
