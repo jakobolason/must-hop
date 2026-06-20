@@ -42,17 +42,22 @@ def get_pct_in_low(df):
     return (false_time / total_time, first_index)
 
 
-def analyze_runs(runs, min_entries=10):
+def analyze_runs(runs, min_entries=5):
     """
-    Takes a list of run dicts and returns a list of result dicts, one per run.
-    Runs whose CSV files are missing, empty, or have fewer than `min_entries`
-    data rows are skipped with a printed warning (same strategy as
-    load_and_weight_datasets).
+    Takes a list of run dicts and returns a list of result dicts, **one per
+    node per run**: a 2-node run produces two result entries (distinguishable
+    via the `node_id` field). 1-node runs behave as before.
 
-      sf, bw, kp, ki, nodes,
+    Skips a run/node when the CSVs are missing, empty, or have fewer than
+    `min_entries` rows for that node.
+
+      sf, bw, kp, ki, tau, nodes,
+      node_id,
       mean_hw_delay, std_hw_delay,
-      pct_in_low  (fraction 0–1),
-      settling_index  (first row where tau_hb_high is True, or None)
+      mean_believed_err, std_believed_err,
+      mean_believed_speed, std_believed_speed,
+      pct_in_low (fraction 0–1),
+      settling_index (first row where tau_hb_high is True, or None)
     """
     results = []
     for run in runs:
@@ -64,50 +69,97 @@ def analyze_runs(runs, min_entries=10):
             print(f"  skip {label}: {e}")
             continue
 
-        if len(stats) < min_entries or len(hw_stats) < min_entries:
-            print(
-                f"  skip {label}: too few rows (main={len(stats)}, hw={len(hw_stats)}, need >{min_entries})"
-            )
+        if "node_id" not in stats.columns or "node_id" not in hw_stats.columns:
+            print(f"  skip {label}: missing node_id column in main_stats / hw_stats")
             continue
-
-        hw_delay = hw_stats["hardware_delay"]
-        mean = float(hw_delay.mean())
-        std = float(hw_delay.std())
-        pct_in_low, first_index = get_pct_in_low(stats)
-        # Controller's own belief about its sync error — should hover near 0 ms
-        # if the PI loop is steady (per-packet values from the [SYNC] event).
-        believed_err = (
-            stats["err_ms"] if "err_ms" in stats.columns else pd.Series(dtype=float)
-        )
-        mean_believed_err = (
-            float(believed_err.mean()) if not believed_err.empty else float("nan")
-        )
-        std_believed_err = (
-            float(believed_err.std()) if not believed_err.empty else float("nan")
-        )
 
         # Pull params from the filename so fields not present in the run dict
         # (notably `tau` in older manifests) are still available downstream.
         fname_params = parse_params_from_filename(run["hw_stats"])
+        nodes_total = len(run.get("nodes", [])) or fname_params.get("nodes")
 
-        results.append(
-            {
-                "sf": run.get("sf", fname_params.get("sf")),
-                "bw": run.get("bw", fname_params.get("bw")),
-                "kp": run.get("kp", fname_params.get("kp")),
-                "ki": run.get("ki", fname_params.get("ki")),
-                "tau": run.get("tau", fname_params.get("tau")),
-                "nodes": len(run.get("nodes", [])) or fname_params.get("nodes"),
-                "mean_hw_delay": mean,
-                "std_hw_delay": std,
-                "mean_believed_err": mean_believed_err,
-                "std_believed_err": std_believed_err,
-                "pct_in_low": float(pct_in_low),
-                "settling_index": first_index,
-                "main_stats": run["main_stats"],
-                "hw_stats": run["hw_stats"],
-            }
-        )
+        # Intersect node_ids that show up in both CSVs so we don't emit a row
+        # for a node that has main_stats but no hardware capture (or vice versa).
+        main_ids = set(stats["node_id"].unique())
+        hw_ids = set(hw_stats["node_id"].unique())
+        node_ids = sorted(main_ids & hw_ids)
+        if not node_ids:
+            print(
+                f"  skip {label}: no overlap between main_stats nodes "
+                f"({sorted(main_ids)}) and hw_stats nodes ({sorted(hw_ids)})"
+            )
+            continue
+        # runs = False
+        for node_id in node_ids:
+            # if runs:
+            # break
+            # runs = True
+            node_label = f"{label} node={node_id}"
+            node_main = stats[stats["node_id"] == node_id]
+            node_hw = hw_stats[hw_stats["node_id"] == node_id]
+            if len(node_main) < min_entries or len(node_hw) < min_entries:
+                print(
+                    f"  skip {node_label}: too few rows "
+                    f"(main={len(node_main)}, hw={len(node_hw)}, need >{min_entries})"
+                )
+                continue
+
+            hw_delay = node_hw["hardware_delay"]
+            mean = float(hw_delay.mean())
+            std = float(hw_delay.std())
+            pct_in_low, first_index = get_pct_in_low(node_main)
+
+            # Controller's own belief about its sync error (per-packet [SYNC]).
+            believed_err = (
+                node_main["err_ms"]
+                if "err_ms" in node_main.columns
+                else pd.Series(dtype=float)
+            )
+            mean_believed_err = (
+                float(believed_err.mean()) if not believed_err.empty else float("nan")
+            )
+            std_believed_err = (
+                float(believed_err.std()) if not believed_err.empty else float("nan")
+            )
+            # PI-loop output (drift correction velocity) — the `v_s` term in
+            # the controller, written as `new_speed` in main_stats.
+            believed_speed = (
+                node_main["new_speed"]
+                if "new_speed" in node_main.columns
+                else pd.Series(dtype=float)
+            )
+            mean_believed_speed = (
+                float(believed_speed.mean())
+                if not believed_speed.empty
+                else float("nan")
+            )
+            std_believed_speed = (
+                float(believed_speed.std())
+                if not believed_speed.empty
+                else float("nan")
+            )
+
+            results.append(
+                {
+                    "sf": run.get("sf", fname_params.get("sf")),
+                    "bw": run.get("bw", fname_params.get("bw")),
+                    "kp": run.get("kp", fname_params.get("kp")),
+                    "ki": run.get("ki", fname_params.get("ki")),
+                    "tau": run.get("tau", fname_params.get("tau")),
+                    "nodes": nodes_total,
+                    "node_id": node_id,
+                    "mean_hw_delay": mean,
+                    "std_hw_delay": std,
+                    "mean_believed_err": mean_believed_err,
+                    "std_believed_err": std_believed_err,
+                    "mean_believed_speed": mean_believed_speed,
+                    "std_believed_speed": std_believed_speed,
+                    "pct_in_low": float(pct_in_low),
+                    "settling_index": first_index,
+                    "main_stats": run["main_stats"],
+                    "hw_stats": run["hw_stats"],
+                }
+            )
     return results
 
 
@@ -138,19 +190,18 @@ def aggregate_group(group):
     settles = np.array(
         [r["settling_index"] for r in group if r["settling_index"] is not None]
     )
-    beliefs = np.array(
-        [r["mean_believed_err"] for r in group if "mean_believed_err" in r]
-    )
-    beliefs = beliefs[np.isfinite(beliefs)]
-
     q25, q75 = np.percentile(means, [25, 75])
-    if beliefs.size > 0:
-        b_q25, b_q75 = np.percentile(beliefs, [25, 75])
-        median_belief = float(np.median(beliefs))
-        belief_iqr = float(b_q75 - b_q25)
-    else:
-        median_belief = float("nan")
-        belief_iqr = 0.0
+
+    def _med_iqr(key):
+        arr = np.array([r[key] for r in group if key in r])
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            return float("nan"), 0.0
+        b_q25, b_q75 = np.percentile(arr, [25, 75])
+        return float(np.median(arr)), float(b_q75 - b_q25)
+
+    median_belief_err, belief_err_iqr = _med_iqr("mean_believed_err")
+    median_belief_speed, belief_speed_iqr = _med_iqr("mean_believed_speed")
 
     return {
         "sf": first["sf"],
@@ -159,6 +210,7 @@ def aggregate_group(group):
         "ki": first["ki"],
         "tau": first.get("tau"),
         "nodes": first["nodes"],
+        "node_id": first.get("node_id"),
         "n_runs": len(group),
         # Robust center: median ± IQR
         "mean_hw_delay": float(np.median(means)),
@@ -173,8 +225,11 @@ def aggregate_group(group):
         "settling_index": int(np.median(settles)) if len(settles) > 0 else None,
         "settling_sd": float(np.std(settles, ddof=1)) if len(settles) > 1 else 0.0,
         # Believed error: median ± IQR across runs of each run's mean err_ms
-        "mean_believed_err": median_belief,
-        "mean_believed_err_iqr": belief_iqr,
+        "mean_believed_err": median_belief_err,
+        "mean_believed_err_iqr": belief_err_iqr,
+        # Believed PI-loop output speed: same aggregation, from new_speed
+        "mean_believed_speed": median_belief_speed,
+        "mean_believed_speed_iqr": belief_speed_iqr,
     }
 
 
@@ -190,16 +245,18 @@ _COL_W = dict(
     pct=13,
     settle=11,
     belief=18,
+    speed=22,
 )
 
 
-def _table_header(aggregate=False, include_believed_err=False):
+def _table_header(
+    aggregate=False, include_believed_err=False, include_believed_speed=False
+):
     cw = _COL_W
     center_label = "Median(µs)" if aggregate else "Mean(µs)"
     std_label = "Std(µs)" if aggregate else "Std(µs)"
     pct_label = "%InLow"
     settle_label = "Settle"
-    belief_label = "Belief(ms)"
     head = (
         f"{'#':>{cw['run']}}  "
         f"{'SF':>{cw['sf']}}  "
@@ -213,11 +270,28 @@ def _table_header(aggregate=False, include_believed_err=False):
         f"{pct_label:>{cw['pct']}}  "
     )
     if include_believed_err:
-        head += f"{belief_label:>{cw['belief']}}  "
+        head += f"{'Belief(ms)':>{cw['belief']}}  "
+    if include_believed_speed:
+        head += f"{'Speed':>{cw['speed']}}  "
     return head
 
 
-def _table_row(i, r, aggregate=False, include_believed_err=False):
+def _fmt_belief(r, aggregate, mean_key, iqr_key, std_key, precision):
+    """Format a `mean ±spread` cell for either err or speed."""
+    val = r.get(mean_key, float("nan"))
+    if val != val:  # NaN
+        return "—"
+    if aggregate:
+        iqr = r.get(iqr_key, 0.0)
+        return f"${val:.{precision}f} ±{iqr:.{precision}f}i q r$,"
+    std = r.get(std_key, float("nan"))
+    sd_tag = f" ±{std:.{precision}f}" if std == std else ""
+    return f"${val:.{precision}f}{sd_tag}$,"
+
+
+def _table_row(
+    i, r, aggregate=False, include_believed_err=False, include_believed_speed=False
+):
     cw = _COL_W
     settle_val = r["settling_index"]
 
@@ -234,26 +308,29 @@ def _table_row(i, r, aggregate=False, include_believed_err=False):
         settle_str = (
             f"${settle_val * 10} ±{s_sd * 10:.0f}$," if settle_val is not None else "—"
         )
-        belief_iqr = r.get("mean_believed_err_iqr", 0.0)
-        belief_val = r.get("mean_believed_err", float("nan"))
-        belief_str = (
-            f"${belief_val:.2f} ±{belief_iqr:.2f}i q r$,"
-            if belief_val == belief_val  # not NaN
-            else "—"
-        )
     else:
         sd_tag = f" $±{r['mean_hw_delay_sd']:.2f}$," if "mean_hw_delay_sd" in r else ""
         mean_str = f"${r['mean_hw_delay']:.3f}{sd_tag}$,"
         std_str = f"${r['std_hw_delay']:.3f}$,"
         plow_str = f"${r['pct_in_low'] * 100:.1f}%$,"
         settle_str = str(settle_val) if settle_val is not None else "—"
-        belief_val = r.get("mean_believed_err", float("nan"))
-        belief_std = r.get("std_believed_err", float("nan"))
-        if belief_val == belief_val:  # not NaN
-            sd_tag = f" ±{belief_std:.3f}" if belief_std == belief_std else ""
-            belief_str = f"${belief_val:.3f}{sd_tag}$,"
-        else:
-            belief_str = "—"
+
+    err_str = _fmt_belief(
+        r,
+        aggregate,
+        "mean_believed_err",
+        "mean_believed_err_iqr",
+        "std_believed_err",
+        precision=3 if not aggregate else 2,
+    )
+    speed_str = _fmt_belief(
+        r,
+        aggregate,
+        "mean_believed_speed",
+        "mean_believed_speed_iqr",
+        "std_believed_speed",
+        precision=0,
+    )
 
     row = (
         f"{i:>{cw['run']}}  "
@@ -268,14 +345,24 @@ def _table_row(i, r, aggregate=False, include_believed_err=False):
         f"{plow_str:>{cw['pct']}}  "
     )
     if include_believed_err:
-        row += f"{belief_str:>{cw['belief']}}  "
+        row += f"{err_str:>{cw['belief']}}  "
+    if include_believed_speed:
+        row += f"{speed_str:>{cw['speed']}}  "
     return row
 
 
-def print_run_results(results, title=None, aggregate=False, include_believed_err=False):
+def print_run_results(
+    results,
+    title=None,
+    aggregate=False,
+    include_believed_err=False,
+    include_believed_speed=False,
+):
     """Pretty-print a flat list of result dicts as a table."""
     header = _table_header(
-        aggregate=aggregate, include_believed_err=include_believed_err
+        aggregate=aggregate,
+        include_believed_err=include_believed_err,
+        include_believed_speed=include_believed_speed,
     )
     sep = "─" * len(header)
     if title:
@@ -287,13 +374,21 @@ def print_run_results(results, title=None, aggregate=False, include_believed_err
     for i, r in enumerate(results, start=1):
         print(
             _table_row(
-                i, r, aggregate=aggregate, include_believed_err=include_believed_err
+                i,
+                r,
+                aggregate=aggregate,
+                include_believed_err=include_believed_err,
+                include_believed_speed=include_believed_speed,
             )
         )
 
 
 def print_grouped_results(
-    results, by=("sf", "bw"), aggregate=True, include_believed_err=False
+    results,
+    by=("sf", "bw"),
+    aggregate=True,
+    include_believed_err=False,
+    include_believed_speed=False,
 ):
     """
     Group results by `by`, then print each configuration as a titled block.
@@ -302,9 +397,11 @@ def print_grouped_results(
                     median ±IQR for the per-run mean (robust to outliers),
                     mean ±std across runs for Std, %InLow, and Settle.
     aggregate=False — show every individual run inside each group.
-    include_believed_err=True — append a Belief(ms) column showing the mean
-                    of `err_ms` from main_stats (the controller's own view of
-                    its sync error). A steady loop should land near 0.
+    include_believed_err=True   — append a Belief(ms) column from `err_ms`
+                                  (controller's view of its sync error;
+                                  steady loop ⇒ near 0).
+    include_believed_speed=True — append a Speed column from `new_speed`
+                                  (the PI controller's drift-correction output).
     """
     grouped = group_results(results, by=by)
     for key, group in grouped.items():
@@ -315,10 +412,14 @@ def print_grouped_results(
                 title=f"{label}  (n={len(group)})",
                 aggregate=True,
                 include_believed_err=include_believed_err,
+                include_believed_speed=include_believed_speed,
             )
         else:
             print_run_results(
-                group, title=label, include_believed_err=include_believed_err
+                group,
+                title=label,
+                include_believed_err=include_believed_err,
+                include_believed_speed=include_believed_speed,
             )
         # print()
 
@@ -474,12 +575,8 @@ def _two_node_row(i, r, aggregate=False):
         gw_str = f"${r['err_to_gw_median']:.3f} ±{gw_iqr:.3f}i q r$,"
         bt_str = f"${r['err_between_median']:.3f} ±{bt_iqr:.3f}i q r$,"
     else:
-        gw_str = (
-            f"${r['err_to_gw_median']:.3f} ±{r['err_to_gw_std']:.3f}$,"
-        )
-        bt_str = (
-            f"${r['err_between_median']:.3f} ±{r['err_between_std']:.3f}$,"
-        )
+        gw_str = f"${r['err_to_gw_median']:.3f} ±{r['err_to_gw_std']:.3f}$,"
+        bt_str = f"${r['err_between_median']:.3f} ±{r['err_between_std']:.3f}$,"
     return (
         f"{i:>{cw['run']}}  "
         f"{str(r['sf']):>{cw['sf']}}  "
@@ -640,6 +737,12 @@ def plot_oscillation_traces(
                 continue
             if value_col not in df.columns:
                 continue
+            # hw_stats may contain rows for multiple nodes in a 2-node run;
+            # restrict to this result's node so the trace length matches the
+            # actual per-node sample count.
+            node_id = r.get("node_id")
+            if node_id is not None and "node_id" in df.columns:
+                df = df[df["node_id"] == node_id]
             traces.append(df[value_col].to_numpy())
 
         if not traces:
@@ -661,12 +764,12 @@ def plot_oscillation_traces(
         ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
 
         post = arr[:, skip_initial:] if arr.shape[1] > skip_initial else arr
-        rms = np.sqrt(np.mean(post**2, axis=1))
+        # rms = np.sqrt(np.mean(post**2, axis=1))
         sc = np.sum(np.diff(np.sign(post), axis=1) != 0, axis=1)
         letter_prefix = f"({chr(ord('a') + i)})"
         ax.set_title(
             f"{letter_prefix}    {label}  (n={arr.shape[0]})\n"
-            f"RMS={rms.mean():.2f}±{rms.std():.2f}\n  "
+            # f"RMS={rms.mean():.2f}±{rms.std():.2f}\n  "
             f"sign-changes/run={sc.mean():.1f}±{sc.std():.1f}"
         )
 
@@ -688,8 +791,9 @@ def plot_oscillation_traces(
 def plot_delta_up_down(
     results,
     sf_bw_list,
-    title="Mean Δ-up / Δ-down per run",
+    title=r"Mean $\Delta$-up / -down per run",
     n_cols=2,
+    sharey="row",
 ):
     """
     For each (sf, bw) in `sf_bw_list`, plot the per-run mean of `delta_up_ms`
@@ -711,7 +815,7 @@ def plot_delta_up_down(
     n_cols = max(1, min(n_cols, n_groups))
     n_rows = int(np.ceil(n_groups / n_cols))
     fig, axes = plt.subplots(
-        n_rows, n_cols, figsize=(10, 4 * n_rows), sharey="row", squeeze=False
+        n_rows, n_cols, figsize=(10, 4 * n_rows), sharey=sharey, squeeze=False
     )
 
     for i, ((sf, bw), group) in enumerate(selected):
@@ -726,6 +830,9 @@ def plot_delta_up_down(
                 continue
             if "delta_up_ms" not in df.columns or "delta_down_ms" not in df.columns:
                 continue
+            node_id = r.get("node_id")
+            if node_id is not None and "node_id" in df.columns:
+                df = df[df["node_id"] == node_id]
             xs.append(j)
             ups.append(float(df["delta_up_ms"].mean()))
             downs.append(float(df["delta_down_ms"].mean()))
@@ -737,7 +844,13 @@ def plot_delta_up_down(
         ax.plot(xs, ups, "o-", color="tab:blue", label="mean Δ-up (ms)")
         ax.plot(xs, downs, "s-", color="tab:red", label="mean Δ-down (ms)")
         ax.axhline(0, color="gray", linewidth=0.8, linestyle="--")
-        ax.set_title(f"{letter_prefix}SF={sf} BW={bw}  (n={len(xs)})")
+        up_mean, up_sd = float(np.mean(ups)), float(np.std(ups))
+        down_mean, down_sd = float(np.mean(downs)), float(np.std(downs))
+        ax.set_title(
+            f"{letter_prefix}SF={sf} BW={bw}  (n={len(xs)})\n"
+            f"Δ-up={up_mean:.3f}±{up_sd:.3f} ms, \n"
+            f"Δ-down={down_mean:.3f}±{down_sd:.3f} ms"
+        )
         ax.set_xlabel("Run #")
         ax.set_xticks(xs)
         ax.grid(True, linestyle="--", alpha=0.4)
