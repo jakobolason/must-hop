@@ -120,6 +120,8 @@ impl<const N: usize> BlueOs<N> {
     }
 }
 
+const ERROR_SATURATION: i64 = 70_000;
+const ERROR_ADJUSTMENT: i64 = 50_000;
 const VF_SATURATION: i64 = 100_000;
 // mu s
 const DELTA_MAX: i32 = 50_000;
@@ -252,14 +254,20 @@ impl<const N: usize> Controller<N> {
         let err = gw_diff - predicted_elapsed as i64;
 
         // Only re-sync if the error is substantially large
-        let time_sync = if err.abs() > 70_000 {
+        let time_sync = if err.abs() > ERROR_SATURATION {
             // re-sync means the last error was not enough to put the controller onto the correct speed,
             // to not fuck up the controller, adjust the stamp such that it doesn't get too out of sync
-            let adjustment = if err > 0 { -50_000 } else { 50_000 };
-            (
-                ((current_true_time + adjustment) as u64),
-                rx_pkt.rx_done_instant,
-            )
+            if err.abs() < 3 * ERROR_SATURATION {
+                let adjustment = err.signum() * ERROR_ADJUSTMENT;
+                (
+                    ((current_true_time + adjustment) as u64),
+                    rx_pkt.rx_done_instant,
+                )
+            } else {
+                // But if it's too fucked up, then something was wrong with the timestamp and we set
+                // it back
+                (current_true_time as u64, rx_pkt.rx_done_instant)
+            }
         } else {
             // let adjusted_instant = rx_pkt.rx_done_instant + Duration::from_micros(offset);
             ((my_stamp + offset), rx_pkt.rx_done_instant)
