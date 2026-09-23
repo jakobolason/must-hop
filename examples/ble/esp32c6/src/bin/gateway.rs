@@ -1,4 +1,3 @@
-/// This binary implements the necessary traits to be used with must-hop
 #![no_std]
 #![no_main]
 #![deny(
@@ -7,8 +6,7 @@
     holding buffers for the duration of a data transfer."
 )]
 #![deny(clippy::large_stack_frames)]
-
-
+/// This binary implements the necessary traits to be used with must-hop
 // use esp_backtrace as _;
 use defmt::info;
 use embassy_executor::Spawner;
@@ -22,7 +20,6 @@ use trouble_host::prelude::ExternalController;
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
-
 
 #[path = "../must_peripheral.rs"]
 mod must_peripheral;
@@ -38,27 +35,32 @@ async fn main(spawner: Spawner) -> ! {
     info!("Setting up peripherals ...");
     // for executor
     let timg0 = TimerGroup::new(p.TIMG0);
-    let sw_interrup = esp_hal::interrupt::software::SoftwareInterruptControl::new(p.SW_INTERRUPT);
     // Could also use esp_hal_embassy ?
     info!("Setting up BLE");
-    esp_rtos::start(timg0.timer0, sw_interrup.software_interrupt0);
-
-    // configure Remote Control Transciever (RCT) peripheral globally
-    let rmt: Rmt<'_, esp_hal::Async> = Rmt::new(p.RMT, Rate::from_mhz(80))
-        .expect("Failed to initialize RMT")
-        .into_async();
+    esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
 
     esp_alloc::heap_allocator!(size: 72 * 1024);
     info!("Setting up trouble");
-
     // For BLE task
-    let bluetooth = p.BT;
-    let controller = esp_radio::init().expect("Radio init failed");
-    let connector = BleConnector::new(&controller, bluetooth, esp_radio::ble::Config::default())
-        .expect("Connector init failed");
+    let connector = BleConnector::new(p.BT, Default::default()).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
     info!("And away we go!!");
+    // ble_bas_peripheral_run::ble_bas_peripheral_run(controller).await;
 
+    // Takes ownership of peripherals
+    // let radio_reqs = RadioReqs {
+    //     nss_req: p.GPIO7,
+    //     sclk: p.GPIO9,
+    //     mosi: p.GPIO10,
+    //     miso: p.GPIO11,
+    //     reset_req: p.GPIO12,
+    //     busy_req: p.GPIO13,
+    //     dio1_req: p.GPIO14,
+    //     spi2: p.SPI2,
+    // };
+    // spawner
+    //     .spawn(radio_task(DATA_CHANNEL.receiver(), radio_reqs))
+    //     .expect("RADIO TASK failed");
     loop {
         info!("Bing!");
         Timer::after(Duration::from_millis(1000)).await;

@@ -951,8 +951,6 @@ dependencies = [
  "embassy-time",
  "embedded-hal 1.0.0",
  "heapless 0.9.3",
- "lora-modulation",
- "lora-phy",
  "postcard",
  "serde",
 ]

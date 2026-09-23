@@ -41,7 +41,7 @@ esp-hal = { version = "~1.2.2", features = ["defmt", "esp32c6", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["defmt", "esp32c6"] }
 esp-rtos = { version = "0.4.0", features = ["embassy", "esp32c6", "esp-radio"] }
 # For the C6 dev board smart led
-# esp-hal-smartled = { version = "0.18.0", features = ["esp32c6"] }
+esp-hal-smartled = { version = "0.18.0", features = ["esp32c6"] }
 smart-leds = { version = "0.4.0" }
 smart-leds-trait = { version = "0.3.2" }
 

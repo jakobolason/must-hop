@@ -84,7 +84,7 @@ checksum = "8f3c66fd0a41a3b3a5906847b1bf5516048ce083e24fa9341a0fa31d3b4cd73d"
 dependencies = [
  "btuuid",
  "defmt 1.1.1",
- "embassy-sync 0.7.2",
+ "embassy-sync 0.8.0",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-intrusive",
@@ -100,7 +100,7 @@ dependencies = [
  "bt-hci-transport",
  "btuuid",
  "defmt 1.1.1",
- "embassy-sync 0.7.2",
+ "embassy-sync 0.8.0",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-intrusive",
@@ -873,6 +873,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp-hal-smartled"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5315ad80e19e70920e282676e56fec5fb2115c36c9f9fbe14b154148ba761743"
+dependencies = [
+ "document-features",
+ "esp-hal",
+ "num-traits",
+ "smart-leds-trait",
+ "thiserror",
+]
+
+[[package]]
 name = "esp-metadata-generated"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1190,6 +1203,7 @@ dependencies = [
  "esp-alloc",
  "esp-bootloader-esp-idf",
  "esp-hal",
+ "esp-hal-smartled",
  "esp-radio",
  "esp-rtos",
  "must-hop",
@@ -1608,21 +1622,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lora-modulation"
-version = "0.1.5"
-
-[[package]]
-name = "lora-phy"
-version = "3.0.2-alpha"
-dependencies = [
- "document-features",
- "embedded-hal 1.0.0",
- "embedded-hal-async",
- "lora-modulation",
- "num-traits",
-]
-
-[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1646,8 +1645,6 @@ dependencies = [
  "embassy-time",
  "embedded-hal 1.0.0",
  "heapless 0.9.3",
- "lora-modulation",
- "lora-phy",
  "postcard",
  "serde",
 ]

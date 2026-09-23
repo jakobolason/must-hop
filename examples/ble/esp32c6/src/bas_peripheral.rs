@@ -2,10 +2,13 @@
 use defmt::{Debug2Format, error, info, warn};
 use embassy_futures::join::join3;
 use embassy_time::{Duration, Timer};
+use esp_hal::peripherals::BT;
+use esp_radio::ble::controller::BleConnector;
 use postcard::to_slice;
 use serde::{Deserialize, Serialize};
 use trouble_host::{PacketPool, prelude::*};
 
+use trouble_host::prelude::ExternalController;
 const CONNECTIONS_MAX: usize = 1;
 /// Max number of L2CAP Channels
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
@@ -20,7 +23,7 @@ struct Server {
 struct BatteryService {
     /// Battery level
     #[descriptor(uuid = descriptors::VALID_RANGE, read, value = [0, 100])]
-    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level")]
+    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level", type = &'static str)]
     #[characteristic(uuid = characteristic::BATTERY_LEVEL, read, notify, value = 10)]
     level: u8,
     #[characteristic(uuid = "408813df-5dd4-1f87-ec11-cdb001100000", write, read, notify)]
@@ -44,10 +47,8 @@ impl<T, E: core::fmt::Debug> LogExt<T, E> for Result<T, E> {
 }
 
 /// Run the BLE stack
-pub async fn ble_bas_peripheral_run<C>(controller: C)
-where
-    C: Controller,
-{
+#[embassy_executor::task]
+pub async fn ble_bas_peripheral_run(controller: ExternalController<BleConnector<'static>, 20>) {
     // Using a fixed random address is useful for testing, in real scenarios
     // the MAC 6 byte array can be used as the address
     let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
@@ -55,19 +56,16 @@ where
 
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
-    let stack = trouble_host::new(controller, &mut resources).set_random_address(address);
+    let builder = trouble_host::new(controller, &mut resources).set_random_address(address);
     // Build host which gives peripheral access and runner to handle radio
-    let Host {
-        mut peripheral,
-        mut central,
-        runner,
-        ..
-    } = stack.build();
+    let stack = builder.build();
+
     let target: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
+    let targets = [target];
     let config = ConnectConfig {
         connect_params: Default::default(),
         scan_config: ScanConfig {
-            filter_accept_list: &[(target.kind, &target.addr)],
+            filter_accept_list: &targets,
             ..Default::default()
         },
     };
@@ -79,17 +77,23 @@ where
     // }))
     // .unwrap();
 
+    let mut runner = stack.runner();
+    let mut central = stack.central();
+    let mut peripheral = stack.peripheral();
+
     // This runs 3 jobs: runner handles the radio, search and advertise are periodic tasks
-    let _ = join3(
-        ble_task(runner),
-        search_task(&mut central, config, &stack),
-        advertise_task(&mut peripheral, &stack),
-    )
-    .await;
+    loop {
+        let _ = join3(
+            ble_task(&mut runner),
+            search_task(&mut central, &config, &stack),
+            advertise_task(&mut peripheral, &stack),
+        )
+        .await;
+    }
 }
 
 /// runs whatever tasks are send to the runner, panics if error
-async fn ble_task<C, P>(mut runner: Runner<'_, C, P>)
+async fn ble_task<C, P>(runner: &mut Runner<'_, C, P>)
 where
     C: Controller,
     P: PacketPool,
@@ -118,9 +122,9 @@ fn create_sensor_data(buffer: &mut [u8]) -> Result<&mut [u8], postcard::Error> {
 /// This task searches for sensor data, and afterwards determines if the data Should
 /// be saved here, or sent onwards
 async fn search_task<'a, C>(
-    central: &mut Central<'a, C, DefaultPacketPool>,
-    config: ConnectConfig<'a>,
-    stack: &'a Stack<'a, C, DefaultPacketPool>,
+    central: &mut Central<'_, C, DefaultPacketPool>,
+    config: &ConnectConfig<'_>,
+    stack: &Stack<'a, C, DefaultPacketPool>,
 ) where
     C: Controller + 'a,
 {
@@ -200,24 +204,25 @@ where
 
 /// This task advertises when there are sensor data available
 async fn advertise_task<'a, C>(
-    peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
-    stack: &'a Stack<'a, C, DefaultPacketPool>,
+    peripheral: &mut Peripheral<'_, C, DefaultPacketPool>,
+    stack: &Stack<'a, C, DefaultPacketPool>,
 ) where
     C: Controller + 'a,
 {
+    info!("In advertising task!!");
     let mut adv_data = [0; 31];
-    let name = "trouBLE tester";
+    let name = b"trouBLE tester";
     let adv_data_len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
             // AdStructure::ServiceUuids16(&[[0x0f, 0x18]]), // For battery GATT
-            AdStructure::ServiceUuids16(&[[0x00, 0x01]]), // For L2CAP
-            AdStructure::CompleteLocalName(name.as_bytes()),
+            AdStructure::CompleteServiceUuids16(&[[0x00, 0x01]]), // For L2CAP
+            AdStructure::CompleteLocalName(name),
         ],
         &mut adv_data[..],
     )
     .unwrap();
-    Timer::after_secs(10).await; // Wait a bit before starting this 
+    // Timer::after_secs(10).await; // Wait a bit before starting this
     loop {
         info!("Advertising, waiting for connection ...");
         let conn = match advertise_sensordata(peripheral, &adv_data, adv_data_len).await {
@@ -260,32 +265,6 @@ async fn advertise_task<'a, C>(
         Timer::after(Duration::from_secs(60)).await;
     }
 }
-
-// async fn advertise_task<'a, C>(
-//     peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
-//     server: Server<'a>,
-//     stack: &Stack<'_, C, DefaultPacketPool>,
-// ) where
-//     C: Controller,
-// {
-//     // After bootup, wait some time before having sensor data
-//     Timer::after_secs(10).await;
-//     loop {
-//         match advertise("trouBLE example", peripheral, &server).await {
-//             Ok(conn) => {
-//                 // these tasks only run after a connection has been established
-//                 let a = gatt_events_task(&server, &conn);
-//                 let b = custom_task(&server, &conn, stack);
-//
-//                 select(a, b).await;
-//             }
-//             Err(e) => {
-//                 info!("[ERROR] adv error:");
-//             }
-//         }
-//         Timer::after_secs(30);
-//     }
-// }
 
 /// Create an advertiser to use to connect to a BLE Central, and wait for it to connect.
 #[allow(unused)]
@@ -344,10 +323,7 @@ async fn gatt_events_task<P: PacketPool>(
                     }
                     GattEvent::Write(event) => {
                         if event.handle() == level.handle {
-                            info!(
-                                "[gatt] Write Event to Level Characteristic: {:?}",
-                                event.data()
-                            );
+                            info!("[gatt] Write Event to Level Characteristic: {:?}", event);
                         }
                     }
                     _ => {}
@@ -381,7 +357,7 @@ async fn custom_task<C: Controller, P: PacketPool>(
     loop {
         tick = tick.wrapping_add(1);
         info!("[custom_task] notifying connection of tick {}", tick);
-        if level.notify(conn, &tick).await.is_err() {
+        if level.notify(conn, &tick, false).await.is_err() {
             info!("[custom_task] error notifying connection");
             break;
         };

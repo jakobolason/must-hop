@@ -8,7 +8,6 @@ use trouble_host::{PacketPool, prelude::*};
 
 use must_hop::{
     mesh_router, network_manager,
-    node::lora::{LoraNode, RadioPackParams, RatioModParams},
     policy::{
         // ra::{NodePolicy, RandomAccessMac},
         tdma::TdmaMac,
@@ -22,12 +21,13 @@ const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
 struct Server {
     battery_service: BatteryService,
 }
+
 /// Battery Service
 #[gatt_service(uuid = service::BATTERY)]
 struct BatteryService {
     /// Battery level
     #[descriptor(uuid = descriptors::VALID_RANGE, read, value = [0, 100])]
-    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level")]
+    #[descriptor(uuid = descriptors::MEASUREMENT_DESCRIPTION, name = "hello", read, value = "Battery Level", type = &'static str)]
     #[characteristic(uuid = characteristic::BATTERY_LEVEL, read, notify, value = 10)]
     level: u8,
     #[characteristic(uuid = "408813df-5dd4-1f87-ec11-cdb001100000", write, read, notify)]
@@ -50,12 +50,12 @@ impl<T, E: core::fmt::Debug> LogExt<T, E> for Result<T, E> {
     }
 }
 
-pub struct BleNode<C>
+pub struct BleNode<'a, C>
 where
     C: Controller,
 {
     ble: C,
-    config: ConnectConfig,
+    config: ConnectConfig<'a>,
 }
 
 /// Run the BLE stack
@@ -70,30 +70,25 @@ where
 
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
-    let stack = trouble_host::new(controller, &mut resources).set_random_address(address);
     // Build host which gives peripheral access and runner to handle radio
-    let Host {
-        mut peripheral,
-        mut central,
-        runner,
-        ..
-    } = stack.build();
+    let builder = trouble_host::new(controller, &mut resources).set_random_address(address);
+    let stack = builder.build();
+
     let target: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
+    let targets = [target];
     let config = ConnectConfig {
         connect_params: Default::default(),
         scan_config: ScanConfig {
-            filter_accept_list: &[(target.kind, &target.addr)],
+            filter_accept_list: &targets,
             ..Default::default()
         },
     };
 
     info!("Starting advertising and GATT service");
-    // let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
-    //     name: "TrouBle",
-    //     appearance: &appearance::power_device::GENERIC_POWER_DEVICE,
-    // }))
-    // .unwrap();
 
+    let runner = stack.runner();
+    let mut central = stack.central();
+    let mut peripheral = stack.peripheral();
     // This runs 3 jobs: runner handles the radio, search and advertise are periodic tasks
     let _ = join3(
         ble_task(runner),
@@ -133,9 +128,9 @@ fn create_sensor_data(buffer: &mut [u8]) -> Result<&mut [u8], postcard::Error> {
 /// This task searches for sensor data, and afterwards determines if the data Should
 /// be saved here, or sent onwards
 async fn search_task<'a, C>(
-    central: &mut Central<'a, C, DefaultPacketPool>,
-    config: ConnectConfig<'a>,
-    stack: &'a Stack<'a, C, DefaultPacketPool>,
+    central: &mut Central<'_, C, DefaultPacketPool>,
+    config: ConnectConfig<'_>,
+    stack: &Stack<'a, C, DefaultPacketPool>,
 ) where
     C: Controller + 'a,
 {
@@ -215,8 +210,8 @@ where
 
 /// This task advertises when there are sensor data available
 async fn advertise_task<'a, C>(
-    peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
-    stack: &'a Stack<'a, C, DefaultPacketPool>,
+    peripheral: &mut Peripheral<'_, C, DefaultPacketPool>,
+    stack: &Stack<'a, C, DefaultPacketPool>,
 ) where
     C: Controller + 'a,
 {
@@ -226,7 +221,7 @@ async fn advertise_task<'a, C>(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
             // AdStructure::ServiceUuids16(&[[0x0f, 0x18]]), // For battery GATT
-            AdStructure::ServiceUuids16(&[[0x00, 0x01]]), // For L2CAP
+            AdStructure::CompleteServiceUuids16(&[[0x00, 0x01]]), // For L2CAP
             AdStructure::CompleteLocalName(name.as_bytes()),
         ],
         &mut adv_data[..],
@@ -359,10 +354,7 @@ async fn gatt_events_task<P: PacketPool>(
                     }
                     GattEvent::Write(event) => {
                         if event.handle() == level.handle {
-                            info!(
-                                "[gatt] Write Event to Level Characteristic: {:?}",
-                                event.data()
-                            );
+                            info!("[gatt] Write Event to Level Characteristic: {:?}", event);
                         }
                     }
                     _ => {}
@@ -396,7 +388,7 @@ async fn custom_task<C: Controller, P: PacketPool>(
     loop {
         tick = tick.wrapping_add(1);
         info!("[custom_task] notifying connection of tick {}", tick);
-        if level.notify(conn, &tick).await.is_err() {
+        if level.notify(conn, &tick, false).await.is_err() {
             info!("[custom_task] error notifying connection");
             break;
         };
