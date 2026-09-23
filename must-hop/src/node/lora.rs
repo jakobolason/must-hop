@@ -287,7 +287,7 @@ where
         self.prepare_for_rx(RxMode::Continuous).await?;
         self.done_instant = None;
         // TODO: Remove this? I'm not using it anymore, don't plan to do
-        let get_done_instant = || {
+        let _get_done_instant = || {
             if self.done_instant.is_none() {
                 self.done_instant = Some(Instant::now())
             }
@@ -296,7 +296,8 @@ where
             Some(timeout) => {
                 match embassy_time::with_timeout(
                     embassy_time::Duration::from_micros(timeout.as_micros() as u64),
-                    self.lora.rx(&self.rx_pkt_params, rec_buf, get_done_instant),
+                    self.lora
+                        .rx(&self.rx_pkt_params, rec_buf /*, get_done_instant */),
                 )
                 .await
                 {
@@ -306,12 +307,24 @@ where
             }
             None => Ok(self
                 .lora
-                .rx(&self.rx_pkt_params, rec_buf, get_done_instant)
+                .rx(&self.rx_pkt_params, rec_buf /*, get_done_instant*/)
                 .await),
         }
     }
 
     fn calc_tx_delay(&self, payload_len: usize) -> u64 {
         self.calc_toa(payload_len as u8) as u64 + self.avg_slice_delay(payload_len as u8)
+    }
+}
+
+#[cfg(test)]
+impl<'a, RK, DLY, const SIZE: usize, const LEN: usize, const OUTPUT_POWER: i32>
+    LoraNode<'a, RK, DLY, SIZE, LEN, OUTPUT_POWER>
+where
+    RK: RadioKind,
+    DLY: DelayNs,
+{
+    pub fn lora_mut(&mut self) -> &mut LoRa<RK, DLY> {
+        self.lora
     }
 }

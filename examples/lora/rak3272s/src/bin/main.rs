@@ -37,7 +37,7 @@ use must_hop::{
     mesh_router, network_manager,
     node::lora::{LoraNode, RadioPackParams, RatioModParams},
     policy::{
-        ra::{NodePolicy, RandomAccessMac},
+        // ra::{NodePolicy, RandomAccessMac},
         tdma::TdmaMac,
     },
 };

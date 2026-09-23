@@ -8,7 +8,6 @@ use log::{error, trace, warn};
 
 use embassy_time::{Duration, Instant};
 use heapless::Vec;
-use lora_phy::mod_params::RadioError;
 use postcard::Error as PostError;
 
 /// Internal pending-packet state (not serialized); used for retransmission and timeouts.
@@ -23,27 +22,32 @@ struct PendingPacket<const SIZE: usize> {
     retries: u8,
 }
 
+// TODO: Should not be dependent on lora-phy
 #[derive(Debug)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
-pub enum NetworkManagerError {
-    Hardware(RadioError),
+pub enum NetworkManagerError<R> {
+    Hardware(R),
     Serialization(PostError),
     Timeout,
     InvalidPacket(u16),
     BufferFull,
 }
 
-impl From<RadioError> for NetworkManagerError {
+#[cfg(feature = "lora")]
+use lora_phy::mod_params::RadioError;
+
+#[cfg(feature = "lora")]
+impl From<RadioError> for NetworkManagerError<RadioError> {
     fn from(err: RadioError) -> Self {
         NetworkManagerError::Hardware(err)
     }
 }
-impl From<PostError> for NetworkManagerError {
+
+impl<R> From<PostError> for NetworkManagerError<R> {
     fn from(err: PostError) -> Self {
         NetworkManagerError::Serialization(err)
     }
 }
-
 /// Ring buffer to hold recently seen messages, to avoid retransmitting them
 pub struct RecentSeen<const N: usize> {
     buffer: [Option<(u16, u16)>; N],
@@ -187,7 +191,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     }
 
     /// Adds the packet to the internal list
-    fn add_packet(&mut self, packet: MHPacket<SIZE>) -> Result<(), NetworkManagerError> {
+    fn add_packet<Radio>(
+        &mut self,
+        packet: MHPacket<SIZE>,
+    ) -> Result<(), NetworkManagerError<Radio>> {
         let curr_time = Instant::now();
         let pkt_timout = curr_time + Duration::from_millis(self.timeout_ms as u64);
         // First add this package to our vec
@@ -204,11 +211,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Ok(())
     }
 
-    pub fn queue_new_payload(
+    pub fn queue_new_payload<Radio>(
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u16,
-    ) -> Result<MHPacket<SIZE>, NetworkManagerError> {
+    ) -> Result<MHPacket<SIZE>, NetworkManagerError<Radio>> {
         let new_pkt = self.new_packet(payload, destination)?;
         self.add_packet(new_pkt.clone())?;
         Ok(new_pkt)
@@ -238,10 +245,10 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
 
     /// Manages actions which the packet might require from a network pov, and returns the packet
     /// if none are required, otherwise returns none
-    fn receive_packet(
+    fn receive_packet<Radio>(
         &mut self,
         pkt: MHPacket<SIZE>,
-    ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError> {
+    ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError<Radio>> {
         if pkt.source_id == self.source_id {
             // We return None no matter if its our own or not
             let _ = self.check_pend_ack(&pkt);
@@ -329,18 +336,19 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
 
     /// To be used when receiving multiple packets, returns list of packets to send on, and the
     /// other list is a list of packets to the user
-    pub fn handle_packets(
+    pub fn handle_packets<Radio>(
         &mut self,
         pkts: Vec<MHPacket<SIZE>, LEN>,
-    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Vec<MHPacket<SIZE>, LEN>), NetworkManagerError> {
+    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Vec<MHPacket<SIZE>, LEN>), NetworkManagerError<Radio>>
+    {
         let mut to_send: Vec<MHPacket<SIZE>, LEN> = Vec::new();
         let mut commands: Vec<MHPacket<SIZE>, LEN> = Vec::new();
         for pkt in pkts {
-            let (packet, ptype) = match self.receive_packet(pkt) {
+            let (packet, ptype) = match self.receive_packet::<Radio>(pkt) {
                 Ok(Some(p)) => p,
                 Ok(None) => continue,
-                Err(e) => {
-                    error!("Error in managing packet: {:?}", e);
+                Err(_e) => {
+                    // error!("Error in managing packet: {:?}", e);
                     continue;
                 }
             };
@@ -397,7 +405,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Ok((to_send, commands))
     }
 
-    pub fn add_heartbeat(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError> {
+    pub fn add_heartbeat<Radio>(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError<Radio>> {
         self.next_packet_id += 1;
         self.recent_seen.push((self.source_id, self.next_packet_id));
         // trace!(
@@ -447,7 +455,7 @@ mod tests {
 
         // Queue a new packet bound for node 3
         manager
-            .queue_new_payload(payload, 3)
+            .queue_new_payload::<()>(payload, 3)
             .expect("Should queue payload");
 
         // It should now be in the pending list awaiting an ACK
@@ -468,7 +476,7 @@ mod tests {
 
         // Process the ACK
         let result = manager
-            .receive_packet(ack_pkt)
+            .receive_packet::<()>(ack_pkt)
             .expect("Should process packet");
 
         // The manager should consume the ACK and return None
@@ -501,7 +509,7 @@ mod tests {
         };
 
         let result = manager
-            .receive_packet(incoming_pkt)
+            .receive_packet::<()>(incoming_pkt)
             .expect("Should process packet");
 
         // We expect the manager to modify the packet and tell us to send it on
@@ -530,7 +538,7 @@ mod tests {
 
         // Queue a new packet bound for node 2
         manager
-            .queue_new_payload(payload, 1)
+            .queue_new_payload::<()>(payload, 1)
             .expect("Should queue payload");
 
         // It should now be in the pending list awaiting an ACK
@@ -551,7 +559,7 @@ mod tests {
 
         // Process the ACK
         let result = manager
-            .receive_packet(ack_pkt)
+            .receive_packet::<()>(ack_pkt)
             .expect("Should process packet");
 
         // The manager should consume the ACK and return None
@@ -571,7 +579,7 @@ mod tests {
         };
 
         let result = manager
-            .receive_packet(incoming_pkt)
+            .receive_packet::<()>(incoming_pkt)
             .expect("Should process packet");
         assert!(result.is_some());
         assert_eq!(manager.pkts_acked, 1);
@@ -600,7 +608,7 @@ mod tests {
             hop_to_gw: 1,
         };
         let result = manager
-            .receive_packet(ack_pkt)
+            .receive_packet::<()>(ack_pkt)
             .expect("Should process packet");
 
         // The manager should consume the ACK and return None

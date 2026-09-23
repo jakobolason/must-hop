@@ -14,17 +14,17 @@ use heapless::Vec;
 
 #[derive(Debug)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
-pub enum MeshRouterError<E> {
-    Manager(NetworkManagerError),
+pub enum MeshRouterError<E, Radio> {
+    Manager(NetworkManagerError<Radio>),
     Node(E),
 }
 
-impl<E> From<NetworkManagerError> for MeshRouterError<E> {
-    fn from(err: NetworkManagerError) -> Self {
+impl<E, Radio> From<NetworkManagerError<Radio>> for MeshRouterError<E, Radio> {
+    fn from(err: NetworkManagerError<Radio>) -> Self {
         MeshRouterError::Manager(err)
     }
 }
-impl<E: fmt::Debug> fmt::Display for MeshRouterError<E> {
+impl<E: fmt::Debug, Radio: fmt::Debug> fmt::Display for MeshRouterError<E, Radio> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // A simple implementation just delegates to the Debug output,
         // but you can customize this to be more human-readable.
@@ -33,7 +33,10 @@ impl<E: fmt::Debug> fmt::Display for MeshRouterError<E> {
 }
 
 // We bound E to also implement Error so the inner error is valid too.
-impl<E: fmt::Debug + core::error::Error> core::error::Error for MeshRouterError<E> {}
+impl<E: core::error::Error, Radio: core::error::Error> core::error::Error
+    for MeshRouterError<E, Radio>
+{
+}
 
 /// Mesh Router(MR) handles the user defined radio which implements MHNode, and a Network Manager,
 /// managing the logic necessary to send and receive packets, but the user does not have to think
@@ -69,24 +72,31 @@ where
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u16,
-    ) -> Result<(), MeshRouterError<Node::Error>> {
+    ) -> Result<(), MeshRouterError<Node::Error, Node::RadioError>> {
         trace!("Queing payload ...");
         let pkt = self.manager.queue_new_payload(payload, destination)?;
         self.push_queue(pkt)?;
         Ok(())
     }
 
-    fn push_queue(&mut self, pkt: MHPacket<SIZE>) -> Result<(), MeshRouterError<Node::Error>> {
+    fn push_queue(
+        &mut self,
+        pkt: MHPacket<SIZE>,
+    ) -> Result<(), MeshRouterError<Node::Error, Node::RadioError>> {
         self.tx_queue
             .push(pkt)
             .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
         Ok(())
     }
 
+    pub fn hops_to_gw(&self) -> u8 {
+        self.manager.get_gw_hops()
+    }
+
     pub async fn tick(
         &mut self,
         rx_buf: &mut Node::ReceiveBuffer,
-    ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
+    ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error, Node::RadioError>> {
         if self.mac_policy.should_tx_heartbeat() {
             trace!("SENDING OUT HEARTBEAT!!");
             self.mac_policy.tx_heartbeat(self.manager.add_heartbeat()?);
@@ -129,5 +139,92 @@ where
     #[doc(hidden)]
     pub fn get_packet_loss_ratio(&self) -> f32 {
         self.manager.packet_loss_ratio()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        RandomAccessMac,
+        node::lora::{LoraNode, RadioPackParams, RatioModParams},
+        policy::ra::NodePolicy,
+    };
+    use core::time::Duration;
+
+    use lora_modulation::{Bandwidth, CodingRate, SpreadingFactor};
+    use lora_phy::{DelayNs, LoRa, mock::MockRadio, mod_traits::IrqState};
+    // use must_hop::{
+    //     MeshRouter, NetworkManager, RandomAccessMac,
+    //     node::lora::{LoraNode, RadioPackParams, RatioModParams},
+    //     policy::ra::NodePolicy,
+    // };
+    use tokio::time::sleep;
+
+    const MAX_PACK_LEN: usize = 40;
+    const LEN: usize = 8;
+    const OUTPUT_POWER: i32 = 0;
+    const LORA_FREQUENCY_IN_HZ: u32 = 868_700_000;
+
+    pub struct TokioDelay;
+
+    impl DelayNs for TokioDelay {
+        async fn delay_ns(&mut self, ns: u32) {
+            sleep(Duration::from_nanos(ns as u64)).await;
+        }
+
+        async fn delay_us(&mut self, us: u32) {
+            sleep(Duration::from_micros(us as u64)).await;
+        }
+
+        async fn delay_ms(&mut self, ms: u32) {
+            sleep(Duration::from_millis(ms as u64)).await;
+        }
+    }
+
+    macro_rules! setup_mock_radio {
+        ($lora:expr, $node_id:expr) => {{
+            let sf = SpreadingFactor::_5;
+            let bw = Bandwidth::_7KHz;
+            let cr = CodingRate::_4_5;
+            let mp = RatioModParams {
+                sf,
+                bw,
+                cr,
+                lora_hz: LORA_FREQUENCY_IN_HZ,
+            };
+            let tp = RadioPackParams {
+                pre_amp: 8,
+                imp_hed: false,
+                max_pack_len: MAX_PACK_LEN,
+                crc: true,
+                iq: false,
+            };
+
+            let node =
+                LoraNode::<_, _, MAX_PACK_LEN, LEN, OUTPUT_POWER>::new(&mut $lora, tp, mp, None)
+                    .unwrap();
+            let manager = NetworkManager::new($node_id, 0, 5, None);
+            let mac = RandomAccessMac::new(NodePolicy);
+            MeshRouter::new(node, manager, mac)
+        }};
+    }
+
+    #[tokio::test]
+    async fn test_mock() {
+        let mr = MockRadio::new();
+        let mut lora = LoRa::new(mr, false, TokioDelay).await.unwrap();
+        let mut mr = setup_mock_radio!(lora, 0);
+        let mut rb: [u8; 256] = [0_u8; 256];
+        let pkts = mr.tick(&mut rb).await.unwrap();
+        assert_eq!(pkts.len(), 0);
+        let state = mr.node.lora_mut().get_irq_state().await.unwrap().unwrap();
+        assert!(state == IrqState::Done);
+
+        let lr = mr.node.lora_mut();
+        mr.queue_payload(Vec::from_slice(&[1, 2, 3]).unwrap(), 2)
+            .unwrap();
+        let state = mr.node.lora_mut().get_irq_state().await.unwrap().unwrap();
+        assert!(state == IrqState::Done);
     }
 }

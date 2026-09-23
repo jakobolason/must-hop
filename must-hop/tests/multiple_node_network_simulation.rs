@@ -442,26 +442,35 @@ async fn gw_communication() {
         RandomAccessMac::new(NodePolicy {}),
     );
 
+    let nm = NetworkManager::<SIZE, LEN>::new(gw, 5, 3, Some(0));
+
     let mut gw_router = MeshRouter::new(
         MockRadio {
             node_id: gw,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(gw, 5, 3, None),
-        RandomAccessMac::new(GatewayPolicy::new(10)),
+        nm,
+        RandomAccessMac::new(GatewayPolicy::new(0)),
     );
     // First GW sends out Bootup
     gw_router.tick(&mut ()).await.unwrap();
+    gw_router.tick(&mut ()).await.unwrap();
+    assert_eq!(gw_router.hops_to_gw(), 0);
     // Two ticks, one for receiving, one for sending
     router_d.tick(&mut ()).await.unwrap();
     router_d.tick(&mut ()).await.unwrap();
+    router_d.tick(&mut ()).await.unwrap();
+    assert_eq!(router_d.hops_to_gw(), 1);
 
+    router_c.tick(&mut ()).await.unwrap();
     router_c.tick(&mut ()).await.unwrap();
     router_c.tick(&mut ()).await.unwrap();
 
     router_b.tick(&mut ()).await.unwrap();
     router_b.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
 
+    router_a.tick(&mut ()).await.unwrap();
     router_a.tick(&mut ()).await.unwrap();
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();
@@ -561,27 +570,39 @@ async fn complex_gw_communication() {
         NetworkManager::<SIZE, LEN>::new(node_d, 5, 3, None),
         RandomAccessMac::new(NodePolicy {}),
     );
+    let nm = NetworkManager::<SIZE, LEN>::new(gw, 5, 3, Some(0));
 
     let mut gw_router = MeshRouter::new(
         MockRadio {
             node_id: gw,
             env: env.clone(),
         },
-        NetworkManager::<SIZE, LEN>::new(gw, 5, 3, Some(0)),
-        RandomAccessMac::new(GatewayPolicy::new(10)),
+        nm,
+        RandomAccessMac::new(GatewayPolicy::new(0)),
     );
     // First GW sends out Bootup
+    gw_router.tick(&mut ()).await.unwrap();
+    gw_router.tick(&mut ()).await.unwrap();
     gw_router.tick(&mut ()).await.unwrap();
     // Two ticks, one for receiving, one for sending
     router_d.tick(&mut ()).await.unwrap();
     router_d.tick(&mut ()).await.unwrap();
+    router_d.tick(&mut ()).await.unwrap();
+    assert_eq!(router_d.hops_to_gw(), 1);
 
     router_c.tick(&mut ()).await.unwrap();
     router_c.tick(&mut ()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
+    router_c.tick(&mut ()).await.unwrap();
+    assert_eq!(router_c.hops_to_gw(), 2);
 
     router_b.tick(&mut ()).await.unwrap();
     router_b.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
+    router_b.tick(&mut ()).await.unwrap();
 
+    router_a.tick(&mut ()).await.unwrap();
+    router_a.tick(&mut ()).await.unwrap();
     router_a.tick(&mut ()).await.unwrap();
 
     let msg1 = Vec::from_slice(&[0x01]).unwrap();

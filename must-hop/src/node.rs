@@ -6,6 +6,7 @@ use core::time::Duration;
 use heapless::Vec;
 
 /// Implements the `MHNode` trait for all lora-phy compatible radios
+#[cfg(feature = "lora")]
 pub mod lora;
 
 use crate::{MHPacket, RxPacket};
@@ -17,6 +18,7 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     #[cfg(feature = "in_std")]
     type Error: core::fmt::Debug;
 
+    type RadioError;
     type Connection;
     type ReceiveBuffer;
 

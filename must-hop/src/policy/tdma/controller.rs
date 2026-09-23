@@ -73,38 +73,38 @@ impl<const N: usize> BlueOs<N> {
         self.u_bar.min()
     }
 
-    pub fn parameter_estimation(&self) -> (u32, u32, u32) {
-        if self.u_bar.len() < 2 {
-            info!("Shorting out! {}, {}", self.u1(), self.v1());
-            return (0, 0, 0);
-        }
-        let u1 = self.u1();
-        let v1 = self.v1();
-        // info!(
-        //     "Calculating *BLUE_OS*: v1={}, u1={}, bv={}, bu={}",
-        //     v1,
-        //     u1,
-        //     self.v_bar.get(),
-        //     self.u_bar.get()
-        // );
-        let u1pv1 = u1 as u64 + v1 as u64;
-        let bars_u1pv1 = self.v_bar.get() + self.u_bar.get();
-        let n = self.u_bar.len() as u64;
-        let scalar: f32 = 1.0 / (2 * (n - 1)) as f32;
-        info!(
-            "Scalar={}, u1pv1={}, bars={}, n={}",
-            scalar, u1pv1, bars_u1pv1, n
-        );
-        let delay = scalar * (n * u1pv1 - bars_u1pv1) as f32;
-        let offset = ((u1 as i64 - v1 as i64) as f32) / 2.0;
-        let bias = scalar * (n * (bars_u1pv1 - u1pv1)) as f32;
-
-        (
-            delay.max(0.0) as u32,
-            offset.max(0.0) as u32,
-            bias.max(0.0) as u32,
-        )
-    }
+    // pub fn parameter_estimation(&self) -> (u32, u32, u32) {
+    //     if self.u_bar.len() < 2 {
+    //         info!("Shorting out! {}, {}", self.u1(), self.v1());
+    //         return (0, 0, 0);
+    //     }
+    //     let u1 = self.u1();
+    //     let v1 = self.v1();
+    //     // info!(
+    //     //     "Calculating *BLUE_OS*: v1={}, u1={}, bv={}, bu={}",
+    //     //     v1,
+    //     //     u1,
+    //     //     self.v_bar.get(),
+    //     //     self.u_bar.get()
+    //     // );
+    //     let u1pv1 = u1 as u64 + v1 as u64;
+    //     let bars_u1pv1 = self.v_bar.get() + self.u_bar.get();
+    //     let n = self.u_bar.len() as u64;
+    //     let scalar: f32 = 1.0 / (2 * (n - 1)) as f32;
+    //     info!(
+    //         "Scalar={}, u1pv1={}, bars={}, n={}",
+    //         scalar, u1pv1, bars_u1pv1, n
+    //     );
+    //     let delay = scalar * (n * u1pv1 - bars_u1pv1) as f32;
+    //     let offset = ((u1 as i64 - v1 as i64) as f32) / 2.0;
+    //     let bias = scalar * (n * (bars_u1pv1 - u1pv1)) as f32;
+    //
+    //     (
+    //         delay.max(0.0) as u32,
+    //         offset.max(0.0) as u32,
+    //         bias.max(0.0) as u32,
+    //     )
+    // }
 
     pub fn avg_delay(&self) -> u64 {
         (self.u_bar.get() + self.v_bar.get()) / 2

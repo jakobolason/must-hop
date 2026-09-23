@@ -10,6 +10,7 @@ use heapless::Vec;
 
 pub trait NodeRole {
     fn check_heartbeat(&self) -> bool;
+    fn tx_hb(&mut self);
 }
 
 pub struct NodePolicy;
@@ -17,6 +18,8 @@ impl NodeRole for NodePolicy {
     fn check_heartbeat(&self) -> bool {
         false
     }
+
+    fn tx_hb(&mut self) {}
 }
 
 /// A gateway sends out periodic heartbeats
@@ -25,6 +28,7 @@ pub struct GatewayPolicy {
     pub last_heartbeat: Option<Instant>,
     pub timeout: u8,
 }
+
 #[cfg(feature = "in_std")]
 impl GatewayPolicy {
     pub fn new(timeout: u8) -> Self {
@@ -44,6 +48,9 @@ impl NodeRole for GatewayPolicy {
             Some(last) => now.duration_since(last) >= Duration::from_secs(self.timeout as u64),
         }
     }
+    fn tx_hb(&mut self) {
+        self.last_heartbeat = Some(Instant::now());
+    }
 }
 
 /// A RA MAC policy which sends when it has a packet to send, and listens otherwise
@@ -51,6 +58,7 @@ pub struct RandomAccessMac<const SIZE: usize, NR: NodeRole> {
     hbt_pkt: Option<MHPacket<SIZE>>,
     node_role: NR,
     gw_hops: u8,
+    rebroadcast_hb: bool,
     recent_seen_hb: [(u16, u16); 5],
     cursor: usize,
 }
@@ -61,12 +69,13 @@ impl<const SIZE: usize, NR: NodeRole> RandomAccessMac<SIZE, NR> {
             hbt_pkt: None,
             node_role,
             gw_hops: 255,
+            rebroadcast_hb: false,
             recent_seen_hb: [(0, 0); 5],
             cursor: 0,
         }
     }
 
-    fn handle_hb(&mut self, pkt: &MHPacket<SIZE>) -> Option<MHPacket<SIZE>> {
+    fn handle_hb(&mut self, pkt: &MHPacket<SIZE>) {
         let id = (pkt.source_id, pkt.packet_id);
 
         // If we haven't flooded this specific heartbeat yet
@@ -75,14 +84,10 @@ impl<const SIZE: usize, NR: NodeRole> RandomAccessMac<SIZE, NR> {
             self.cursor = (self.cursor + 1) % 5;
 
             // Only forward if we are logically between source and edge
-            if pkt.hop_count < self.gw_hops {
-                let mut fwd_pkt = pkt.clone();
-                fwd_pkt.hop_count += 1;
-                // Push it to the queue to be sent on the next tick
-                return Some(fwd_pkt);
+            if pkt.hop_to_gw < self.gw_hops {
+                self.rebroadcast_hb = true;
             }
         }
-        None
     }
 }
 
@@ -102,8 +107,18 @@ where
     }
 
     fn should_tx_heartbeat(&mut self) -> bool {
-        self.node_role.check_heartbeat()
+        let nr = self.node_role.check_heartbeat();
+        if nr {
+            return true;
+        }
+        if self.rebroadcast_hb {
+            self.rebroadcast_hb = false;
+            true
+        } else {
+            false
+        }
     }
+
     fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
         self.hbt_pkt = Some(hbt);
     }
@@ -133,13 +148,9 @@ where
                     // Heartbeats that should be relayed must go out on the next tick.
                     // Push into tx_queue (not pkts) — pkts feeds handle_packets, which
                     // returns None for HB and would drop the forwarded copy.
-                    if let Some(fwd_pkt) = pkts
-                        .iter()
+                    pkts.iter()
                         .filter(|p| p.packet_type == PacketType::HeartBeat)
-                        .find_map(|p| self.handle_hb(p))
-                    {
-                        let _ = tx_queue.push(fwd_pkt);
-                    }
+                        .for_each(|p| self.handle_hb(p));
                     Ok(Some(pkts))
                 }
                 Err(e) => Err(e),

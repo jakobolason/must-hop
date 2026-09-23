@@ -1,0 +1,7 @@
+{
+  "linkedProjects": [
+    "Cargo.toml",
+    "examples/ble/esp32c6/Cargo.toml",
+    "examples/lora/rak3272s/Cargo.toml"
+  ]
+}
