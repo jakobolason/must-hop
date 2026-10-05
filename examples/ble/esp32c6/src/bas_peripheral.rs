@@ -130,7 +130,7 @@ async fn search_task<'a, C>(
 {
     loop {
         let Some(conn) = central
-            .connect(&config)
+            .connect(config)
             .await
             .log_error("Getting connection failed")
         else {
@@ -202,6 +202,10 @@ where
     Ok(conn)
 }
 
+#[allow(
+    clippy::large_stack_frames,
+    reason = "it's not unusual to allocate larger buffers etc. in main"
+)]
 /// This task advertises when there are sensor data available
 async fn advertise_task<'a, C>(
     peripheral: &mut Peripheral<'_, C, DefaultPacketPool>,
@@ -239,6 +243,7 @@ async fn advertise_task<'a, C>(
             ..Default::default()
         };
         const PSM_L2CAP_EXAMPLES: u16 = 0x0081; // NOTE: Look into this
+        // TODO: Impl most of this for the laptop too, so that i have 2 on the network
         let mut ch1 = match L2capChannel::create(stack, &conn, PSM_L2CAP_EXAMPLES, &config).await {
             Ok(ch) => ch,
             Err(e) => {

@@ -197,6 +197,7 @@ where
     type Error = RadioError;
     type Connection = Result<(u8, PacketStatus), RadioError>;
     type ReceiveBuffer = [u8; TRANSMISSION_BUFFER];
+    type RadioError = RadioError;
 
     /// Slices up packets into bytes and transmits, does not call `lora.sleep`
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {

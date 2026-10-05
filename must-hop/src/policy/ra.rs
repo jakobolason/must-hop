@@ -1,8 +1,10 @@
+use crate::node::ConnectionType;
 use crate::policy::MacPolicy;
 use crate::{PacketType, node::MHNode};
 
 use super::MHPacket;
 
+#[cfg(feature = "in_std")]
 use embassy_time::{Duration, Instant};
 use heapless::Vec;
 
@@ -136,14 +138,17 @@ where
                 // If queue full
                 self.hbt_pkt = Some(pkt)
             }
-            node.transmit(tx_queue).await?;
+            node.transmit(tx_queue, ConnectionType::Broadcast).await?;
             tx_queue.clear();
         }
         match node
             .listen(rx_buffer, Some(core::time::Duration::from_secs(1)))
             .await
         {
-            Ok(conn) => match node.receive(conn, rx_buffer).await {
+            Ok(conn) => match node
+                .receive(conn, rx_buffer, ConnectionType::Broadcast)
+                .await
+            {
                 Ok((pkts, _rx_hw_timestamp)) => {
                     // Heartbeats that should be relayed must go out on the next tick.
                     // Push into tx_queue (not pkts) — pkts feeds handle_packets, which

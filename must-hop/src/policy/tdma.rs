@@ -1,4 +1,4 @@
-use crate::{MHNode, PacketType, RxPacket, policy::tdma::slots::SlotMask};
+use crate::{MHNode, PacketType, RxPacket, node::ConnectionType, policy::tdma::slots::SlotMask};
 
 #[cfg(not(feature = "in_std"))]
 use defmt::{debug, error, info, warn};
@@ -606,7 +606,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             }
         };
         // FIXME: Remember setting this
-        let measured_constant_offset = 7;
+        let measured_constant_offset = 0; //7;
         let total_size = used_slice.len() + measured_constant_offset;
 
         info!("[SIZE EXPECTED]|{}|", total_size);
@@ -685,13 +685,14 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         rx_buffer: &mut Node::ReceiveBuffer,
         with_timeout: Option<CoreDuration>,
         calc_feedback: bool,
+        dir: ConnectionType,
     ) -> Option<(Vec<MHPacket<SIZE>, LEN>, RxPacket)>
     where
         Node: MHNode<SIZE, LEN>,
     {
         let conn = node.listen(rx_buffer, with_timeout).await;
         if let Ok(conn) = conn
-            && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
+            && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer, dir).await
         {
             self.sync_epoch(&pkts, &rx_pkt, calc_feedback);
 
@@ -740,7 +741,12 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             self.slot_manager.hb_countdown = self.slot_manager.hb_countdown.saturating_sub(1);
         }
         if !tx_queue.is_empty() {
-            let tx_result = node.transmit(tx_queue).await;
+            // FIXME: This should ideally both send upstream and downstream, since parent uses this
+            // to know how in sync the child is
+            // Therefore this uses 'Any', to mean that it should send to all who is interested
+            // But is there a better way to do this? The connection oriented design of BLE does make
+            // this more complicated. Maybe the BLE impl should have a broadcast
+            let tx_result = node.transmit(tx_queue, ConnectionType::Broadcast).await;
             tx_queue.clear();
             tx_result?;
         }
@@ -798,7 +804,13 @@ where
         let Some(timestamps) = self.time_manager.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             if let Some((pkts, _rx_pkt)) = self
-                .rx(node, rx_buffer, Some(CoreDuration::from_secs(10)), false)
+                .rx(
+                    node,
+                    rx_buffer,
+                    Some(CoreDuration::from_secs(10)),
+                    false,
+                    ConnectionType::Broadcast,
+                )
                 .await
             {
                 if self.time_manager.hbt_pkt.is_some()
@@ -840,9 +852,16 @@ where
 
             // NOTE: listen for 200ms for new nodes on network
             // Shuold  only be done after heartbeats
+            // FIXME: There should ideally be a None option, since this should listen to a new connection
             if wait_after_hb
                 && let Some((pkts, _rx_pkt)) = self
-                    .rx(node, rx_buffer, Some(CoreDuration::from_millis(200)), false)
+                    .rx(
+                        node,
+                        rx_buffer,
+                        Some(CoreDuration::from_millis(200)),
+                        false,
+                        ConnectionType::New,
+                    )
                     .await
             {
                 info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts.len());
@@ -859,6 +878,8 @@ where
                         self.slot_manager.rx_window as u64,
                     )),
                     true,
+                    // FIXME: This is not necessarily the node id, but is the slot
+                    ConnectionType::Id(slot),
                 )
                 .await
             {

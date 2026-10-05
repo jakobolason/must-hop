@@ -1,18 +1,17 @@
 // use esp_backtrace as _;
 use defmt::{Debug2Format, error, info, warn};
 use embassy_futures::join::join3;
-use embassy_time::{Duration, Timer};
-use postcard::to_slice;
+use embassy_time::{Duration, Instant, Timer};
+use esp_hal::peripherals::BT;
+use esp_radio::ble::controller::BleConnector;
+use heapless::{Vec, vec};
+use must_hop::node::ConnectionType;
+use must_hop::{MHNode, MHPacket, RxPacket};
+use postcard::{from_bytes, to_slice};
 use serde::{Deserialize, Serialize};
 use trouble_host::{PacketPool, prelude::*};
 
-use must_hop::{
-    mesh_router, network_manager,
-    policy::{
-        // ra::{NodePolicy, RandomAccessMac},
-        tdma::TdmaMac,
-    },
-};
+use trouble_host::prelude::ExternalController;
 const CONNECTIONS_MAX: usize = 1;
 /// Max number of L2CAP Channels
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
@@ -50,19 +49,218 @@ impl<T, E: core::fmt::Debug> LogExt<T, E> for Result<T, E> {
     }
 }
 
-pub struct BleNode<'a, C>
-where
-    C: Controller,
-{
-    ble: C,
-    config: ConnectConfig<'a>,
+type ExtController<const SLOTS: usize> = ExternalController<BleConnector<'static>, SLOTS>;
+type HostRes = HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
+
+pub struct Link {
+    node_id: u8,
+    hops: u8,
+    addr: Address,
 }
 
-/// Run the BLE stack
-pub async fn ble_bas_peripheral_run<C>(controller: C)
-where
-    C: Controller,
+pub struct BleNode<'a, 'r, const SLOTS: usize, const ADV_LEN: usize> {
+    stack: Stack<'r, ExtController<SLOTS>, DefaultPacketPool>,
+    config: ConnectConfig<'a>,
+    links: Vec<Link, 5>,
+    adv_data: &'a [u8; ADV_LEN],
+}
+
+impl<'a, 'r, const SLOTS: usize, const ADV_LEN: usize> BleNode<'a, 'r, SLOTS, ADV_LEN> {
+    fn new(
+        controller: ExtController<SLOTS>,
+        address: Address,
+        config: ConnectConfig<'a>,
+        resources: &'r mut HostRes,
+    ) -> Self {
+        info!("our address = {:?}", address);
+
+        let builder = trouble_host::new(controller, resources).set_random_address(address);
+        // Build host which gives peripheral access and runner to handle radio
+        let stack = builder.build();
+
+        Self {
+            stack,
+            config,
+            links: Vec::new(),
+            adv_data: &[0u8; ADV_LEN],
+        }
+    }
+}
+
+impl<'a, 'r, const SLOTS: usize, const SIZE: usize, const LEN: usize, const ADV_LEN: usize>
+    MHNode<SIZE, LEN> for BleNode<'a, 'r, SLOTS, ADV_LEN>
 {
+    type RadioError = ();
+    type Error = ();
+    type Connection = ();
+    type ReceiveBuffer = ();
+    type Recipient = Link;
+
+    // NOTE: Will probably have to change the flow in tdma, because it requires listen -> receive
+    // Which I don't think is a good idea here.
+
+    async fn transmit(
+        &mut self,
+        packet: &[MHPacket<SIZE>],
+        dir: ConnectionType,
+    ) -> Result<(), Self::Error> {
+        // We get a list of the link indexes we want to send to.
+        // NOTE: When do we need to transmit to a new one?
+        // NOTE: Instead of sending for each index, perhaps a broadcast should only be an 'advertisement', with
+        // limited MTU, where as when given an Id it uses the channel? THus the timing requirements of sending
+        // a packet wouldn't be broken
+        match dir {
+            ConnectionType::Id(id) => {
+                // Find the slot in our links, and send to that
+                let Some(link) = self.links.iter().find(|l| l.node_id == id) else {
+                    return Err(());
+                };
+                let Some(conn) = self
+                    .stack
+                    .connections()
+                    .find(|c| c.peer_address() == link.addr)
+                else {
+                    return Err(());
+                };
+                const PAYLOAD_LEN: usize = 10;
+                let buf = &[0u8; PAYLOAD_LEN];
+                let config = L2capChannelConfig {
+                    mtu: Some(PAYLOAD_LEN as u16),
+                    ..Default::default()
+                };
+                let Ok(mut ch) = L2capChannel::create(&self.stack, &conn, 0x0081, &config).await
+                else {
+                    error!("Could not create channel!");
+                    return Err(());
+                };
+                if let Err(e) = ch.send(&self.stack, buf).await {
+                    error!("Error in transmitting , because: {}", e);
+                    return Err(());
+                }
+            }
+            ConnectionType::New => {
+                // First advertise
+                todo!()
+            }
+            ConnectionType::Broadcast => {
+                // Should advertise, right?
+                todo!()
+                // And then should send to all known links
+            }
+        };
+        // for i in indexes {
+        //     if *i < 0isize {
+        //         break;
+        //     }
+        //     let i = *i as usize;
+        //     let Some(conn) = self
+        //         .stack
+        //         .connections()
+        //         .find(|c| &c.peer_address().addr.into_inner() == self.links[i].addr)
+        //     else {
+        //         error!("Could not find link for address: {:?}", self.links[i].addr);
+        //         continue;
+        //     };
+        //     const payload_len: usize = 10;
+        //     let buf = &[0u8; payload_len];
+        //     let config = L2capChannelConfig {
+        //         mtu: Some(payload_len as u16),
+        //         ..Default::default()
+        //     };
+        //     let Ok(mut ch) = L2capChannel::create(&self.stack, &conn, 0x0081, &config).await else {
+        //         error!("Could not create channel!");
+        //         continue;
+        //     };
+        //     if let Err(e) = ch.send(&self.stack, buf).await {
+        //         error!("Error in transmitting with {}, because: {}", i, e);
+        //         continue;
+        //     }
+        //     todo!("Transmit!");
+        // }
+        todo!()
+    }
+
+    async fn receive(
+        &mut self,
+        conn: Self::Connection,
+        rec_buf: &Self::ReceiveBuffer,
+        dir: ConnectionType,
+    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), Self::Error> {
+        // To receive a packet from a connection, we should simply listen to it, right?
+        match dir {
+            ConnectionType::Id(id) => {
+                let addr = if let Some(link) = self.links.iter().find(|l| l.node_id == id) {
+                    link.addr
+                } else {
+                    return Err(());
+                };
+                let Some(conn) = self.stack.connections().find(|c| c.peer_address() == addr) else {
+                    return Err(());
+                };
+                const PAYLOAD_LEN: usize = 20;
+                let mut rx = [0; PAYLOAD_LEN];
+                let config = L2capChannelConfig {
+                    mtu: Some(PAYLOAD_LEN as u16),
+                    ..Default::default()
+                };
+                let Ok(mut ch) = L2capChannel::listen(&self.stack, &conn)
+                    .accept(&config)
+                    .await
+                else {
+                    error!("Could not listenf ro some reason");
+                    return Err(());
+                };
+                let len = ch.receive(&self.stack, &mut rx).await.unwrap();
+                let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(&rx) {
+                    Ok(packet) => packet,
+                    Err(e) => {
+                        error!("Deserialization failed: {:?}", e);
+                        return Err(());
+                    }
+                };
+                let rxpkt = RxPacket {
+                    payload_size: len as u8,
+                    rx_done_instant: Instant::now(),
+                };
+                Ok((packets, rxpkt))
+            }
+            ConnectionType::New => {
+                // TODO: Should first advertise with how many hops this has
+                todo!()
+            }
+            ConnectionType::Broadcast => {
+                // TODO: *ONLY* advertise, and don't accept connections, such that we have a advertisement
+                // beacon
+                todo!()
+            }
+        }
+    }
+
+    async fn listen(
+        &mut self,
+        rec_buf: &mut Self::ReceiveBuffer,
+        with_timeout: Option<core::time::Duration>,
+    ) -> Result<Self::Connection, Self::Error> {
+        // Here we use our given pool of connections, and listen for any one of those connections to
+        // be sending anything right now
+        // TODO: Alter some internal state, such that the runner task checks that it should
+        // check for an advertisement with stack.runner().run_with_handler(&handler).await
+        todo!()
+    }
+
+    fn calc_tx_delay(&self, _payload_len: usize) -> u64 {
+        // TODO: Figure out if there is any transmission delay for BLE
+        0
+    }
+}
+
+#[allow(
+    clippy::large_stack_frames,
+    reason = "it's not unusual to allocate larger buffers etc. in main"
+)]
+/// Run the BLE stack
+#[embassy_executor::task]
+pub async fn must_peripheral_run(controller: ExternalController<BleConnector<'static>, 20>) {
     // Using a fixed random address is useful for testing, in real scenarios
     // the MAC 6 byte array can be used as the address
     let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
@@ -70,9 +268,6 @@ where
 
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
-    // Build host which gives peripheral access and runner to handle radio
-    let builder = trouble_host::new(controller, &mut resources).set_random_address(address);
-    let stack = builder.build();
 
     let target: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
     let targets = [target];
@@ -84,22 +279,16 @@ where
         },
     };
 
-    info!("Starting advertising and GATT service");
+    let node: BleNode<'_, '_, 20, 64> = BleNode::new(controller, address, config, &mut resources);
 
-    let runner = stack.runner();
-    let mut central = stack.central();
-    let mut peripheral = stack.peripheral();
-    // This runs 3 jobs: runner handles the radio, search and advertise are periodic tasks
-    let _ = join3(
-        ble_task(runner),
-        search_task(&mut central, config, &stack),
-        advertise_task(&mut peripheral, &stack),
-    )
-    .await;
+    loop {
+        Timer::after_secs(5).await;
+        info!("BONG!");
+    }
 }
 
-/// runs whatever tasks are send to the runner, panics if error
-async fn ble_task<C, P>(mut runner: Runner<'_, C, P>)
+/// runs whatever tasks are send to the runner, prints out any error
+async fn ble_task<C, P>(runner: &mut Runner<'_, C, P>)
 where
     C: Controller,
     P: PacketPool,
@@ -116,6 +305,7 @@ struct SensorMessage {
     temperature: i8,
     current_voltage: i8,
 }
+
 fn create_sensor_data(buffer: &mut [u8]) -> Result<&mut [u8], postcard::Error> {
     let msg = SensorMessage {
         temperature: 20,
@@ -129,14 +319,14 @@ fn create_sensor_data(buffer: &mut [u8]) -> Result<&mut [u8], postcard::Error> {
 /// be saved here, or sent onwards
 async fn search_task<'a, C>(
     central: &mut Central<'_, C, DefaultPacketPool>,
-    config: ConnectConfig<'_>,
+    config: &ConnectConfig<'_>,
     stack: &Stack<'a, C, DefaultPacketPool>,
 ) where
     C: Controller + 'a,
 {
     loop {
         let Some(conn) = central
-            .connect(&config)
+            .connect(config)
             .await
             .log_error("Getting connection failed")
         else {
@@ -208,6 +398,10 @@ where
     Ok(conn)
 }
 
+#[allow(
+    clippy::large_stack_frames,
+    reason = "it's not unusual to allocate larger buffers etc. in main"
+)]
 /// This task advertises when there are sensor data available
 async fn advertise_task<'a, C>(
     peripheral: &mut Peripheral<'_, C, DefaultPacketPool>,
@@ -215,19 +409,20 @@ async fn advertise_task<'a, C>(
 ) where
     C: Controller + 'a,
 {
+    info!("In advertising task!!");
     let mut adv_data = [0; 31];
-    let name = "trouBLE tester";
+    let name = b"trouBLE tester";
     let adv_data_len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
             // AdStructure::ServiceUuids16(&[[0x0f, 0x18]]), // For battery GATT
             AdStructure::CompleteServiceUuids16(&[[0x00, 0x01]]), // For L2CAP
-            AdStructure::CompleteLocalName(name.as_bytes()),
+            AdStructure::CompleteLocalName(name),
         ],
         &mut adv_data[..],
     )
     .unwrap();
-    Timer::after_secs(10).await; // Wait a bit before starting this 
+    // Timer::after_secs(10).await; // Wait a bit before starting this
     loop {
         info!("Advertising, waiting for connection ...");
         let conn = match advertise_sensordata(peripheral, &adv_data, adv_data_len).await {
@@ -244,6 +439,7 @@ async fn advertise_task<'a, C>(
             ..Default::default()
         };
         const PSM_L2CAP_EXAMPLES: u16 = 0x0081; // NOTE: Look into this
+        // TODO: Impl most of this for the laptop too, so that i have 2 on the network
         let mut ch1 = match L2capChannel::create(stack, &conn, PSM_L2CAP_EXAMPLES, &config).await {
             Ok(ch) => ch,
             Err(e) => {
@@ -270,32 +466,6 @@ async fn advertise_task<'a, C>(
         Timer::after(Duration::from_secs(60)).await;
     }
 }
-
-// async fn advertise_task<'a, C>(
-//     peripheral: &mut Peripheral<'a, C, DefaultPacketPool>,
-//     server: Server<'a>,
-//     stack: &Stack<'_, C, DefaultPacketPool>,
-// ) where
-//     C: Controller,
-// {
-//     // After bootup, wait some time before having sensor data
-//     Timer::after_secs(10).await;
-//     loop {
-//         match advertise("trouBLE example", peripheral, &server).await {
-//             Ok(conn) => {
-//                 // these tasks only run after a connection has been established
-//                 let a = gatt_events_task(&server, &conn);
-//                 let b = custom_task(&server, &conn, stack);
-//
-//                 select(a, b).await;
-//             }
-//             Err(e) => {
-//                 info!("[ERROR] adv error:");
-//             }
-//         }
-//         Timer::after_secs(30);
-//     }
-// }
 
 /// Create an advertiser to use to connect to a BLE Central, and wait for it to connect.
 #[allow(unused)]

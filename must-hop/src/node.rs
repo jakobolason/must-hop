@@ -10,6 +10,13 @@ use heapless::Vec;
 pub mod lora;
 
 use crate::{MHPacket, RxPacket};
+
+pub enum ConnectionType {
+    Id(u8),
+    New,
+    Broadcast,
+}
+
 /// This trait denodes the necessary radio operations a node on the network
 /// is required to do, to function properly.
 pub trait MHNode<const SIZE: usize, const LEN: usize> {
@@ -21,12 +28,14 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     type RadioError;
     type Connection;
     type ReceiveBuffer;
+    type Recipient;
 
     /// Takes an MHPacket with a size for the user defined payload. This will be sent to the
     /// appropriate destination_id
     fn transmit(
         &mut self,
         packet: &[MHPacket<SIZE>],
+        dir: ConnectionType,
     ) -> impl Future<Output = Result<(), Self::Error>>;
 
     /// Function needed for this lib, for multi hop communication.
@@ -35,6 +44,7 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
         &mut self,
         conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
+        dir: ConnectionType,
     ) -> impl Future<Output = Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), Self::Error>>;
 
     /// Make the node listen for a preample, giving a connection relative to the physical layer

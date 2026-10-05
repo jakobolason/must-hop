@@ -45,7 +45,9 @@ async fn main(spawner: Spawner) -> ! {
     let connector = BleConnector::new(p.BT, Default::default()).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
     info!("And away we go!!");
-    // ble_bas_peripheral_run::ble_bas_peripheral_run(controller).await;
+    spawner.spawn(
+        must_peripheral::must_peripheral_run(controller).expect("Task must peripheral failed"),
+    );
 
     // Takes ownership of peripherals
     // let radio_reqs = RadioReqs {
