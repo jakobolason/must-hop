@@ -85,32 +85,59 @@ async fn main(_spawner: Spawner) -> ! {
     let _ = join(runner.run(), async {
         let mut counter: u16 = 0;
         loop {
-            // encode the current counter
             let mut payload = [0u8; 24];
             let used = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
                 .unwrap()
                 .len();
-            counter += 1;
-            let len =
-                AdStructure::encode_slice(&[/* flags, name, mfg data */], &mut adv_data).unwrap();
-
-            {
-                info!("Advertising!");
-                let _adv = peri
-                    .advertise(
-                        &Default::default(),
-                        Advertisement::NonconnectableNonscannableUndirected {
-                            adv_data: &adv_data[..len],
-                        },
-                    )
-                    .await
-                    .unwrap();
-                info!("After adverisitin");
-
-                // update every 10s while it's running (see below)
+            let len = AdStructure::encode_slice(
+                &[
+                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+                    AdStructure::ManufacturerSpecificData {
+                        company_identifier: 0xFFFF,
+                        payload: &payload[..used],
+                    },
+                ],
+                &mut adv_data,
+            )
+            .unwrap();
+            let adv = peri
+                .advertise(
+                    &Default::default(),
+                    Advertisement::NonconnectableNonscannableUndirected {
+                        adv_data: &adv_data[..len],
+                    },
+                )
+                .await
+                .unwrap();
+            for _ in 0..6 {
                 Timer::after(Duration::from_secs(1)).await;
-            } // _adv dropped here -> advertising stops
+                let mut payload = [0u8; 24];
+                let used = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
+                    .unwrap()
+                    .len();
+                counter += 1;
+                let len = AdStructure::encode_slice(
+                    &[
+                        AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+                        AdStructure::ManufacturerSpecificData {
+                            company_identifier: 0xFFFF,
+                            payload: &payload[..used],
+                        },
+                    ],
+                    &mut adv_data,
+                )
+                .unwrap();
 
+                info!("Upodating adv data with couter {}", counter);
+                // re-encode counter into adv_data -> len
+                peri.update_adv_data(Advertisement::NonconnectableNonscannableUndirected {
+                    adv_data: &adv_data[..len],
+                })
+                .await
+                .unwrap();
+            }
+
+            drop(adv); // advertising stops
             Timer::after(Duration::from_secs(10)).await;
         }
     })

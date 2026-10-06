@@ -58,6 +58,7 @@ trouble-host = { version = "0.8.0", features = [
   "default-packet-pool-mtu-255",
   "derive",
   "defmt",
+  "scan",
 ] }
 esp-alloc = { version = "0.11.0", features = ["esp32c6"] }
 
