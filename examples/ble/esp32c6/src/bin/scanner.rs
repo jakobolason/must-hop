@@ -68,9 +68,8 @@ async fn main(_spawner: Spawner) -> ! {
     let _ = join(runner.run_with_handler(&Rx), async {
         let mut scanner = Scanner::new(&mut central);
         let config = ScanConfig {
-            active: true,
-            interval: Duration::from_secs(1),
-            window: Duration::from_secs(1),
+            interval: Duration::from_millis(100),
+            window: Duration::from_millis(100),
             // faster rate, less power used
             phys: PhySet::M2,
             ..Default::default()

@@ -7,6 +7,10 @@ exclude = [
   "examples/gateway/sx1302",
 ]
 
+[patch.crates-io]
+trouble-host = { path = "../repos/trouble/host" }
+
+
 [workspace.dependencies]
 
 lora-phy = { path = "../../repos/pr-lora-rs/lora-phy" }

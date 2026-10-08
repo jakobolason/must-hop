@@ -47,6 +47,15 @@ smart-leds = { version = "0.4.0" }
 smart-leds-trait = { version = "0.3.2" }
 
 
+##/*version = "0.8.0", 
+trouble-host = { path = "../../../../../repos/trouble/host/", features = [
+  "default-packet-pool-mtu-255",
+  "derive",
+  "defmt",
+  "scan",
+  "extended-advertising",
+] }
+
 ### --- for BLE  ----
 esp-radio = { version = "1.0.0-beta.1", features = [
   "esp32c6",
@@ -54,16 +63,11 @@ esp-radio = { version = "1.0.0-beta.1", features = [
   "unstable",
   "defmt",
 ] }
-trouble-host = { version = "0.8.0", features = [
-  "default-packet-pool-mtu-255",
-  "derive",
-  "defmt",
-  "scan",
-] }
 esp-alloc = { version = "0.11.0", features = ["esp32c6"] }
 
 must-hop = { path = "../../../must-hop", features = ["debug"] }
 heapless = "0.9.3"
+bt-hci = "0.10.1"
 
 [profile.dev]
 # Rust debug is too slow.

@@ -12,7 +12,7 @@ mod ble_bas_peripheral_run;
 #[path = "../led_runner.rs"]
 mod led_runner;
 
-use defmt::info;
+use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_time::{Duration, Timer};
@@ -24,8 +24,7 @@ use rtt_target::rtt_init_defmt;
 use serde::{Deserialize, Serialize};
 use trouble_host::{
     Address, HostResources,
-    advertise::{AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE},
-    connection::{ConnectConfig, ScanConfig},
+    advertise::{AdStructure, AdvHandle, Advertisement, AdvertisementParameters, AdvertisementSet},
     prelude::{DefaultPacketPool, ExternalController},
 };
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -35,6 +34,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const CONNECTIONS_MAX: usize = 1;
 // Probably doesn't matter?
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
+const DATA_SIZE: usize = 20;
 
 #[allow(
     clippy::large_stack_frames,
@@ -51,7 +51,10 @@ async fn main(_spawner: Spawner) -> ! {
 
     esp_alloc::heap_allocator!(size: 72 * 1024);
     info!("Setting up trouble");
-    let connector = BleConnector::new(p.BT, Default::default()).unwrap();
+    let config = esp_radio::ble::Config::default()
+        .with_ext_adv_max_size(255)
+        .with_data_length_zero_aux(false);
+    let connector = BleConnector::new(p.BT, config).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
     let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
     info!("our address = {:?}", address);
@@ -59,86 +62,83 @@ async fn main(_spawner: Spawner) -> ! {
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
 
-    // let config = ConnectConfig {
-    //     connect_params: Default::default(),
-    //     scan_config: ScanConfig {
-    //         filter_accept_list: &targets,
-    //         ..Default::default()
-    //     },
-    // };
-
-    let builder = trouble_host::new(controller, &mut resources).set_random_address(address);
+    let builder = trouble_host::new(controller, &mut resources);
     let stack = builder.build();
     let mut peri = stack.peripheral();
-    let mut adv_data = [0; 31];
-    let name = b"advertising beacon1";
-    let adv_data_len = AdStructure::encode_slice(
-        &[
-            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::CompleteLocalName(name),
-        ],
-        &mut adv_data[..],
-    )
-    .unwrap();
+    let mut adv_data = [0; DATA_SIZE];
+
+    let make_len = |counter: u16, adv_data: &mut [u8; DATA_SIZE]| {
+        let mut payload = [0u8; 24];
+        let bbeacon = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
+            .unwrap()
+            .len();
+        AdStructure::encode_slice(
+            &[
+                // AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+                AdStructure::ManufacturerSpecificData {
+                    company_identifier: 0xFFFF,
+                    payload: &payload[..bbeacon],
+                },
+            ],
+            adv_data,
+        )
+        .unwrap()
+    };
 
     let mut runner = stack.runner();
     let _ = join(runner.run(), async {
         let mut counter: u16 = 0;
-        loop {
-            let mut payload = [0u8; 24];
-            let used = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
-                .unwrap()
-                .len();
-            let len = AdStructure::encode_slice(
-                &[
-                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                    AdStructure::ManufacturerSpecificData {
-                        company_identifier: 0xFFFF,
-                        payload: &payload[..used],
-                    },
-                ],
-                &mut adv_data,
-            )
-            .unwrap();
-            let adv = peri
-                .advertise(
-                    &Default::default(),
-                    Advertisement::NonconnectableNonscannableUndirected {
-                        adv_data: &adv_data[..len],
-                    },
-                )
+        let adv_params = AdvertisementParameters {
+            interval_min: Duration::from_millis(100),
+            interval_max: Duration::from_millis(200),
+
+            ..Default::default()
+        };
+
+        let len = make_len(counter, &mut adv_data);
+
+        'outer_loop: loop {
+            let sets = [AdvertisementSet {
+                params: adv_params,
+                data: Advertisement::ExtNonconnectableNonscannableUndirected {
+                    anonymous: false,
+                    // adv_data: &adv_data[..len],
+                    adv_data: &[],
+                },
+                address: None,
+            }];
+            info!("sets ok");
+            let mut handles = AdvertisementSet::handles(&sets);
+            // let adv = peri.advertise_ext(&sets, &mut handles).await.unwrap();
+            let adv = match peri
+                .per_adv_ext(&sets, &mut handles, core::time::Duration::from_millis(100))
                 .await
-                .unwrap();
+            {
+                Ok(adv) => adv,
+                Err(e) => {
+                    error!("Error with start_periodic: {:?}", e);
+                    break;
+                }
+            };
             for _ in 0..6 {
                 Timer::after(Duration::from_secs(1)).await;
-                let mut payload = [0u8; 24];
-                let used = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
-                    .unwrap()
-                    .len();
+                let len = make_len(counter, &mut adv_data);
+
                 counter += 1;
-                let len = AdStructure::encode_slice(
-                    &[
-                        AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                        AdStructure::ManufacturerSpecificData {
-                            company_identifier: 0xFFFF,
-                            payload: &payload[..used],
-                        },
-                    ],
-                    &mut adv_data,
-                )
-                .unwrap();
 
-                info!("Upodating adv data with couter {}", counter);
-                // re-encode counter into adv_data -> len
-                peri.update_adv_data(Advertisement::NonconnectableNonscannableUndirected {
-                    adv_data: &adv_data[..len],
-                })
-                .await
-                .unwrap();
+                info!("Updating adv data with couter {}, ok", counter);
+                if let Err(e) = peri
+                    .update_per_adv_ext(AdvHandle::new(0), &adv_data[..len])
+                    .await
+                {
+                    error!("Error with update_periodic: {:?}", e);
+                    break 'outer_loop;
+                }
             }
+            info!("Outer loop ok");
 
-            drop(adv); // advertising stops
-            Timer::after(Duration::from_secs(10)).await;
+            drop(adv);
+            Timer::after(Duration::from_secs(1)).await;
         }
     })
     .await;
