@@ -120,7 +120,7 @@ async fn main(_spawner: Spawner) -> ! {
                     break;
                 }
             };
-            for _ in 0..6 {
+            for _ in 0..60 {
                 Timer::after(Duration::from_secs(1)).await;
                 let len = make_len(counter, &mut adv_data);
 

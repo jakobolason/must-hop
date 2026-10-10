@@ -7,11 +7,6 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-#[path = "../bas_peripheral.rs"]
-mod ble_bas_peripheral_run;
-#[path = "../led_runner.rs"]
-mod led_runner;
-
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
@@ -24,8 +19,8 @@ use rtt_target::rtt_init_defmt;
 use serde::{Deserialize, Serialize};
 use trouble_host::{
     Address, HostResources,
-    advertise::{AdStructure, Advertisement, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE},
-    connection::{ConnectConfig, PhySet, ScanConfig},
+    advertise::AdStructure,
+    connection::{PhySet, ScanConfig},
     prelude::{DefaultPacketPool, EventHandler, ExternalController},
     scan::{LeAdvReportsIter, Scanner},
 };
@@ -71,6 +66,7 @@ async fn main(_spawner: Spawner) -> ! {
             interval: Duration::from_millis(100),
             window: Duration::from_millis(100),
             // faster rate, less power used
+            // NOTE: Might not be possible with periodic adv.
             phys: PhySet::M2,
             ..Default::default()
         };
