@@ -34,7 +34,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const CONNECTIONS_MAX: usize = 1;
 // Probably doesn't matter?
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
-const DATA_SIZE: usize = 20;
+const DATA_SIZE: usize = 1;
 
 #[allow(
     clippy::large_stack_frames,
@@ -53,6 +53,7 @@ async fn main(_spawner: Spawner) -> ! {
     info!("Setting up trouble");
     let config = esp_radio::ble::Config::default()
         .with_ext_adv_max_size(255)
+        .with_ll_sync_cnt(2)
         .with_data_length_zero_aux(false);
     let connector = BleConnector::new(p.BT, config).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
@@ -62,7 +63,7 @@ async fn main(_spawner: Spawner) -> ! {
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
 
-    let builder = trouble_host::new(controller, &mut resources);
+    let builder = trouble_host::new(controller, &mut resources).set_random_address(address);
     let stack = builder.build();
     let mut peri = stack.peripheral();
     let mut adv_data = [0; DATA_SIZE];
@@ -95,15 +96,15 @@ async fn main(_spawner: Spawner) -> ! {
             ..Default::default()
         };
 
-        let len = make_len(counter, &mut adv_data);
+        // let len = make_len(counter, &mut adv_data);
 
         'outer_loop: loop {
             let sets = [AdvertisementSet {
                 params: adv_params,
                 data: Advertisement::ExtNonconnectableNonscannableUndirected {
                     anonymous: false,
-                    // adv_data: &adv_data[..len],
-                    adv_data: &[],
+                    adv_data: &adv_data,
+                    // adv_data: &[],
                 },
                 address: None,
             }];
@@ -120,13 +121,13 @@ async fn main(_spawner: Spawner) -> ! {
                     break;
                 }
             };
-            for _ in 0..60 {
+            for _ in 0..600 {
                 Timer::after(Duration::from_secs(1)).await;
                 let len = make_len(counter, &mut adv_data);
 
                 counter += 1;
 
-                info!("Updating adv data with couter {}, ok", counter);
+                // info!("Updating adv data with couter {}, ok", counter);
                 if let Err(e) = peri
                     .update_per_adv_ext(AdvHandle::new(0), &adv_data[..len])
                     .await

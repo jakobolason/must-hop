@@ -22,6 +22,7 @@ use embassy_futures::join::join;
 use embassy_time::{Duration, Timer};
 use esp_hal::{Config, timer::timg::TimerGroup};
 use esp_radio::ble::controller::BleConnector;
+use heapless::Vec;
 use panic_rtt_target as _;
 use rtt_target::rtt_init_defmt;
 
@@ -56,8 +57,13 @@ async fn main(_spawner: Spawner) -> ! {
 
     esp_alloc::heap_allocator!(size: 72 * 1024);
     info!("Setting up trouble");
-    let connector = BleConnector::new(p.BT, Default::default()).unwrap();
+    let config = esp_radio::ble::Config::default()
+        .with_ll_sync_cnt(2)
+        .with_ll_sync_list_cnt(2)
+        .with_data_length_zero_aux(false);
+    let connector = BleConnector::new(p.BT, config).unwrap();
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
+
     let address: Address = Address::random([0xff, 0x8d, 0x1a, 0x05, 0xe4, 0xff]);
     info!("our address = {:?}", address);
 
@@ -70,18 +76,21 @@ async fn main(_spawner: Spawner) -> ! {
     let mut runner = stack.runner();
     let mut central = stack.central();
 
-    let adv_addr = BdAddr::new([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
+    let adv_addr = BdAddr::new([0x55, 0xA0, 0xE4, 0x9F, 0xC1, 0x16]);
     let sync_params = LePeriodicAdvCreateSyncParams {
         options: Default::default(), // don't use the periodic advertiser list; use adv_addr below
         adv_sid: 0,                  // must equal the advertiser's SID
-        adv_addr_kind: AddrKind::RANDOM, // advertiser uses a static random address
+        adv_addr_kind: AddrKind::PUBLIC, // advertiser uses a static random address
         adv_addr,
         skip: 0, // don't skip any periodic events
         sync_timeout: bt_hci::param::Duration::from_secs(10), // must be > periodic interval (100 ms)
         sync_cte_kind: Default::default(),                    // no CTE restrictions
     };
+    let rx = Rx {
+        vec: core::cell::RefCell::new(Vec::new()),
+    };
 
-    let _ = join(runner.run_with_handler(&Rx), async {
+    let _ = join(runner.run_with_handler(&rx), async {
         let mut scanner = Scanner::new(&mut central);
         let config = ScanConfig {
             interval: Duration::from_millis(100),
@@ -92,6 +101,7 @@ async fn main(_spawner: Spawner) -> ! {
             phys: PhySet::M1,
             ..Default::default()
         };
+        info!("config setup..., ok");
         let _session = match scanner.scan_periodic(&config, sync_params).await {
             Ok(s) => s,
             Err(e) => {
@@ -99,9 +109,9 @@ async fn main(_spawner: Spawner) -> ! {
                 core::future::pending().await
             }
         };
+        info!("Session made");
         // Keep `_session` alive: dropping it cancels the scan.
         loop {
-            info!("In loop again");
             Timer::after(Duration::from_secs(1)).await;
         }
     })
@@ -117,9 +127,37 @@ struct Beacon {
     seq: u16,
 }
 
-struct Rx;
+struct Rx {
+    vec: core::cell::RefCell<Vec<BdAddr, 35>>,
+}
 
 impl EventHandler for Rx {
+    fn on_ext_adv_reports(&self, mut it: bt_hci::param::LeExtAdvReportsIter) {
+        while let Some(Ok(report)) = it.next() {
+            let mut vec = self.vec.borrow_mut();
+            if vec.contains(&report.addr) {
+                continue;
+            }
+            // Drop the mutable borrow before doing anything else
+
+            let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
+
+            let matches_addr = report.addr == address.addr;
+            if matches_addr || report.adv_sid == 0 || report.data.is_empty() {
+                info!("Extended adv from {:?}, rssi={}", report.addr, report.rssi);
+                info!("data: {}", report.data);
+
+                if let Err(_e) = vec.push(report.addr) {
+                    error!("Vec full!");
+                    continue;
+                }
+            }
+
+            drop(vec);
+            // ... decode and log
+        }
+    }
+
     fn on_adv_reports(&self, mut it: LeAdvReportsIter<'_>) {
         while let Some(Ok(report)) = it.next() {
             // report.addr, report.rssi, report.data (raw AD bytes)
