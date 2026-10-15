@@ -34,7 +34,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const CONNECTIONS_MAX: usize = 1;
 // Probably doesn't matter?
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
-const DATA_SIZE: usize = 1;
+const DATA_SIZE: usize = 10;
 
 #[allow(
     clippy::large_stack_frames,
@@ -68,24 +68,6 @@ async fn main(_spawner: Spawner) -> ! {
     let mut peri = stack.peripheral();
     let mut adv_data = [0; DATA_SIZE];
 
-    let make_len = |counter: u16, adv_data: &mut [u8; DATA_SIZE]| {
-        let mut payload = [0u8; 24];
-        let bbeacon = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
-            .unwrap()
-            .len();
-        AdStructure::encode_slice(
-            &[
-                // AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                AdStructure::ManufacturerSpecificData {
-                    company_identifier: 0xFFFF,
-                    payload: &payload[..bbeacon],
-                },
-            ],
-            adv_data,
-        )
-        .unwrap()
-    };
-
     let mut runner = stack.runner();
     let _ = join(runner.run(), async {
         let mut counter: u16 = 0;
@@ -96,18 +78,12 @@ async fn main(_spawner: Spawner) -> ! {
             ..Default::default()
         };
 
-        // let len = make_len(counter, &mut adv_data);
-
         'outer_loop: loop {
-            let sets = [AdvertisementSet {
-                params: adv_params,
-                data: Advertisement::ExtNonconnectableNonscannableUndirected {
-                    anonymous: false,
-                    adv_data: &adv_data,
-                    // adv_data: &[],
-                },
-                address: None,
-            }];
+            let sets = match make_sets(counter, &mut adv_data, adv_params) {
+                Some(sets) => [sets],
+                None => break,
+            };
+
             info!("sets ok");
             let mut handles = AdvertisementSet::handles(&sets);
             // let adv = peri.advertise_ext(&sets, &mut handles).await.unwrap();
@@ -123,15 +99,11 @@ async fn main(_spawner: Spawner) -> ! {
             };
             for _ in 0..600 {
                 Timer::after(Duration::from_secs(1)).await;
-                let len = make_len(counter, &mut adv_data);
 
                 counter += 1;
 
                 // info!("Updating adv data with couter {}, ok", counter);
-                if let Err(e) = peri
-                    .update_per_adv_ext(AdvHandle::new(0), &adv_data[..len])
-                    .await
-                {
+                if let Err(e) = peri.update_per_adv_ext(AdvHandle::new(0), &adv_data).await {
                     error!("Error with update_periodic: {:?}", e);
                     break 'outer_loop;
                 }
@@ -152,4 +124,40 @@ async fn main(_spawner: Spawner) -> ! {
 #[derive(Serialize, Deserialize)]
 struct Beacon {
     seq: u16,
+}
+
+fn make_sets(
+    counter: u16,
+    adv_data: &'_ mut [u8; DATA_SIZE],
+    adv_params: AdvertisementParameters,
+) -> Option<AdvertisementSet<'_>> {
+    let mut payload = [0u8; 24];
+    let bbeacon = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
+        .unwrap()
+        .len();
+    let data = match AdStructure::encode_slice(
+        &[
+            // AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            AdStructure::ManufacturerSpecificData {
+                company_identifier: 0xFFFF,
+                payload: &payload[..bbeacon],
+            },
+        ],
+        adv_data,
+    ) {
+        Ok(data) => data,
+        Err(e) => {
+            error!("Error: {:?}", e);
+            return None;
+        }
+    };
+    Some(AdvertisementSet {
+        params: adv_params,
+        data: Advertisement::ExtNonconnectableNonscannableUndirected {
+            anonymous: false,
+            adv_data: &adv_data[..data],
+            // adv_data: &[],
+        },
+        address: None,
+    })
 }
