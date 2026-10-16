@@ -67,7 +67,7 @@ esp-alloc = { version = "0.11.0", features = ["esp32c6"] }
 
 must-hop = { path = "../../../must-hop", features = ["debug"] }
 heapless = "0.9.3"
-bt-hci = "0.10.1"
+bt-hci = "0.11.0"
 
 [profile.dev]
 # Rust debug is too slow.

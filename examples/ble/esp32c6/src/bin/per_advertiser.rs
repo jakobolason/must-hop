@@ -34,7 +34,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const CONNECTIONS_MAX: usize = 1;
 // Probably doesn't matter?
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
-const DATA_SIZE: usize = 10;
+const DATA_SIZE: usize = 31;
+
+const NAME: &[u8] = b"ESP Periodic Adv";
 
 #[allow(
     clippy::large_stack_frames,
@@ -78,17 +80,17 @@ async fn main(_spawner: Spawner) -> ! {
             ..Default::default()
         };
 
-        'outer_loop: loop {
-            let sets = match make_sets(counter, &mut adv_data, adv_params) {
-                Some(sets) => [sets],
-                None => break,
-            };
-
+        while let Some(set) = make_sets(counter, &mut adv_data, adv_params) {
             info!("sets ok");
-            let mut handles = AdvertisementSet::handles(&sets);
+            let sets = &[set];
+            let mut handles = AdvertisementSet::handles(sets);
             // let adv = peri.advertise_ext(&sets, &mut handles).await.unwrap();
             let adv = match peri
-                .per_adv_ext(&sets, &mut handles, core::time::Duration::from_millis(100))
+                .per_adv_ext(
+                    &sets[0],
+                    &mut handles[0],
+                    core::time::Duration::from_millis(100),
+                )
                 .await
             {
                 Ok(adv) => adv,
@@ -97,15 +99,23 @@ async fn main(_spawner: Spawner) -> ! {
                     break;
                 }
             };
-            for _ in 0..600 {
+            info!("adv ok");
+            counter += 1;
+            while let Some(len) = encode_beacon(counter, &mut adv_data)
+                && counter < 600
+            {
                 Timer::after(Duration::from_secs(1)).await;
 
                 counter += 1;
+                info!("Ok updating counter to {}", counter);
 
                 // info!("Updating adv data with couter {}, ok", counter);
-                if let Err(e) = peri.update_per_adv_ext(AdvHandle::new(0), &adv_data).await {
+                if let Err(e) = peri
+                    .update_per_adv_ext(AdvHandle::new(0), &adv_data[..len])
+                    .await
+                {
                     error!("Error with update_periodic: {:?}", e);
-                    break 'outer_loop;
+                    break;
                 }
             }
             info!("Outer loop ok");
@@ -126,28 +136,42 @@ struct Beacon {
     seq: u16,
 }
 
+fn encode_beacon(counter: u16, buf: &mut [u8; DATA_SIZE]) -> Option<usize> {
+    let mut payload = [0u8; 24];
+    let n = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
+        .unwrap()
+        .len();
+    match AdStructure::encode_slice(
+        &[
+            AdStructure::Flags(
+                trouble_host::advertise::LE_GENERAL_DISCOVERABLE
+                    | trouble_host::advertise::BR_EDR_NOT_SUPPORTED,
+            ),
+            AdStructure::CompleteLocalName(NAME),
+            AdStructure::ManufacturerSpecificData {
+                company_identifier: 0xFFFF,
+                payload: &payload[..n],
+            },
+        ],
+        buf,
+    ) {
+        Ok(len) => Some(len),
+        Err(e) => {
+            error!("Error: {:?}", e);
+            None
+        }
+    }
+}
+
 fn make_sets(
     counter: u16,
     adv_data: &'_ mut [u8; DATA_SIZE],
     adv_params: AdvertisementParameters,
 ) -> Option<AdvertisementSet<'_>> {
-    let mut payload = [0u8; 24];
-    let bbeacon = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
-        .unwrap()
-        .len();
-    let data = match AdStructure::encode_slice(
-        &[
-            // AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ManufacturerSpecificData {
-                company_identifier: 0xFFFF,
-                payload: &payload[..bbeacon],
-            },
-        ],
-        adv_data,
-    ) {
-        Ok(data) => data,
-        Err(e) => {
-            error!("Error: {:?}", e);
+    let data = match encode_beacon(counter, adv_data) {
+        Some(data) => data,
+        None => {
+            error!("Error in encoding beacon");
             return None;
         }
     };

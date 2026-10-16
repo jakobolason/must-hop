@@ -34,7 +34,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const CONNECTIONS_MAX: usize = 1;
 // Probably doesn't matter?
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
-const DATA_SIZE: usize = 1;
+const DATA_SIZE: usize = 10;
 
 #[allow(
     clippy::large_stack_frames,
@@ -86,7 +86,7 @@ async fn main(_spawner: Spawner) -> ! {
             let adv = match peri.advertise_ext(&sets, &mut handles).await {
                 Ok(adv) => adv,
                 Err(e) => {
-                    error!("Error with start_periodic: {:?}", e);
+                    error!("Error with advertise_ext: {:?}", e);
                     break;
                 }
             };
@@ -99,7 +99,7 @@ async fn main(_spawner: Spawner) -> ! {
 
                 // info!("Updating adv data with couter {}, ok", counter);
                 if let Err(e) = peri.update_adv_data_ext(&sets, &mut handles).await {
-                    error!("Error with update_periodic: {:?}", e);
+                    error!("Error with update_adv_data_ext: {:?}", e);
                     break 'outer_loop;
                 }
             }
