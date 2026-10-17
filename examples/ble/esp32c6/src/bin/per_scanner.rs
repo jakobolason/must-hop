@@ -76,15 +76,15 @@ async fn main(_spawner: Spawner) -> ! {
     let mut runner = stack.runner();
     let mut central = stack.central();
 
-    let adv_addr = BdAddr::new([0x55, 0xA0, 0xE4, 0x9F, 0xC1, 0x16]);
+    let adv_addr = BdAddr::new([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]); // same array as Address::random on the advertiser
     let sync_params = LePeriodicAdvCreateSyncParams {
-        options: Default::default(), // don't use the periodic advertiser list; use adv_addr below
-        adv_sid: 0,                  // must equal the advertiser's SID
-        adv_addr_kind: AddrKind::PUBLIC, // advertiser uses a static random address
+        options: Default::default(),
+        adv_sid: 0,
+        adv_addr_kind: AddrKind::RANDOM,
         adv_addr,
-        skip: 0, // don't skip any periodic events
-        sync_timeout: bt_hci::param::Duration::from_secs(10), // must be > periodic interval (100 ms)
-        sync_cte_kind: Default::default(),                    // no CTE restrictions
+        skip: 0,
+        sync_timeout: bt_hci::param::Duration::from_secs(10),
+        sync_cte_kind: Default::default(),
     };
     let rx = Rx {
         vec: core::cell::RefCell::new(Vec::new()),
@@ -96,7 +96,7 @@ async fn main(_spawner: Spawner) -> ! {
             interval: Duration::from_millis(100),
             window: Duration::from_millis(100),
             // faster rate, less power used
-            // NOTE: Might not be possible with periodic adv.
+            // NOTE: Gives 0x12 error
             // phys: PhySet::M2,
             phys: PhySet::M1,
             ..Default::default()
@@ -109,7 +109,7 @@ async fn main(_spawner: Spawner) -> ! {
                 core::future::pending().await
             }
         };
-        info!("Session made");
+        info!("Session made ok");
         // Keep `_session` alive: dropping it cancels the scan.
         loop {
             Timer::after(Duration::from_secs(1)).await;
@@ -117,7 +117,7 @@ async fn main(_spawner: Spawner) -> ! {
     })
     .await;
     loop {
-        info!("Why the hell am i her??");
+        info!("Why the hell am i here?? not ok");
         Timer::after(Duration::from_secs(10)).await;
     }
 }
@@ -134,28 +134,74 @@ struct Rx {
 impl EventHandler for Rx {
     fn on_ext_adv_reports(&self, mut it: bt_hci::param::LeExtAdvReportsIter) {
         while let Some(Ok(report)) = it.next() {
-            let mut vec = self.vec.borrow_mut();
-            if vec.contains(&report.addr) {
-                continue;
-            }
+            // let mut vec = self.vec.borrow_mut();
+            // if vec.contains(&report.addr) {
+            //     continue;
+            // }
             // Drop the mutable borrow before doing anything else
 
             let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
-
             let matches_addr = report.addr == address.addr;
-            if matches_addr || report.adv_sid == 0 || report.data.is_empty() {
-                info!("Extended adv from {:?}, rssi={}", report.addr, report.rssi);
-                info!("data: {}", report.data);
-
-                if let Err(_e) = vec.push(report.addr) {
-                    error!("Vec full!");
-                    continue;
+            if matches_addr && report.adv_sid == 0 {
+                info!(
+                    "OK! Extended adv from {:?}, rssi={}",
+                    report.addr, report.rssi
+                );
+                for ad in AdStructure::decode(report.data) {
+                    let ad = match ad {
+                        Ok(ad) => ad,
+                        Err(e) => {
+                            error!("Error in decoding error: {:?}", e);
+                            continue;
+                        }
+                    };
+                    if let AdStructure::ManufacturerSpecificData {
+                        company_identifier: 0xFFFF,
+                        payload,
+                    } = ad
+                    {
+                        match postcard::from_bytes::<Beacon>(payload) {
+                            Ok(b) => info!("ext report: rssi={} seq={}", report.rssi, b.seq),
+                            Err(_) => info!("bad payload from {:?}", report.addr),
+                        }
+                    }
                 }
+                // if let Err(_e) = vec.push(report.addr) {
+                //     error!("Vec full!");
+                //     continue;
+                // }
             }
 
-            drop(vec);
+            // drop(vec);
             // ... decode and log
         }
+    }
+
+    fn on_periodic_adv_report(&self, report: &bt_hci::event::le::LePeriodicAdvertisingReport) {
+        info!("OK! Periodic adv report from {:?}", report);
+        // for ad in AdStructure::decode(report.data) {
+        //     let ad = match ad {
+        //         Ok(ad) => ad,
+        //         Err(e) => {
+        //             error!("Error in decoding error: {:?}", e);
+        //             continue;
+        //         }
+        //     };
+        //     if let AdStructure::ManufacturerSpecificData {
+        //         company_identifier: 0xFFFF,
+        //         payload,
+        //     } = ad
+        //     {
+        //         match postcard::from_bytes::<Beacon>(payload) {
+        //             Ok(b) => info!("per report: rssi={} seq={}", report.rssi, b.seq),
+        //             Err(_) => info!("bad payload"),
+        //         }
+        //     }
+        // }
+    }
+
+    fn on_sync(&self, report: &bt_hci::event::le::LePeriodicAdvertisingSyncEstablished) {
+        info!("Is synced now!! {}", report.adv_addr);
     }
 
     fn on_adv_reports(&self, mut it: LeAdvReportsIter<'_>) {

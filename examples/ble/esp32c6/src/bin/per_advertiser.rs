@@ -73,12 +73,15 @@ async fn main(_spawner: Spawner) -> ! {
     let mut runner = stack.runner();
     let _ = join(runner.run(), async {
         let mut counter: u16 = 0;
+        // Sets extended advertisement parameters
         let adv_params = AdvertisementParameters {
-            interval_min: Duration::from_millis(100),
-            interval_max: Duration::from_millis(200),
-
+            interval_min: Duration::from_secs(5),
+            interval_max: Duration::from_secs(6),
+            // NOTE: Gives 0x12 error
+            // primary_phy: bt_hci::param::PhyKind::Le2M,
             ..Default::default()
         };
+        let per_params = core::time::Duration::from_secs(5);
 
         while let Some(set) = make_sets(counter, &mut adv_data, adv_params) {
             info!("sets ok");
@@ -86,11 +89,7 @@ async fn main(_spawner: Spawner) -> ! {
             let mut handles = AdvertisementSet::handles(sets);
             // let adv = peri.advertise_ext(&sets, &mut handles).await.unwrap();
             let adv = match peri
-                .per_adv_ext(
-                    &sets[0],
-                    &mut handles[0],
-                    core::time::Duration::from_millis(100),
-                )
+                .per_adv_ext(&sets[0], &mut handles[0], per_params)
                 .await
             {
                 Ok(adv) => adv,
@@ -104,7 +103,7 @@ async fn main(_spawner: Spawner) -> ! {
             while let Some(len) = encode_beacon(counter, &mut adv_data)
                 && counter < 600
             {
-                Timer::after(Duration::from_secs(1)).await;
+                Timer::after(Duration::from_secs(5)).await;
 
                 counter += 1;
                 info!("Ok updating counter to {}", counter);
