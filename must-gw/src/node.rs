@@ -147,6 +147,9 @@ impl MHNode<SIZE, LEN> for GWNode {
     type Connection = ();
     type ReceiveBuffer = Option<RxPacket>;
 
+    // TODO: Remove this, can't find the difference between this and just Error
+    type RadioError = loragw::Error;
+
     async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
         let (tx_pkt, payload_size) = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {

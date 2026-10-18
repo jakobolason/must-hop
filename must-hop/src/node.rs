@@ -9,6 +9,9 @@ use heapless::Vec;
 #[cfg(feature = "lora")]
 pub mod lora;
 
+#[cfg(feature = "ble")]
+pub mod ble;
+
 use crate::{MHPacket, RxPacket};
 
 pub enum ConnectionType {
@@ -25,18 +28,28 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     #[cfg(feature = "in_std")]
     type Error: core::fmt::Debug;
 
+    /// The error from the used radio
     type RadioError;
+
+    /// The contents of a connection provided by your radio
     type Connection;
+
+    /// The size you wish to provide for receieving messages
     type ReceiveBuffer;
-    type Recipient;
+
+    // TODO: What is this used for?
+    // As we are in the network layer, this is technically IP address, whilst a BDAddr is the MAC
+    // address kind of. But this shouldn't be a implementation type, it shuold be general around the
+    // network then?
+    // type Recipient;
 
     /// Takes an MHPacket with a size for the user defined payload. This will be sent to the
     /// appropriate destination_id
     fn transmit(
         &mut self,
         packet: &[MHPacket<SIZE>],
-        dir: ConnectionType,
     ) -> impl Future<Output = Result<(), Self::Error>>;
+    // TODO: Make the hb packet be a seperate parameter, such that the impl chooses how to handle it
 
     /// Function needed for this lib, for multi hop communication.
     /// The conn and receiving_buffer might be too LoRa specific, so it might change
@@ -44,7 +57,6 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
         &mut self,
         conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-        dir: ConnectionType,
     ) -> impl Future<Output = Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), Self::Error>>;
 
     /// Make the node listen for a preample, giving a connection relative to the physical layer

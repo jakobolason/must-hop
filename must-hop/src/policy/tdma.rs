@@ -1,4 +1,4 @@
-use crate::{MHNode, PacketType, RxPacket, node::ConnectionType, policy::tdma::slots::SlotMask};
+use crate::{MHNode, PacketType, RxPacket, policy::tdma::slots::SlotMask};
 
 #[cfg(not(feature = "in_std"))]
 use defmt::{debug, error, info, warn};
@@ -685,14 +685,13 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         rx_buffer: &mut Node::ReceiveBuffer,
         with_timeout: Option<CoreDuration>,
         calc_feedback: bool,
-        dir: ConnectionType,
     ) -> Option<(Vec<MHPacket<SIZE>, LEN>, RxPacket)>
     where
         Node: MHNode<SIZE, LEN>,
     {
         let conn = node.listen(rx_buffer, with_timeout).await;
         if let Ok(conn) = conn
-            && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer, dir).await
+            && let Ok((pkts, rx_pkt)) = node.receive(conn, rx_buffer).await
         {
             self.sync_epoch(&pkts, &rx_pkt, calc_feedback);
 
@@ -746,7 +745,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             // Therefore this uses 'Any', to mean that it should send to all who is interested
             // But is there a better way to do this? The connection oriented design of BLE does make
             // this more complicated. Maybe the BLE impl should have a broadcast
-            let tx_result = node.transmit(tx_queue, ConnectionType::Broadcast).await;
+            let tx_result = node.transmit(tx_queue).await;
             tx_queue.clear();
             tx_result?;
         }
@@ -804,13 +803,7 @@ where
         let Some(timestamps) = self.time_manager.time_sync else {
             info!("TDMA: Waiting for first packet to sync");
             if let Some((pkts, _rx_pkt)) = self
-                .rx(
-                    node,
-                    rx_buffer,
-                    Some(CoreDuration::from_secs(10)),
-                    false,
-                    ConnectionType::Broadcast,
-                )
+                .rx(node, rx_buffer, Some(CoreDuration::from_secs(10)), false)
                 .await
             {
                 if self.time_manager.hbt_pkt.is_some()
@@ -855,13 +848,7 @@ where
             // FIXME: There should ideally be a None option, since this should listen to a new connection
             if wait_after_hb
                 && let Some((pkts, _rx_pkt)) = self
-                    .rx(
-                        node,
-                        rx_buffer,
-                        Some(CoreDuration::from_millis(200)),
-                        false,
-                        ConnectionType::New,
-                    )
+                    .rx(node, rx_buffer, Some(CoreDuration::from_millis(200)), false)
                     .await
             {
                 info!("RECEIVED A HeartBeat after Tx!! {:?}", pkts.len());
@@ -879,7 +866,6 @@ where
                     )),
                     true,
                     // FIXME: This is not necessarily the node id, but is the slot
-                    ConnectionType::Id(slot),
                 )
                 .await
             {

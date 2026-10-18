@@ -79,6 +79,10 @@ where
         Ok(())
     }
 
+    pub fn tx_free(&self) -> usize {
+        self.tx_queue.capacity() - self.tx_queue.len()
+    }
+
     fn push_queue(
         &mut self,
         pkt: MHPacket<SIZE>,
@@ -142,7 +146,7 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lora"))]
 mod tests {
     use super::*;
     use crate::{

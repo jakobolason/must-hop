@@ -22,7 +22,19 @@ embedded-hal = { version = "1.0.0", optional = true }
 # For LoRa functionality
 lora-phy = { workspace = true, optional = true }
 lora-modulation = { workspace = true, optional = true }
+# For BLE functionality
+trouble-host = { workspace = true, features = [
+  "default-packet-pool-mtu-255",
+  "derive",
+  "defmt",
+  "scan",
+  "extended-advertising",
+], optional = true }
 
+bt-hci = { version = "0.11.0", optional = true }
+
+# Only for the Instant type, so if it can be made more slim, do that
+tokio = { version = "1.52.3", optional = true }
 
 [features]
 default = [
@@ -39,9 +51,13 @@ in_std = [
   "embassy-time/std",
   "serde/std",
   "embassy-time/generic-queue-8",
+  "tokio",
 ]
 debug = ["embedded-hal"]
 lora = ["lora-phy", "lora-modulation"]
+ble = ["trouble-host", "bt-hci"]
 
 [dev-dependencies]
 tokio = { version = "1.52.3", features = ["macros", "rt", "time"] }
+lora-phy = { workspace = true }
+lora-modulation = { workspace = true }

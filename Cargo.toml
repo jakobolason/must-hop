@@ -8,13 +8,15 @@ exclude = [
 ]
 
 [patch.crates-io]
-trouble-host = { path = "../repos/trouble/host" }
+trouble-host = { path = "../../repos/trouble/host" }
 
 
 [workspace.dependencies]
 
 lora-phy = { path = "../../repos/pr-lora-rs/lora-phy" }
 lora-modulation = { path = "../../repos/pr-lora-rs/lora-modulation" }
+trouble-host = { path = "../../repos/trouble/host" }
+
 # lora-phy = "3.0.1"
 # lora-modulation = "0.1.5"
 
