@@ -120,7 +120,12 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(runner_task(runner, run_config).expect("Runner did not start successfully?"));
     let rx_buf = [0u8; MAX_ADV];
-    let manager: NetworkManager<DATA_SIZE, 5> = NetworkManager::new(0, 1, 10, None);
+    #[cfg(not(feature = "board-b"))]
+    let source_id = 2;
+    #[cfg(feature = "board-b")]
+    let source_id = 3;
+
+    let manager: NetworkManager<DATA_SIZE, 5> = NetworkManager::new(source_id, 1, 10, None);
     let mac = RandomAccessMac::new(NodePolicy);
     let router = MeshRouter::new(ble_node, manager, mac);
 
@@ -129,10 +134,11 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(mesh_task(service).expect("Mesh task started successfully"));
     // Now that should run in the background, and the user can now make their business logic to
     // choose when to send what, to whom
-    let rng = Rng::new();
+    // let rng = Rng::new();
     loop {
-        let delay_ms = 1000 + (rng.random() % 5000) as u64;
-        Timer::after(Duration::from_millis(delay_ms)).await;
+        // let delay_ms = 1000 + (rng.random() % 5000) as u64;
+        // Timer::after(Duration::from_millis(delay_ms)).await;
+        Timer::after_secs(5).await;
         match mail_box.send(0, &[1u8; 8]).await {
             Ok(_) => info!("Sucessfully sent!"),
             Err(_) => error!("Error for sending empty payload"),

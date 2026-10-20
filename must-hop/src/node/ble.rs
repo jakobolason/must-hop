@@ -125,7 +125,7 @@ where
             ],
             &mut adv_data,
         )
-        .unwrap();
+        .map_err(|_| BleHostError::BleHost(trouble_host::Error::Other))?;
         let adv_set = AdvertisementSet {
             params: self.adv_params,
             data: Advertisement::ExtNonconnectableNonscannableUndirected {
@@ -158,7 +158,17 @@ where
         _rec_buf: &Self::ReceiveBuffer,
     ) -> Result<(heapless::Vec<crate::MHPacket<SIZE>, LEN>, crate::RxPacket), Self::Error> {
         // Basically just take the connection with the data, and return that
-        let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(&conn.data) {
+        let payload = AdStructure::decode(&conn.data)
+            .flatten()
+            .find_map(|ad| match ad {
+                AdStructure::ManufacturerSpecificData {
+                    company_identifier: 0xFFFF,
+                    payload,
+                } => Some(payload),
+                _ => None,
+            })
+            .ok_or(BleHostError::BleHost(trouble_host::Error::Other))?;
+        let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(payload) {
             Ok(packet) => packet,
             Err(e) => {
                 error!("Deserialization failed: {:?}", e);
@@ -203,7 +213,7 @@ where
             Either::First(_) => {
                 // TODO:
                 // Means we timed out, return with timeout error
-                info!("Timed out after {}!", timeout);
+                info!("Timed out after {:?}!", timeout);
                 session.stop().await;
                 return Err(BleHostError::BleHost(
                     trouble_host::Error::NoChannelAvailable,
