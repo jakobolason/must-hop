@@ -7,11 +7,6 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-#[path = "../bas_peripheral.rs"]
-mod ble_bas_peripheral_run;
-#[path = "../led_runner.rs"]
-mod led_runner;
-
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
@@ -136,7 +131,7 @@ struct Beacon {
 }
 
 fn encode_beacon(counter: u16, buf: &mut [u8; DATA_SIZE]) -> Option<usize> {
-    let mut payload = [0u8; 24];
+    let mut payload = [0u8; 32];
     let n = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
         .unwrap()
         .len();

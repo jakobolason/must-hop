@@ -79,6 +79,10 @@ where
         Ok(())
     }
 
+    pub fn tx_free(&self) -> usize {
+        self.tx_queue.capacity() - self.tx_queue.len()
+    }
+
     fn push_queue(
         &mut self,
         pkt: MHPacket<SIZE>,
@@ -115,6 +119,7 @@ where
         // Short circuit if no packets received
         let received_pkts = match received_pkts {
             Some(pkts) => pkts,
+            // Compiler should reduce footprint of unecessary call
             None => return Ok(Vec::new()),
         };
         let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;
@@ -142,7 +147,7 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "lora"))]
 mod tests {
     use super::*;
     use crate::{

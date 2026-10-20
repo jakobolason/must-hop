@@ -1,4 +1,3 @@
-use crate::node::ConnectionType;
 use crate::policy::MacPolicy;
 use crate::{PacketType, node::MHNode};
 
@@ -138,17 +137,14 @@ where
                 // If queue full
                 self.hbt_pkt = Some(pkt)
             }
-            node.transmit(tx_queue, ConnectionType::Broadcast).await?;
+            node.transmit(tx_queue).await?;
             tx_queue.clear();
         }
         match node
             .listen(rx_buffer, Some(core::time::Duration::from_secs(1)))
             .await
         {
-            Ok(conn) => match node
-                .receive(conn, rx_buffer, ConnectionType::Broadcast)
-                .await
-            {
+            Ok(conn) => match node.receive(conn, rx_buffer).await {
                 Ok((pkts, _rx_hw_timestamp)) => {
                     // Heartbeats that should be relayed must go out on the next tick.
                     // Push into tx_queue (not pkts) — pkts feeds handle_packets, which

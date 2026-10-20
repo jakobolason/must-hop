@@ -18,17 +18,22 @@ pub use crate::{
     policy::{ra::RandomAccessMac, tdma::TdmaMac},
 };
 
+pub mod channels;
 pub mod mesh_router;
 pub mod network_manager;
 pub mod policy;
 
-// TODO: Move these into lib.rs, move all files in node/ into appropriate places
-// MEans that mesh_router and network_manager goes into this dir, and tdma goes into policy/ instead
-// of node/policy/
-
 use embassy_time::Instant;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
+
+pub(crate) mod log_compat {
+    #[cfg(not(feature = "in_std"))]
+    pub use defmt::{debug, error, info, trace, warn};
+
+    #[cfg(feature = "in_std")]
+    pub use log::{debug, error, info, trace, warn};
+}
 
 /// Either this packet
 /// Is Data, and should get an ACK return
@@ -51,7 +56,6 @@ pub enum PacketType {
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 pub struct MHPacket<const SIZE: usize> {
     /// Destination identifier
-    // TODO: Perhaps bigger than u8?
     pub destination_id: u16,
     pub packet_type: PacketType,
     pub packet_id: u16,
@@ -60,6 +64,7 @@ pub struct MHPacket<const SIZE: usize> {
     // (DE)serialize is only available up to 32 bytes
     pub payload: Vec<u8, SIZE>,
     /// The amount of hops this package has been on
+    // TODO: Never used, should it be deleted?
     hop_count: u8,
     /// Amount of hops the current node has to GW
     pub hop_to_gw: u8,
@@ -69,7 +74,6 @@ pub struct MHPacket<const SIZE: usize> {
 /// in `TdmaMac` to improve the time synchronization
 #[derive(Debug, Clone)]
 pub struct RxPacket {
-    // pub preamble_instant: Option<Instant>,
     pub rx_done_instant: Instant,
     pub payload_size: u8,
     // pub estimated_toa: (u32, u32),
