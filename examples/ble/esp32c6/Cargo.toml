@@ -69,6 +69,12 @@ must-hop = { path = "../../../must-hop", features = ["debug", "ble"] }
 heapless = "0.9.3"
 bt-hci = "0.11.0"
 
+[patch.crates-io]
+esp-radio = { path = "/home/jakob/repos/esp-radio-patched/" }
+# esp-rom-sys = { path = "/home/jakob/repos/esp-hal/esp-rom-sys/" }
+# esp-riscv-rt = { path = "/home/jakob/repos/esp-hal/esp-riscv-rt/" }
+# xtensa-lx-rt = { path = "/home/jakob/repos/esp-hal/xtensa-lx-rt/" }
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization

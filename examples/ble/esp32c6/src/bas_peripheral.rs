@@ -2,7 +2,6 @@
 use defmt::{Debug2Format, error, info, warn};
 use embassy_futures::join::join3;
 use embassy_time::{Duration, Timer};
-use esp_hal::peripherals::BT;
 use esp_radio::ble::controller::BleConnector;
 use postcard::to_slice;
 use serde::{Deserialize, Serialize};

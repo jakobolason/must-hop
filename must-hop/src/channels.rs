@@ -29,6 +29,16 @@ pub struct MeshState<const SIZE: usize, const N: usize> {
     events: Channel<Raw, MeshEvent, 4>,
 }
 
+impl<const SIZE: usize, const N: usize> MeshState<SIZE, N> {
+    pub fn new() -> Self {
+        Self {
+            out: Channel::new(),
+            inc: Channel::new(),
+            events: Channel::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum MeshEvent {
     Dropped,     // router refused the payload
@@ -142,7 +152,7 @@ where
 /// initialize Mailbox for sending and receiving packets, and the MeshService which should be put in
 /// a seperate task from the main loop.
 pub fn init<Node, Mac, const SIZE: usize, const LEN: usize, const N: usize>(
-    state: &'static mut MeshState<SIZE, N>,
+    state: &'static MeshState<SIZE, N>,
     router: MeshRouter<Node, Mac, SIZE, LEN>,
     rx_buf: Node::ReceiveBuffer,
 ) -> (Mailbox<SIZE, N>, MeshService<Node, Mac, SIZE, LEN, N>)

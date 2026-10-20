@@ -12,30 +12,28 @@ mod ble_bas_peripheral_run;
 #[path = "../led_runner.rs"]
 mod led_runner;
 
-use bt_hci::{
-    cmd::le::LePeriodicAdvCreateSyncParams,
-    param::{AddrKind, BdAddr},
-};
-use defmt::{error, info};
+use bt_hci::param::BdAddr;
+use defmt::info;
 use embassy_executor::Spawner;
-use embassy_futures::join::join;
 use embassy_time::{Duration, Timer};
 use esp_hal::{Config, timer::timg::TimerGroup};
 use esp_radio::ble::controller::BleConnector;
 use heapless::Vec;
-use must_hop::node::ble::{BleNode, rx::RunConfig};
+use must_hop::{
+    MeshRouter, NetworkManager, RandomAccessMac,
+    channels::{MeshService, MeshState},
+    node::ble::{BleNode, RxShared, rx::RunConfig},
+    policy::ra::NodePolicy,
+};
 use panic_rtt_target as _;
 use rtt_target::rtt_init_defmt;
 
 use static_cell::StaticCell;
 
-use serde::{Deserialize, Serialize};
 use trouble_host::{
     Address, HostResources, Stack,
-    advertise::{AdStructure, AdvertisementParameters},
-    connection::{PhySet, ScanConfig},
-    prelude::{DefaultPacketPool, EventHandler, ExternalController, Runner},
-    scan::{LeAdvReportsIter, Scanner},
+    advertise::AdvertisementParameters,
+    prelude::{DefaultPacketPool, ExternalController, Runner},
 };
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -49,7 +47,7 @@ const CONNECTIONS_MAX: usize = 1;
 // Probably doesn't matter?
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
 
-const DATA_SIZE: usize = 31;
+const DATA_SIZE: usize = 128;
 
 #[cfg(not(feature = "board-b"))]
 const OUR_ADDR: [u8; 6] = [0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff];
@@ -66,6 +64,9 @@ type Res = HostResources<Pool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX>;
 static RESOURCES: StaticCell<Res> = StaticCell::new();
 
 static STACK: StaticCell<BleStack> = StaticCell::new();
+static SHARED: RxShared = RxShared::new();
+
+static STATE: StaticCell<MeshState<128, 5>> = StaticCell::new();
 
 #[allow(
     clippy::large_stack_frames,
@@ -104,17 +105,39 @@ async fn main(spawner: Spawner) -> ! {
 
     let builder = trouble_host::new(controller, resources).set_random_address(address);
     let stack = STACK.init(builder.build());
-    let ble_node = BleNode::new(stack, adv_params);
+    let ble_node = BleNode::new(stack, adv_params, &SHARED);
 
     let runner = stack.runner();
 
-    let run_config = RunConfig::new_from_slice(Vec::from_array([BdAddr::new(PEER_ADDR)]));
+    let run_config = RunConfig::new_from_slice(Vec::from_array([BdAddr::new(PEER_ADDR)]), &SHARED);
 
     spawner.spawn(runner_task(runner, run_config).expect("Runner did not start successfully?"));
+    let rx_buf = [0u8; 128];
+    let manager: NetworkManager<128, 5> = NetworkManager::new(0, 1, 10, None);
+    let mac = RandomAccessMac::new(NodePolicy);
+    let router = MeshRouter::new(ble_node, manager, mac);
 
+    let state = STATE.init(MeshState::new());
+    let (mail_box, service) = must_hop::channels::init(state, router, rx_buf);
+    spawner.spawn(mesh_task(service).expect("Mesh task started successfully"));
     loop {
         Timer::after(Duration::from_secs(1)).await;
     }
+}
+const LEN: usize = 5;
+const N: usize = 5;
+
+#[embassy_executor::task]
+async fn mesh_task(
+    service: MeshService<
+        BleNode<ExternalController<BleConnector<'static>, 20>, DefaultPacketPool>,
+        RandomAccessMac<DATA_SIZE, NodePolicy>,
+        DATA_SIZE,
+        LEN,
+        N,
+    >,
+) {
+    service.run().await
 }
 
 #[embassy_executor::task]

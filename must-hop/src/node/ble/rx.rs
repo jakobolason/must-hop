@@ -9,7 +9,7 @@ use trouble_host::{
     scan::LeAdvReportsIter,
 };
 
-use crate::node::ble::Beacon;
+use crate::node::ble::{Beacon, RxShared};
 
 pub type Pool = DefaultPacketPool;
 pub type BleStack<Ctrl> = Stack<'static, Ctrl, Pool>;
@@ -17,19 +17,24 @@ pub type Res = HostResources<Pool, 0, 0>;
 
 pub struct RunConfig<const PEERS: usize> {
     peers: Vec<BdAddr, PEERS>,
+    shared: &'static RxShared,
 }
 
 impl<const PEERS: usize> RunConfig<PEERS> {
-    pub fn new() -> Self {
-        Self { peers: Vec::new() }
+    pub fn new(shared: &'static RxShared) -> Self {
+        Self {
+            peers: Vec::new(),
+            shared,
+        }
     }
 
-    pub fn new_from_slice(peers: Vec<BdAddr, PEERS>) -> Self {
-        Self { peers }
+    pub fn new_from_slice(peers: Vec<BdAddr, PEERS>, shared: &'static RxShared) -> Self {
+        Self { peers, shared }
     }
 }
 
 impl<const PEERS: usize> EventHandler for RunConfig<PEERS> {
+    // TODO: Use channels, such that these callback functions can give information back to BleNode
     fn on_ext_adv_reports(&self, mut it: bt_hci::param::LeExtAdvReportsIter) {
         while let Some(Ok(report)) = it.next() {
             let matches_peer = self.peers.contains(&report.addr);
