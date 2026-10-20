@@ -76,17 +76,17 @@ async fn main(_spawner: Spawner) -> ! {
             // primary_phy: bt_hci::param::PhyKind::Le2M,
             ..Default::default()
         };
-        let per_params = core::time::Duration::from_secs(5);
 
         while let Some(set) = make_sets(counter, &mut adv_data, adv_params) {
             info!("sets ok");
-            let sets = &[set];
-            let mut handles = AdvertisementSet::handles(sets);
             // let adv = peri.advertise_ext(&sets, &mut handles).await.unwrap();
-            let adv = match peri
-                .per_adv_ext(&sets[0], &mut handles[0], per_params)
-                .await
-            {
+            let per_params = trouble_host::advertise::PeriodicAdvertisementParameters {
+                min_interval: core::time::Duration::from_secs(5),
+                max_interval: core::time::Duration::from_secs(5),
+                include_tx_power: false,
+                data: &[],
+            };
+            let adv = match peri.per_adv_ext(&set, per_params).await {
                 Ok(adv) => adv,
                 Err(e) => {
                     error!("Error with start_periodic: {:?}", e);

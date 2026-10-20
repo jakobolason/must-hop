@@ -717,7 +717,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     where
         Node: MHNode<SIZE, LEN>,
     {
-        if !tx_queue.is_full()
+        let hb_pkt = if !tx_queue.is_full()
             && let Some(pkt) = self.time_manager.hbt_pkt.take()
         {
             let extracted_deltas: VecFB = core::mem::take(&mut self.time_manager.feedback_vec);
@@ -731,21 +731,18 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             );
             let upd_pkt =
                 self.update_heartbeat(pkt, my_tx_slot, extracted_deltas, adjusted_timestamp);
-            if let Err(pkt) = tx_queue.push(upd_pkt) {
-                error!("Queue is full even though we just checked??");
-                self.time_manager.hbt_pkt = Some(pkt);
-            }
+            // if let Err(pkt) = tx_queue.push(upd_pkt) {
+            //     error!("Queue is full even though we just checked??");
+            //     self.time_manager.hbt_pkt = Some(pkt);
+            // }
+            Some(upd_pkt)
         } else {
             // Update so we eventually send a hb out
             self.slot_manager.hb_countdown = self.slot_manager.hb_countdown.saturating_sub(1);
-        }
+            None
+        };
         if !tx_queue.is_empty() {
-            // FIXME: This should ideally both send upstream and downstream, since parent uses this
-            // to know how in sync the child is
-            // Therefore this uses 'Any', to mean that it should send to all who is interested
-            // But is there a better way to do this? The connection oriented design of BLE does make
-            // this more complicated. Maybe the BLE impl should have a broadcast
-            let tx_result = node.transmit(tx_queue).await;
+            let tx_result = node.transmit(tx_queue, hb_pkt).await;
             tx_queue.clear();
             tx_result?;
         }

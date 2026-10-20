@@ -47,7 +47,8 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     /// appropriate destination_id
     fn transmit(
         &mut self,
-        packet: &[MHPacket<SIZE>],
+        packets: &[MHPacket<SIZE>],
+        hb_pkt: Option<MHPacket<SIZE>>,
     ) -> impl Future<Output = Result<(), Self::Error>>;
     // TODO: Make the hb packet be a seperate parameter, such that the impl chooses how to handle it
 

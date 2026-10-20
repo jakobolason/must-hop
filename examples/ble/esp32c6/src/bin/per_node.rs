@@ -11,7 +11,7 @@ use bt_hci::param::BdAddr;
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
-use esp_hal::{Config, rng::Rng, timer::timg::TimerGroup};
+use esp_hal::{Config, timer::timg::TimerGroup};
 use esp_radio::ble::controller::BleConnector;
 use heapless::Vec;
 use must_hop::{
@@ -27,7 +27,7 @@ use static_cell::StaticCell;
 
 use trouble_host::{
     Address, HostResources, Stack,
-    advertise::AdvertisementParameters,
+    advertise::{AdvertisementParameters, PeriodicAdvertisementParameters},
     connection::{PhySet, ScanConfig},
     prelude::{DefaultPacketPool, ExternalController, Runner},
 };
@@ -107,13 +107,19 @@ async fn main(spawner: Spawner) -> ! {
         phys: PhySet::M1,
         ..Default::default()
     };
+    let per_params = PeriodicAdvertisementParameters {
+        min_interval: core::time::Duration::from_millis(10),
+        max_interval: core::time::Duration::from_millis(10),
+        include_tx_power: false,
+        data: &[],
+    };
 
     let stack = STACK.init(
         trouble_host::new(controller, resources)
             .set_random_address(address)
             .build(),
     );
-    let ble_node = BleNode::new(stack, adv_params, &SHARED, config);
+    let ble_node = BleNode::new(stack, adv_params, per_params, &SHARED, config);
 
     let runner = stack.runner();
     let run_config = RunConfig::new_from_slice(Vec::from_array([BdAddr::new(PEER_ADDR)]), &SHARED);

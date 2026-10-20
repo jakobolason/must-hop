@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 /// This contains node implementations for BLE
 use trouble_host::{
     BleHostError, Controller, PacketPool, Stack,
-    advertise::{AdStructure, Advertisement, AdvertisementParameters, AdvertisementSet},
+    advertise::{
+        AdStructure, Advertisement, AdvertisementParameters, AdvertisementSet,
+        PeriodicAdvertisementParameters,
+    },
     connection::ScanConfig,
     prelude::DefaultPacketPool,
     scan::Scanner,
@@ -64,6 +67,7 @@ impl RxShared {
 pub struct BleNode<'a, C: 'static, P: PacketPool = DefaultPacketPool> {
     stack: &'static Stack<'static, C, P>,
     adv_params: AdvertisementParameters,
+    per_params: PeriodicAdvertisementParameters<'a>,
     shared: &'static RxShared,
     scan_config: ScanConfig<'a>,
 }
@@ -72,12 +76,14 @@ impl<'a, C, P: PacketPool> BleNode<'a, C, P> {
     pub fn new(
         stack: &'static Stack<'static, C, P>,
         adv_params: AdvertisementParameters,
+        per_params: PeriodicAdvertisementParameters<'a>,
         shared: &'static RxShared,
         scan_config: ScanConfig<'a>,
     ) -> Self {
         Self {
             stack,
             adv_params,
+            per_params,
             shared,
             scan_config,
         }
@@ -97,14 +103,18 @@ where
     type Connection = RxFrame;
     type ReceiveBuffer = [u8; MAX_ADV];
 
-    // TODO: For TDMA: Add length of time slot duration
-    async fn transmit(&mut self, packet: &[crate::MHPacket<SIZE>]) -> Result<(), Self::Error> {
+    // TODO: For TDMA: Add length of time slot duration; but how?
+    async fn transmit(
+        &mut self,
+        packets: &[MHPacket<SIZE>],
+        hb_pkt: Option<MHPacket<SIZE>>,
+    ) -> Result<(), Self::Error> {
         const { assert!(LEN * (SIZE + OVERHEAD) <= MAX_ADV) }
         let mut peri = self.stack.peripheral();
         let mut scratch = [0u8; MAX_ADV];
         let mut adv_data = [0u8; MAX_ADV];
 
-        let data = match to_slice(packet, &mut scratch) {
+        let data = match to_slice(packets, &mut scratch) {
             Ok(data) => data,
             Err(_e) => return Err(BleHostError::BleHost(trouble_host::Error::Other)),
         };
@@ -137,10 +147,41 @@ where
 
         let sets = &[adv_set];
         let mut handles = AdvertisementSet::handles(sets);
-        let _adv = match peri.advertise_ext(sets, &mut handles).await {
+        let func = match hb_pkt {
+            None => peri.advertise_ext(sets, &mut handles).await,
+            Some(hb_pkt) => {
+                let mut scratch = [0u8; MAX_ADV];
+                let mut adv_data = [0u8; MAX_ADV];
+
+                let data = match to_slice(&[hb_pkt], &mut scratch) {
+                    Ok(data) => data,
+                    Err(_e) => return Err(BleHostError::BleHost(trouble_host::Error::Other)),
+                };
+
+                info!("Sending...");
+
+                let data_len = AdStructure::encode_slice(
+                    &[AdStructure::ManufacturerSpecificData {
+                        company_identifier: 0xFFFF,
+                        payload: data,
+                    }],
+                    &mut adv_data,
+                )
+                .map_err(|_| BleHostError::BleHost(trouble_host::Error::Other))?;
+                let per_params = PeriodicAdvertisementParameters {
+                    min_interval: self.per_params.min_interval,
+                    max_interval: self.per_params.max_interval,
+                    include_tx_power: self.per_params.include_tx_power,
+                    data: &adv_data[..data_len],
+                };
+
+                peri.per_adv_ext(&sets[0], per_params).await
+            }
+        };
+        let _adv = match func {
             Ok(adv) => adv,
             Err(e) => {
-                error!("Error with extended advertisement: {:?}", e);
+                error!("Error with advertisement: {:?}", e);
                 Timer::after(Duration::from_secs(10)).await;
                 return Err(e);
             }

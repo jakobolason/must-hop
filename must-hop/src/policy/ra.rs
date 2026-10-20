@@ -131,13 +131,7 @@ where
         rx_buffer: &mut Node::ReceiveBuffer,
     ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
         if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
-            if let Some(pkt) = self.hbt_pkt.take()
-                && let Err(pkt) = tx_queue.push(pkt)
-            {
-                // If queue full
-                self.hbt_pkt = Some(pkt)
-            }
-            node.transmit(tx_queue).await?;
+            node.transmit(tx_queue, self.hbt_pkt.take()).await?;
             tx_queue.clear();
         }
         match node
