@@ -119,6 +119,7 @@ where
         // Short circuit if no packets received
         let received_pkts = match received_pkts {
             Some(pkts) => pkts,
+            // Compiler should reduce footprint of unecessary call
             None => return Ok(Vec::new()),
         };
         let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;

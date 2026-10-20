@@ -1,10 +1,7 @@
 use super::{MHPacket, PacketType};
 use core::cmp::{max, min};
 
-#[cfg(not(feature = "in_std"))]
-use defmt::{error, trace, warn};
-#[cfg(feature = "in_std")]
-use log::{error, trace, warn};
+use crate::log_compat::{debug, error, trace, warn};
 
 use embassy_time::{Duration, Instant};
 use heapless::Vec;
@@ -173,6 +170,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             |p| p.retries < self._max_retries, /*|| p.timeout < curr_time*/
         );
         self.pkts_lost += (prev_len - self.pending_acks.len()) as u32;
+        debug!("pkts lost: {}", self.pkts_lost);
 
         // Look into packages with expired timeouts,
         let to_send: Vec<MHPacket<SIZE>, LEN> = self

@@ -27,6 +27,14 @@ use embassy_time::Instant;
 use heapless::Vec;
 use serde::{Deserialize, Serialize};
 
+pub(crate) mod log_compat {
+    #[cfg(not(feature = "in_std"))]
+    pub use defmt::{debug, error, info, trace, warn};
+
+    #[cfg(feature = "in_std")]
+    pub use log::{debug, error, info, trace, warn};
+}
+
 /// Either this packet
 /// Is Data, and should get an ACK return
 /// A Data stream, meaning it wants to send multiple packets(u8 amount). In this case, Node B will

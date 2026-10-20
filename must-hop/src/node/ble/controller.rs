@@ -1,7 +1,11 @@
 use bt_hci::{cmd::le::*, controller::*};
 
+// TODO: Find a better method than this, this is stupid that we have to write it up twice, and it
+// can't just be inferred somehow
 pub trait ExtAdvController:
     Controller
+    + ControllerCmdSync<LeSetScanParams>
+    + ControllerCmdSync<LeSetExtScanParams>
     + ControllerCmdSync<LeSetPeriodicAdvParams>
     + ControllerCmdSync<LeSetExtAdvParams>
     + ControllerCmdSync<LeSetAdvSetRandomAddr>
@@ -17,6 +21,8 @@ pub trait ExtAdvController:
 
 impl<T> ExtAdvController for T where
     T: Controller
+        + ControllerCmdSync<LeSetScanParams>
+        + ControllerCmdSync<LeSetExtScanParams>
         + ControllerCmdSync<LeSetPeriodicAdvParams>
         + ControllerCmdSync<LeSetExtAdvParams>
         + ControllerCmdSync<LeSetAdvSetRandomAddr>

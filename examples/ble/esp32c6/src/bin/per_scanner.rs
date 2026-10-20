@@ -7,11 +7,6 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-#[path = "../bas_peripheral.rs"]
-mod ble_bas_peripheral_run;
-#[path = "../led_runner.rs"]
-mod led_runner;
-
 use bt_hci::{
     cmd::le::LePeriodicAdvCreateSyncParams,
     param::{AddrKind, BdAddr},
@@ -87,7 +82,7 @@ async fn main(_spawner: Spawner) -> ! {
         sync_cte_kind: Default::default(),
     };
     let rx = Rx {
-        vec: core::cell::RefCell::new(Vec::new()),
+        _vec: core::cell::RefCell::new(Vec::new()),
     };
 
     let _ = join(runner.run_with_handler(&rx), async {
@@ -128,7 +123,7 @@ struct Beacon {
 }
 
 struct Rx {
-    vec: core::cell::RefCell<Vec<BdAddr, 35>>,
+    _vec: core::cell::RefCell<Vec<BdAddr, 35>>,
 }
 
 impl EventHandler for Rx {

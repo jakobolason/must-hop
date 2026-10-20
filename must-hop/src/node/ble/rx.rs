@@ -1,6 +1,7 @@
+use crate::log_compat::{error, info};
 use bt_hci::param::BdAddr;
-use defmt::{error, info};
 
+use embassy_time::Instant;
 use heapless::Vec;
 use trouble_host::{
     HostResources, Stack,
@@ -9,7 +10,7 @@ use trouble_host::{
     scan::LeAdvReportsIter,
 };
 
-use crate::node::ble::{Beacon, RxShared};
+use crate::node::ble::{Beacon, RxFrame, RxShared};
 
 pub type Pool = DefaultPacketPool;
 pub type BleStack<Ctrl> = Stack<'static, Ctrl, Pool>;
@@ -34,15 +35,21 @@ impl<const PEERS: usize> RunConfig<PEERS> {
 }
 
 impl<const PEERS: usize> EventHandler for RunConfig<PEERS> {
-    // TODO: Use channels, such that these callback functions can give information back to BleNode
     fn on_ext_adv_reports(&self, mut it: bt_hci::param::LeExtAdvReportsIter) {
         while let Some(Ok(report)) = it.next() {
             let matches_peer = self.peers.contains(&report.addr);
-            if matches_peer && report.adv_sid == 0 {
+            if matches_peer {
                 info!(
                     "OK! Extended adv from {:?}, rssi={}",
                     report.addr, report.rssi
                 );
+                let conn = RxFrame {
+                    addr: report.addr,
+                    data: Vec::from_slice(report.data).unwrap_or(Vec::new()),
+                    rssi: report.rssi,
+                    instant: Instant::now(),
+                };
+                self.shared.signal.signal(conn);
             }
         }
     }
@@ -71,7 +78,7 @@ impl<const PEERS: usize> EventHandler for RunConfig<PEERS> {
     }
 
     fn on_sync(&self, report: &bt_hci::event::le::LePeriodicAdvertisingSyncEstablished) {
-        info!("Is synced now!! {}", report.adv_addr);
+        info!("Is synced now!! {:?}", report.adv_addr);
     }
 
     fn on_adv_reports(&self, mut it: LeAdvReportsIter<'_>) {

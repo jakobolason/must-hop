@@ -7,11 +7,6 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-#[path = "../bas_peripheral.rs"]
-mod ble_bas_peripheral_run;
-#[path = "../led_runner.rs"]
-mod led_runner;
-
 use defmt::{error, info};
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
@@ -24,7 +19,10 @@ use rtt_target::rtt_init_defmt;
 use serde::{Deserialize, Serialize};
 use trouble_host::{
     Address, HostResources,
-    advertise::{AdStructure, AdvHandle, Advertisement, AdvertisementParameters, AdvertisementSet},
+    advertise::{
+        AdStructure, Advertisement, AdvertisementParameters, AdvertisementSet,
+        BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
+    },
     prelude::{DefaultPacketPool, ExternalController},
 };
 // This creates a default app-descriptor required by the esp-idf bootloader.
@@ -34,7 +32,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const CONNECTIONS_MAX: usize = 1;
 // Probably doesn't matter?
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
-const DATA_SIZE: usize = 10;
+const DATA_SIZE: usize = 32;
 
 #[allow(
     clippy::large_stack_frames,
@@ -92,6 +90,7 @@ async fn main(_spawner: Spawner) -> ! {
             };
             for _ in 0..600 {
                 Timer::after(Duration::from_secs(1)).await;
+                info!("Updating ..");
                 let sets = [make_sets(counter, &mut adv_data, adv_params)];
                 let mut handles = AdvertisementSet::handles(&sets);
 
@@ -121,18 +120,21 @@ struct Beacon {
     seq: u16,
 }
 
+const NAME: &[u8] = b"ESP";
+
 fn make_sets(
     counter: u16,
     adv_data: &'_ mut [u8; DATA_SIZE],
     adv_params: AdvertisementParameters,
 ) -> AdvertisementSet<'_> {
-    let mut payload = [0u8; 24];
+    let mut payload = [0u8; 32];
     let bbeacon = postcard::to_slice(&Beacon { seq: counter }, &mut payload)
         .unwrap()
         .len();
     let data = AdStructure::encode_slice(
         &[
-            // AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            AdStructure::CompleteLocalName(NAME),
             AdStructure::ManufacturerSpecificData {
                 company_identifier: 0xFFFF,
                 payload: &payload[..bbeacon],

@@ -5,31 +5,26 @@ use embassy_sync::{
 };
 use heapless::Vec;
 
-// #[cfg(not(feature = "in_std"))]
-// use embassy_time::Instant;
-// #[cfg(feature = "in_std")]
-// use tokio::time::Instant;
+use crate::{MHNode, MeshRouter, log_compat::info, policy::MacPolicy};
 
-use crate::{MHNode, MeshRouter, policy::MacPolicy};
-
-pub struct Outgoing<const SIZE: usize> {
+pub struct Outgoing<const S: usize> {
     pub dest: u16,
-    pub payload: Vec<u8, SIZE>,
+    pub payload: Vec<u8, S>,
 }
 
-pub struct Incoming<const SIZE: usize> {
+pub struct Incoming<const S: usize> {
     pub source: u16,
-    pub payload: Vec<u8, SIZE>,
+    pub payload: Vec<u8, S>,
 }
 
 /// User has to initialize this struct, and hand it to init
-pub struct MeshState<const SIZE: usize, const N: usize> {
-    out: Channel<Raw, Outgoing<SIZE>, N>,
-    inc: Channel<Raw, Incoming<SIZE>, N>,
-    events: Channel<Raw, MeshEvent, 4>,
+pub struct MeshState<const S: usize, const N: usize> {
+    out: Channel<Raw, Outgoing<S>, N>,
+    inc: Channel<Raw, Incoming<S>, N>,
+    events: Channel<Raw, MeshEvent, N>,
 }
 
-impl<const SIZE: usize, const N: usize> MeshState<SIZE, N> {
+impl<const S: usize, const N: usize> MeshState<S, N> {
     pub fn new() -> Self {
         Self {
             out: Channel::new(),
@@ -52,26 +47,26 @@ pub enum SendError {
     QueueFull,
 }
 
-pub struct MeshService<Node, Mac, const SIZE: usize, const LEN: usize, const N: usize>
+pub struct MeshService<Node, Mac, const S: usize, const LEN: usize, const N: usize>
 where
-    Node: MHNode<SIZE, LEN>,
-    Mac: MacPolicy<Node, SIZE, LEN>,
+    Node: MHNode<S, LEN>,
+    Mac: MacPolicy<Node, S, LEN>,
 {
-    router: MeshRouter<Node, Mac, SIZE, LEN>,
+    router: MeshRouter<Node, Mac, S, LEN>,
     rx_buf: Node::ReceiveBuffer,
-    out: Receiver<'static, Raw, Outgoing<SIZE>, N>,
-    inc: Sender<'static, Raw, Incoming<SIZE>, N>,
-    events: Sender<'static, Raw, MeshEvent, 4>,
+    out: Receiver<'static, Raw, Outgoing<S>, N>,
+    inc: Sender<'static, Raw, Incoming<S>, N>,
+    events: Sender<'static, Raw, MeshEvent, N>,
 }
 
 #[derive(Clone, Copy)]
-pub struct Mailbox<const SIZE: usize, const N: usize> {
-    tx: Sender<'static, Raw, Outgoing<SIZE>, N>,
-    rx: Receiver<'static, Raw, Incoming<SIZE>, N>,
-    events: Receiver<'static, Raw, MeshEvent, 4>,
+pub struct Mailbox<const S: usize, const N: usize> {
+    tx: Sender<'static, Raw, Outgoing<S>, N>,
+    rx: Receiver<'static, Raw, Incoming<S>, N>,
+    events: Receiver<'static, Raw, MeshEvent, N>,
 }
 
-impl<const SIZE: usize, const N: usize> Mailbox<SIZE, N> {
+impl<const S: usize, const N: usize> Mailbox<S, N> {
     /// Waits if the outbox is full (backpressure)
     pub async fn send(&self, dest: u16, data: &[u8]) -> Result<(), SendError> {
         let payload = Vec::from_slice(data).map_err(|_| SendError::TooLarge)?;
@@ -87,51 +82,60 @@ impl<const SIZE: usize, const N: usize> Mailbox<SIZE, N> {
             .map_err(|_| SendError::QueueFull)
     }
 
-    pub async fn recv(&self) -> Incoming<SIZE> {
+    /// Wait until there is a message to receive
+    pub async fn recv(&self) -> Incoming<S> {
         self.rx.receive().await
     }
 
-    pub fn try_recv(&self) -> Option<Incoming<SIZE>> {
+    /// Try to immediately receive a value
+    pub fn try_recv(&self) -> Option<Incoming<S>> {
         self.rx.try_receive().ok()
     }
 
+    /// Check if any pending messages
     pub fn pending(&self) -> usize {
         self.rx.len()
     }
 
-    pub fn drain(&self) -> impl Iterator<Item = Incoming<SIZE>> + '_ {
+    /// Drain the channel
+    pub fn drain(&self) -> impl Iterator<Item = Incoming<S>> + '_ {
         core::iter::from_fn(move || self.try_recv())
     }
 
+    /// Wait until the next event
     pub async fn next_event(&self) -> MeshEvent {
         self.events.receive().await
     }
 
+    /// Try to immediately fetch an event
     pub fn try_event(&self) -> Option<MeshEvent> {
         self.events.try_receive().ok()
     }
 }
 
-impl<Node, Mac, const SIZE: usize, const LEN: usize, const N: usize>
-    MeshService<Node, Mac, SIZE, LEN, N>
+impl<Node, Mac, const S: usize, const LEN: usize, const N: usize> MeshService<Node, Mac, S, LEN, N>
 where
-    Node: MHNode<SIZE, LEN>,
-    Mac: MacPolicy<Node, SIZE, LEN>,
+    Node: MHNode<S, LEN>,
+    Mac: MacPolicy<Node, S, LEN>,
 {
     pub async fn run(mut self) -> ! {
+        info!("In run!");
         loop {
             // Move user messages into the router while it has room
             while self.router.tx_free() > 0
                 && let Ok(msg) = self.out.try_receive()
             {
+                info!("Queing payload!");
                 if self.router.queue_payload(msg.payload, msg.dest).is_err() {
                     let _ = self.events.try_send(MeshEvent::Dropped);
                 }
             }
 
+            info!("Ticking now...");
             match self.router.tick(&mut self.rx_buf).await {
                 Ok(to_me) => {
                     for pkt in to_me {
+                        info!("pkt to me! {}", pkt.packet_id);
                         let msg = Incoming {
                             source: pkt.source_id,
                             payload: pkt.payload,
@@ -151,16 +155,16 @@ where
 
 /// initialize Mailbox for sending and receiving packets, and the MeshService which should be put in
 /// a seperate task from the main loop.
-pub fn init<Node, Mac, const SIZE: usize, const LEN: usize, const N: usize>(
-    state: &'static MeshState<SIZE, N>,
-    router: MeshRouter<Node, Mac, SIZE, LEN>,
+pub fn init<Node, Mac, const S: usize, const LEN: usize, const N: usize>(
+    state: &'static MeshState<S, N>,
+    router: MeshRouter<Node, Mac, S, LEN>,
     rx_buf: Node::ReceiveBuffer,
-) -> (Mailbox<SIZE, N>, MeshService<Node, Mac, SIZE, LEN, N>)
+) -> (Mailbox<S, N>, MeshService<Node, Mac, S, LEN, N>)
 where
-    Node: MHNode<SIZE, LEN>,
-    Mac: MacPolicy<Node, SIZE, LEN>,
+    Node: MHNode<S, LEN>,
+    Mac: MacPolicy<Node, S, LEN>,
 {
-    let state: &'static MeshState<SIZE, N> = state;
+    let state: &'static MeshState<S, N> = state;
     let mesh = Mailbox {
         tx: state.out.sender(),
         rx: state.inc.receiver(),

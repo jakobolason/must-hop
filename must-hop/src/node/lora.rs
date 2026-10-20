@@ -10,10 +10,7 @@ use lora_phy::mod_params::{PacketStatus, RadioError};
 use lora_phy::mod_traits::RadioKind;
 use lora_phy::{DelayNs, LoRa, RxMode};
 
-#[cfg(not(feature = "in_std"))]
-use defmt::{error, trace};
-#[cfg(feature = "in_std")]
-use log::{error, trace};
+use crate::log_compat::{error, trace};
 
 use core::time::Duration;
 use embassy_time::Instant;
@@ -195,6 +192,7 @@ where
     DLY: DelayNs,
 {
     type Error = RadioError;
+    // TODO: This shouldn't be Result, map to tuple in listen()
     type Connection = Result<(u8, PacketStatus), RadioError>;
     type ReceiveBuffer = [u8; TRANSMISSION_BUFFER];
     type RadioError = RadioError;
