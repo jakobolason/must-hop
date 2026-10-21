@@ -8,7 +8,7 @@
 #![deny(clippy::large_stack_frames)]
 
 use bt_hci::param::BdAddr;
-use defmt::{error, info};
+use defmt::{debug, error, info};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
 use esp_hal::{Config, timer::timg::TimerGroup};
@@ -17,6 +17,7 @@ use heapless::Vec;
 use must_hop::{
     MeshRouter, NetworkManager, RandomAccessMac,
     channels::{MeshService, MeshState},
+    network_manager::NodeId,
     node::ble::{BleNode, MAX_ADV, RxShared, rx::RunConfig},
     policy::ra::NodePolicy,
 };
@@ -35,6 +36,7 @@ use trouble_host::{
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
+// Queue size of commands to controller
 const CMD_SLOTS: usize = 20;
 pub type Ctrl = ExternalController<BleConnector<'static>, CMD_SLOTS>;
 pub type Pool = DefaultPacketPool;
@@ -51,6 +53,13 @@ const DATA_SIZE: usize = 30;
 const OUR_ADDR: [u8; 6] = [0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff];
 #[cfg(not(feature = "board-b"))]
 const PEER_ADDR: [u8; 6] = [0xff, 0x8d, 0x1a, 0x05, 0xe4, 0xff];
+
+#[cfg(not(any(feature = "board-b", feature = "gw")))]
+const SOURCE_ID: usize = 2;
+#[cfg(feature = "board-b")]
+const SOURCE_ID: usize = 3;
+#[cfg(feature = "gw")]
+const SOURCE_ID: usize = 1;
 
 #[cfg(feature = "board-b")]
 const OUR_ADDR: [u8; 6] = [0xff, 0x8d, 0x1a, 0x05, 0xe4, 0xff];
@@ -73,7 +82,7 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, p.FROM_CPU_INTR0);
 
     // TODO: Could be nice to know how much is actually necessary here
-    esp_alloc::heap_allocator!(size: 72 * 1024);
+    esp_alloc::heap_allocator!(size:72 * 1024);
     info!("Setting up trouble");
     let config = esp_radio::ble::Config::default()
         .with_ext_adv_max_size(MAX_ADV as u16)
@@ -126,12 +135,11 @@ async fn main(spawner: Spawner) -> ! {
 
     spawner.spawn(runner_task(runner, run_config).expect("Runner did not start successfully?"));
     let rx_buf = [0u8; MAX_ADV];
-    #[cfg(not(feature = "board-b"))]
-    let source_id = 2;
-    #[cfg(feature = "board-b")]
-    let source_id = 3;
 
-    let manager: NetworkManager<DATA_SIZE, 5> = NetworkManager::new(source_id, 1, 10, None);
+    let timeout = 5;
+    let nid = NodeId::Node(SOURCE_ID as u16);
+
+    let manager: NetworkManager<DATA_SIZE, 5> = NetworkManager::new(nid, timeout, 10);
     let mac = RandomAccessMac::new(NodePolicy);
     let router = MeshRouter::new(ble_node, manager, mac);
 
@@ -145,8 +153,9 @@ async fn main(spawner: Spawner) -> ! {
         // let delay_ms = 1000 + (rng.random() % 5000) as u64;
         // Timer::after(Duration::from_millis(delay_ms)).await;
         Timer::after_secs(5).await;
+        #[cfg(not(feature = "gw"))]
         match mail_box.send(0, &[1u8; 8]).await {
-            Ok(_) => info!("Sucessfully sent!"),
+            Ok(_) => debug!("Sending"),
             Err(_) => error!("Error for sending empty payload"),
         }
         if let Some(data) = mail_box.try_recv() {

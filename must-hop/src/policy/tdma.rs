@@ -731,10 +731,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
             );
             let upd_pkt =
                 self.update_heartbeat(pkt, my_tx_slot, extracted_deltas, adjusted_timestamp);
-            // if let Err(pkt) = tx_queue.push(upd_pkt) {
-            //     error!("Queue is full even though we just checked??");
-            //     self.time_manager.hbt_pkt = Some(pkt);
-            // }
+
             Some(upd_pkt)
         } else {
             // Update so we eventually send a hb out

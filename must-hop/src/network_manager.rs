@@ -84,6 +84,9 @@ pub enum PayloadType {
     HeartBeat,
 }
 
+pub const GW_SRC_ID: usize = 1;
+pub const BROADCAST_ID: usize = 1;
+
 /// Maintains record of packages sent, to ensure that they are received.
 /// Also handles that packets from other nodes should be sent on
 #[derive(Default)]
@@ -105,13 +108,24 @@ pub struct NetworkManager<const SIZE: usize, const LEN: usize> {
     _max_retries: u8,
 }
 
+pub enum NodeId {
+    Gw,
+    Node(u16),
+}
+
 impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
-    pub fn new(source_id: u16, timeout_ms: u32, max_retries: u8, gw_hops: Option<u8>) -> Self {
+    pub fn new(node_id: NodeId, timeout_ms: u32, max_retries: u8) -> Self {
+        // NOTE: maybe the gw_hops should be set to either 0, if gw_id_given is true, 255 otherwise?
+        let (source_id, gw_hops) = match node_id {
+            NodeId::Gw => (GW_SRC_ID as u16, 0u8),
+            NodeId::Node(id) => (id, 255u8),
+        };
+
         Self {
             pending_acks: Vec::new(),
             recent_seen: RecentSeen::default(),
             // Default to max, only have a reasonable count if GW present
-            gw_hops: gw_hops.unwrap_or(255),
+            gw_hops,
             source_id,
             timeout_ms,
             _max_retries: max_retries,
@@ -137,7 +151,6 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         payload: Vec<u8, SIZE>,
         destination: u16,
     ) -> Result<MHPacket<SIZE>, PostError> {
-        // let payload_bytes = Vec::from_slice(payload).map_err(|_| PostError::SerializeBufferFull)?;
         self.next_packet_id += 1;
         Ok(MHPacket {
             destination_id: destination,
@@ -255,6 +268,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         if pkt.packet_type == PacketType::HeartBeat {
             // trace!("!!! RECEIVED A HEARTBEAT {:?} !!!", pkt);
             // TODO: What about GW failure/node failure, altering this?
+            // Should add an instant and timeout_value, and compare them reguraly
             if pkt.hop_to_gw >= self.gw_hops
                 || self.recent_seen.contains((pkt.source_id, pkt.packet_id))
             {

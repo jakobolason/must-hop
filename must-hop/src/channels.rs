@@ -5,7 +5,11 @@ use embassy_sync::{
 };
 use heapless::Vec;
 
-use crate::{MHNode, MeshRouter, log_compat::info, policy::MacPolicy};
+use crate::{
+    MHNode, MeshRouter,
+    log_compat::{debug, info},
+    policy::MacPolicy,
+};
 
 pub struct Outgoing<const S: usize> {
     pub dest: u16,
@@ -125,13 +129,12 @@ where
             while self.router.tx_free() > 0
                 && let Ok(msg) = self.out.try_receive()
             {
-                info!("Queing payload!");
+                debug!("Queing payload!");
                 if self.router.queue_payload(msg.payload, msg.dest).is_err() {
                     let _ = self.events.try_send(MeshEvent::Dropped);
                 }
             }
 
-            info!("Ticking now...");
             match self.router.tick(&mut self.rx_buf).await {
                 Ok(to_me) => {
                     for pkt in to_me {

@@ -52,13 +52,21 @@ pub struct RxShared {
     // TODO: Could perhaps be a channel, since it isn't guaranteed that there should only be 1
     // message received
     pub signal: Signal<CriticalSectionRawMutex, RxFrame>,
+    pub com_id: u16,
 }
 
 impl RxShared {
     pub const fn new() -> Self {
         Self {
             signal: Signal::new(),
+            // FIXME: Should not be this forever
+            com_id: 0xFFFF,
         }
+    }
+
+    /// Send a RxFrame
+    pub fn signal(&self, val: RxFrame) {
+        self.signal.signal(val)
     }
 }
 
@@ -104,6 +112,10 @@ where
     type ReceiveBuffer = [u8; MAX_ADV];
 
     // TODO: For TDMA: Add length of time slot duration; but how?
+    // NOTE: Using periodoic advertisements is really good here, but the dream would be a callback,
+    // up to the TDMA layer, to ask for another time packet, such that it can be updated. For right
+    // now, we can send it without jitter, but there will be jitter from the ext_adv in the first
+    // place?
     async fn transmit(
         &mut self,
         packets: &[MHPacket<SIZE>],
@@ -119,15 +131,13 @@ where
             Err(_e) => return Err(BleHostError::BleHost(trouble_host::Error::Other)),
         };
 
-        info!("Sending...");
-
         let data_len = AdStructure::encode_slice(
             &[
-                AdStructure::Flags(
-                    trouble_host::advertise::LE_GENERAL_DISCOVERABLE
-                        | trouble_host::advertise::BR_EDR_NOT_SUPPORTED,
-                ),
-                AdStructure::CompleteLocalName(NAME),
+                // AdStructure::Flags(
+                //     trouble_host::advertise::LE_GENERAL_DISCOVERABLE
+                //         | trouble_host::advertise::BR_EDR_NOT_SUPPORTED,
+                // ),
+                // AdStructure::CompleteLocalName(NAME),
                 AdStructure::ManufacturerSpecificData {
                     company_identifier: 0xFFFF,
                     payload: data,
@@ -136,6 +146,7 @@ where
             &mut adv_data,
         )
         .map_err(|_| BleHostError::BleHost(trouble_host::Error::Other))?;
+        info!("Sending pkt with size {}", data_len);
         let adv_set = AdvertisementSet {
             params: self.adv_params,
             data: Advertisement::ExtNonconnectableNonscannableUndirected {
@@ -145,13 +156,16 @@ where
             address: None,
         };
 
-        let sets = &[adv_set];
-        let mut handles = AdvertisementSet::handles(sets);
         let func = match hb_pkt {
-            None => peri.advertise_ext(sets, &mut handles).await,
+            None => {
+                let sets = &[adv_set];
+                let mut handles = AdvertisementSet::handles(sets);
+                peri.advertise_ext(sets, &mut handles).await
+            }
             Some(hb_pkt) => {
+                // Make heartbeat data embedded into periodic adv
                 let mut scratch = [0u8; MAX_ADV];
-                let mut adv_data = [0u8; MAX_ADV];
+                let mut per_data = [0u8; MAX_ADV];
 
                 let data = match to_slice(&[hb_pkt], &mut scratch) {
                     Ok(data) => data,
@@ -165,7 +179,7 @@ where
                         company_identifier: 0xFFFF,
                         payload: data,
                     }],
-                    &mut adv_data,
+                    &mut per_data,
                 )
                 .map_err(|_| BleHostError::BleHost(trouble_host::Error::Other))?;
                 let per_params = PeriodicAdvertisementParameters {
@@ -175,7 +189,7 @@ where
                     data: &adv_data[..data_len],
                 };
 
-                peri.per_adv_ext(&sets[0], per_params).await
+                peri.per_adv_ext(&adv_set, per_params).await
             }
         };
         let _adv = match func {
@@ -199,17 +213,8 @@ where
         _rec_buf: &Self::ReceiveBuffer,
     ) -> Result<(heapless::Vec<crate::MHPacket<SIZE>, LEN>, crate::RxPacket), Self::Error> {
         // Basically just take the connection with the data, and return that
-        let payload = AdStructure::decode(&conn.data)
-            .flatten()
-            .find_map(|ad| match ad {
-                AdStructure::ManufacturerSpecificData {
-                    company_identifier: 0xFFFF,
-                    payload,
-                } => Some(payload),
-                _ => None,
-            })
-            .ok_or(BleHostError::BleHost(trouble_host::Error::Other))?;
-        let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(payload) {
+        let payload = conn.data;
+        let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(&payload) {
             Ok(packet) => packet,
             Err(e) => {
                 error!("Deserialization failed: {:?}", e);
@@ -217,7 +222,7 @@ where
             }
         };
         let rx_pkt = RxPacket {
-            payload_size: conn.data.len() as u8,
+            payload_size: payload.len() as u8,
             rx_done_instant: conn.instant,
         };
         Ok((packets, rx_pkt))
@@ -242,7 +247,7 @@ where
         let mut central = self.stack.central();
         let mut scanner = Scanner::new(&mut central);
 
-        info!("Starting scanning");
+        debug!("Starting scanning");
         let session = match scanner.scan_ext(&self.scan_config).await {
             Ok(s) => s,
             Err(e) => {
@@ -254,7 +259,7 @@ where
             Either::First(_) => {
                 // TODO:
                 // Means we timed out, return with timeout error
-                info!("Timed out after {:?}!", timeout);
+                // info!("Timed out after {:?}!", timeout);
                 session.stop().await;
                 return Err(BleHostError::BleHost(
                     trouble_host::Error::NoChannelAvailable,
