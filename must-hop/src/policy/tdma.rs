@@ -13,7 +13,7 @@ use postcard::{from_bytes, ser_flavors::Size, serialize_with_flavor, to_slice};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    MHPacket,
+    MeshPacket,
     policy::{GATEWAY_ID, MacPolicy},
 };
 mod controller;
@@ -315,7 +315,7 @@ pub(crate) struct TimeManager<const SIZE: usize> {
     /// a tuple of timestamp in micros, and instant when that timestamp was set
     time_sync: Option<(u64, Instant)>,
     last_hb_instant: Option<Instant>,
-    hbt_pkt: Option<MHPacket<SIZE>>,
+    hbt_pkt: Option<MeshPacket<SIZE>>,
     /// A list of (node_id, T3 - T2 delta in ms) for PTP
     feedback_vec: VecFB,
     /// Handles error correction
@@ -411,7 +411,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         self.time_manager.controller.prev_err = 0;
     }
 
-    fn sync_epoch(&mut self, pkts: &[MHPacket<SIZE>], rx_pkt: &RxPacket, calc_feedback: bool) {
+    fn sync_epoch(&mut self, pkts: &[MeshPacket<SIZE>], rx_pkt: &RxPacket, calc_feedback: bool) {
         // Look for a heartbeat and get allocation from byte slices
         let received_hb = pkts
             .iter()
@@ -560,7 +560,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         &self,
         my_tx_slot: u8,
         feedback_vec: VecFB,
-        tx_queue: &Vec<MHPacket<SIZE>, LEN>,
+        tx_queue: &Vec<MeshPacket<SIZE>, LEN>,
     ) -> usize {
         let dummy_allocation = SyncBeacon {
             my_slot: my_tx_slot,
@@ -574,7 +574,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         };
         let alloc_size = serialize_with_flavor(&dummy_allocation, Size::default()).unwrap();
 
-        let mut dummy_pkt: MHPacket<SIZE> = MHPacket {
+        let mut dummy_pkt: MeshPacket<SIZE> = MeshPacket {
             destination_id: GATEWAY_ID,
             packet_type: PacketType::HeartBeat,
             packet_id: 0,
@@ -655,11 +655,11 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
 
     fn update_heartbeat(
         &self,
-        mut hbt: MHPacket<SIZE>,
+        mut hbt: MeshPacket<SIZE>,
         my_slot: u8,
         feedback_vec: VecFB,
         adjusted_timestamp: u64,
-    ) -> MHPacket<SIZE> {
+    ) -> MeshPacket<SIZE> {
         info!("Sending my slot as {}", my_slot);
         let allocation = SyncBeacon {
             my_slot,
@@ -685,7 +685,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
         rx_buffer: &mut Node::ReceiveBuffer,
         with_timeout: Option<CoreDuration>,
         calc_feedback: bool,
-    ) -> Option<(Vec<MHPacket<SIZE>, LEN>, RxPacket)>
+    ) -> Option<(Vec<MeshPacket<SIZE>, LEN>, RxPacket)>
     where
         Node: MHNode<SIZE, LEN>,
     {
@@ -711,7 +711,7 @@ impl<P, const SIZE: usize> TdmaMac<Runner, P, SIZE> {
     async fn tx<Node, const LEN: usize>(
         &mut self,
         node: &mut Node,
-        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        tx_queue: &mut Vec<MeshPacket<SIZE>, LEN>,
         my_tx_slot: u8,
     ) -> Result<(), Node::Error>
     where
@@ -780,16 +780,16 @@ where
 
     /// This only sends if you have been given a slot. GW should choose it's own slot, such that it
     /// can start this.
-    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
+    fn tx_heartbeat(&mut self, hbt: MeshPacket<SIZE>) {
         self.time_manager.hbt_pkt = Some(hbt)
     }
 
     async fn run_mac(
         &mut self,
         node: &mut Node,
-        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        tx_queue: &mut Vec<MeshPacket<SIZE>, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
-    ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
+    ) -> Result<Option<Vec<MeshPacket<SIZE>, LEN>>, Node::Error> {
         let mut received_packets = Vec::new();
 
         // Don't transmit anything until you have a slot, which you only have once you've heard a

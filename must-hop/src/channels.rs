@@ -7,7 +7,9 @@ use heapless::Vec;
 
 use crate::{
     MHNode, MeshRouter,
+    ll::LinkLayer,
     log_compat::{debug, info},
+    nw_layer::NetworkLayer,
     policy::MacPolicy,
 };
 
@@ -51,12 +53,14 @@ pub enum SendError {
     QueueFull,
 }
 
-pub struct MeshService<Node, Mac, const S: usize, const LEN: usize, const N: usize>
+pub struct MeshService<Node, Mac, LL, NW, const S: usize, const LEN: usize, const N: usize>
 where
     Node: MHNode<S, LEN>,
     Mac: MacPolicy<Node, S, LEN>,
+    LL: LinkLayer,
+    NW: NetworkLayer<S>,
 {
-    router: MeshRouter<Node, Mac, S, LEN>,
+    router: MeshRouter<Node, Mac, LL, NW, S, LEN>,
     rx_buf: Node::ReceiveBuffer,
     out: Receiver<'static, Raw, Outgoing<S>, N>,
     inc: Sender<'static, Raw, Incoming<S>, N>,
@@ -117,10 +121,13 @@ impl<const S: usize, const N: usize> Mailbox<S, N> {
     }
 }
 
-impl<Node, Mac, const S: usize, const LEN: usize, const N: usize> MeshService<Node, Mac, S, LEN, N>
+impl<Node, Mac, LL, NW, const S: usize, const LEN: usize, const N: usize>
+    MeshService<Node, Mac, LL, NW, S, LEN, N>
 where
     Node: MHNode<S, LEN>,
     Mac: MacPolicy<Node, S, LEN>,
+    LL: LinkLayer,
+    NW: NetworkLayer<S>,
 {
     pub async fn run(mut self) -> ! {
         info!("In run!");
@@ -130,7 +137,7 @@ where
                 && let Ok(msg) = self.out.try_receive()
             {
                 debug!("Queing payload!");
-                if self.router.queue_payload(msg.payload, msg.dest).is_err() {
+                if self.router.queue_payload(&msg.payload, msg.dest).is_err() {
                     let _ = self.events.try_send(MeshEvent::Dropped);
                 }
             }
@@ -158,14 +165,16 @@ where
 
 /// initialize Mailbox for sending and receiving packets, and the MeshService which should be put in
 /// a seperate task from the main loop.
-pub fn init<Node, Mac, const S: usize, const LEN: usize, const N: usize>(
+pub fn init<Node, Mac, LL, NW, const S: usize, const LEN: usize, const N: usize>(
     state: &'static MeshState<S, N>,
-    router: MeshRouter<Node, Mac, S, LEN>,
+    router: MeshRouter<Node, Mac, LL, NW, S, LEN>,
     rx_buf: Node::ReceiveBuffer,
-) -> (Mailbox<S, N>, MeshService<Node, Mac, S, LEN, N>)
+) -> (Mailbox<S, N>, MeshService<Node, Mac, LL, NW, S, LEN, N>)
 where
     Node: MHNode<S, LEN>,
     Mac: MacPolicy<Node, S, LEN>,
+    LL: LinkLayer,
+    NW: NetworkLayer<S>,
 {
     let state: &'static MeshState<S, N> = state;
     let mesh = Mailbox {

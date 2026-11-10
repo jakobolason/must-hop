@@ -4,7 +4,7 @@ use embassy_time::{Duration, Instant, Timer};
 use log::{error, trace};
 use lora_modulation::BaseBandModulationParams;
 use loragw::{Concentrator, Error, Running, RxPacket, TxPacket, TxPacketLoRa, TxStatus};
-use must_hop::{MHNode, MHPacket};
+use must_hop::{MHNode, MeshPacket};
 use postcard::to_slice;
 
 const SIZE: usize = 128;
@@ -103,7 +103,7 @@ impl GWNode {
             toa_sum: 0,
         }
     }
-    fn to_tx_packet(&self, packets: &[MHPacket<SIZE>]) -> Result<(TxPacket, usize), Error> {
+    fn to_tx_packet(&self, packets: &[MeshPacket<SIZE>]) -> Result<(TxPacket, usize), Error> {
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
@@ -150,7 +150,7 @@ impl MHNode<SIZE, LEN> for GWNode {
     // TODO: Remove this, can't find the difference between this and just Error
     type RadioError = loragw::Error;
 
-    async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
+    async fn transmit(&mut self, packets: &[MeshPacket<SIZE>]) -> Result<(), Self::Error> {
         let (tx_pkt, payload_size) = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
             embassy_time::Timer::after(Duration::from_millis(5)).await;
@@ -173,13 +173,13 @@ impl MHNode<SIZE, LEN> for GWNode {
         &mut self,
         _conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, must_hop::RxPacket), Self::Error> {
+    ) -> Result<(heapless::Vec<MeshPacket<SIZE>, LEN>, must_hop::RxPacket), Self::Error> {
         // This is a hack, but we only want one entry
         let Some(pkt) = rec_buf else {
             return Err(loragw::Error::Generic);
         };
 
-        let mut rec_packets: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
+        let mut rec_packets: heapless::Vec<MeshPacket<SIZE>, LEN> = heapless::Vec::new();
 
         let pkt = match pkt {
             RxPacket::LoRa(rx_packet) => rx_packet,
@@ -195,7 +195,7 @@ impl MHNode<SIZE, LEN> for GWNode {
         //     pkt.snr
         // );
 
-        let packets = postcard::from_bytes::<heapless::Vec<MHPacket<SIZE>, LEN>>(raw_bytes)
+        let packets = postcard::from_bytes::<heapless::Vec<MeshPacket<SIZE>, LEN>>(raw_bytes)
             .map_err(|_| {
                 error!("Could not convert to bytes!");
                 loragw::Error::Generic

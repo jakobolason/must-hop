@@ -4,27 +4,30 @@ use defmt::{error, trace};
 #[cfg(feature = "in_std")]
 use log::{error, trace};
 
-use crate::policy::MacPolicy;
-
-use super::{
-    MHNode, MHPacket,
-    network_manager::{NetworkManager, NetworkManagerError},
+use crate::{
+    ll::LinkLayer,
+    nw_layer::{NetworkError, NetworkLayer, TransmitBuffer},
+    policy::MacPolicy,
 };
+
+use super::{MHNode, MeshPacket};
 use heapless::Vec;
 
 #[derive(Debug)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
-pub enum MeshRouterError<E, Radio> {
-    Manager(NetworkManagerError<Radio>),
+pub enum MeshRouterError<E> {
+    Network(NetworkError),
     Node(E),
+    BufferFull,
 }
 
-impl<E, Radio> From<NetworkManagerError<Radio>> for MeshRouterError<E, Radio> {
-    fn from(err: NetworkManagerError<Radio>) -> Self {
-        MeshRouterError::Manager(err)
+impl<E> From<NetworkError> for MeshRouterError<E> {
+    fn from(err: NetworkError) -> Self {
+        MeshRouterError::Network(err)
     }
 }
-impl<E: fmt::Debug, Radio: fmt::Debug> fmt::Display for MeshRouterError<E, Radio> {
+
+impl<E: fmt::Debug> fmt::Display for MeshRouterError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // A simple implementation just delegates to the Debug output,
         // but you can customize this to be more human-readable.
@@ -33,49 +36,53 @@ impl<E: fmt::Debug, Radio: fmt::Debug> fmt::Display for MeshRouterError<E, Radio
 }
 
 // We bound E to also implement Error so the inner error is valid too.
-impl<E: core::error::Error, Radio: core::error::Error> core::error::Error
-    for MeshRouterError<E, Radio>
-{
-}
+impl<E: core::error::Error> core::error::Error for MeshRouterError<E> {}
 
-/// Mesh Router(MR) handles the user defined radio which implements MHNode, and a Network Manager,
+/// Mesh Router(MR) handles the user defined radio which implements MHNode, and a Network Layer,
 /// managing the logic necessary to send and receive packets, but the user does not have to think
 /// about how packets are received and sent on, if they are not for them.
 /// Handles the flow of packets
-pub struct MeshRouter<Node, Mac, const SIZE: usize, const LEN: usize>
+pub struct MeshRouter<Node, Mac, LL, NW, const SIZE: usize, const LEN: usize>
 where
     Node: MHNode<SIZE, LEN>,
     Mac: MacPolicy<Node, SIZE, LEN>,
+    LL: LinkLayer,
+    NW: NetworkLayer<SIZE>,
 {
     node: Node,
-    manager: NetworkManager<SIZE, LEN>,
+    nw: NW,
     mac_policy: Mac,
-    tx_queue: Vec<MHPacket<SIZE>, LEN>,
+    link_layer: LL,
+    tx_queue: TransmitBuffer<SIZE, LEN>,
 }
 
-impl<Node, Mac, const SIZE: usize, const LEN: usize> MeshRouter<Node, Mac, SIZE, LEN>
+impl<Node, Mac, LL, NW, const SIZE: usize, const LEN: usize>
+    MeshRouter<Node, Mac, LL, NW, SIZE, LEN>
 where
     Node: MHNode<SIZE, LEN>,
     Mac: MacPolicy<Node, SIZE, LEN>,
+    LL: LinkLayer,
+    NW: NetworkLayer<SIZE>,
 {
-    /// Takes ownership of a node and network manager, because this handles those
-    pub fn new(node: Node, manager: NetworkManager<SIZE, LEN>, mac_policy: Mac) -> Self {
+    /// Takes ownership of a node and network layer, because this handles those
+    pub fn new(node: Node, nw: NW, mac_policy: Mac, link_layer: LL) -> Self {
         Self {
             node,
-            manager,
+            nw,
             mac_policy,
-            tx_queue: Vec::new(),
+            link_layer,
+            tx_queue: TransmitBuffer::new(),
         }
     }
 
     pub fn queue_payload(
         &mut self,
-        payload: Vec<u8, SIZE>,
+        payload: &[u8],
         destination: u16,
-    ) -> Result<(), MeshRouterError<Node::Error, Node::RadioError>> {
+    ) -> Result<(), MeshRouterError<Node::Error>> {
         trace!("Queing payload ...");
-        let pkt = self.manager.queue_new_payload(payload, destination)?;
-        self.push_queue(pkt)?;
+        self.nw
+            .queue_payload(destination, payload, &mut self.tx_queue)?;
         Ok(())
     }
 
@@ -83,33 +90,28 @@ where
         self.tx_queue.capacity() - self.tx_queue.len()
     }
 
-    fn push_queue(
-        &mut self,
-        pkt: MHPacket<SIZE>,
-    ) -> Result<(), MeshRouterError<Node::Error, Node::RadioError>> {
-        self.tx_queue
-            .push(pkt)
-            .map_err(|_| MeshRouterError::Manager(NetworkManagerError::BufferFull))?;
-        Ok(())
+    pub fn hops_to_gw(&self) -> u8 {
+        self.nw.gw_hops()
     }
 
-    pub fn hops_to_gw(&self) -> u8 {
-        self.manager.get_gw_hops()
+    pub async fn run(&mut self) -> Result<Vec<MeshPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
+        todo!()
     }
 
     pub async fn tick(
         &mut self,
         rx_buf: &mut Node::ReceiveBuffer,
-    ) -> Result<Vec<MHPacket<SIZE>, LEN>, MeshRouterError<Node::Error, Node::RadioError>> {
-        if self.mac_policy.should_tx_heartbeat() {
+    ) -> Result<Vec<MeshPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
+        if self.mac_policy.should_tx_heartbeat()
+            && let Some(hb) = self.nw.build_heartbeat()
+        {
             trace!("SENDING OUT HEARTBEAT!!");
-            self.mac_policy.tx_heartbeat(self.manager.add_heartbeat()?);
+            self.mac_policy.tx_heartbeat(hb);
         }
 
-        let retransmission = self.manager.get_pending_transmissions();
-        for pkt in retransmission {
-            self.push_queue(pkt)?;
-        }
+        // TODO: retransmissions used to be driven from here via NetworkManager::get_pending_transmissions.
+        // That state now belongs to the LinkLayer; wire LL.tick-equivalent here when the LL
+        // retransmission API lands.
 
         let received_pkts = self
             .mac_policy
@@ -122,28 +124,27 @@ where
             // Compiler should reduce footprint of unecessary call
             None => return Ok(Vec::new()),
         };
-        let (to_forward, to_me) = self.manager.handle_packets(received_pkts)?;
-        self.mac_policy.set_gw_hops(self.manager.get_gw_hops());
-        trace!("[PKT_LOSS]|{}|", self.manager.packet_loss_ratio());
 
-        for pkt in to_forward {
-            // If buffer is full, break adding packets to it.
-            if self.tx_queue.push(pkt).is_err() {
-                error!("Tx queue is full, dropping packets ...");
-                break;
+        let mut to_me: Vec<MeshPacket<SIZE>, LEN> = Vec::new();
+        for pkt in received_pkts {
+            let outcome = self.nw.receive(pkt);
+            if let Some(fwd) = outcome.forward
+                && self.tx_queue.push(fwd).is_err()
+            {
+                error!("Tx queue is full, dropping forwarded packet ...");
+            }
+            if let Some(d) = outcome.deliver
+                && to_me.push(d).is_err()
+            {
+                error!("to_me buffer full, dropping delivered packet");
+            }
+            if let Some((pkt_id, dst)) = outcome.ack {
+                self.link_layer.send_ack(pkt_id, dst);
             }
         }
-        Ok(to_me)
-    }
 
-    // only for tests
-    #[doc(hidden)]
-    pub fn get_pending_count(&self) -> usize {
-        self.manager.get_pending_count()
-    }
-    #[doc(hidden)]
-    pub fn get_packet_loss_ratio(&self) -> f32 {
-        self.manager.packet_loss_ratio()
+        self.mac_policy.set_gw_hops(self.nw.gw_hops());
+        Ok(to_me)
     }
 }
 

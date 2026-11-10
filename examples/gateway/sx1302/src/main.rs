@@ -2,7 +2,7 @@ use libloragw_sys::{lgw_get_eui, lgw_version_info};
 use loragw::{
     cfg::Config, BoardConf, ChannelConf, Concentrator, Error, Running, RxPacket, RxRFConf, TxGain,
 };
-use must_hop::{lora::SensorData, node::MHPacket};
+use must_hop::{lora::SensorData, node::MeshPacket};
 use rppal::gpio::Gpio;
 use std::ffi::CStr;
 use std::thread;
@@ -134,10 +134,10 @@ fn main() {
                 _ => continue,
             };
             let raw_bytes = pkt.payload;
-            let mh_pack = match postcard::from_bytes::<heapless::Vec<MHPacket<40>, 5>>(&raw_bytes) {
+            let mh_pack = match postcard::from_bytes::<heapless::Vec<MeshPacket<40>, 5>>(&raw_bytes) {
                 Ok(packet) => packet,
                 Err(e) => {
-                    eprintln!("Error deserializing MHPacket: {:?}", e);
+                    eprintln!("Error deserializing MeshPacket: {:?}", e);
                     continue;
                 }
             };
@@ -156,5 +156,5 @@ fn main() {
         }
     }
 }
-// heapless::Vec<MHPacket<40>, 5>
+// heapless::Vec<MeshPacket<40>, 5>
 //

@@ -1,6 +1,6 @@
-use crate::node::MHNode;
+use crate::{node::MHNode, nw_layer::TransmitBuffer};
 
-use super::MHPacket;
+use super::MeshPacket;
 
 use heapless::Vec;
 
@@ -18,12 +18,12 @@ where
     fn run_mac(
         &mut self,
         node: &mut Node,
-        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        tx_queue: &mut TransmitBuffer<SIZE, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
-    ) -> impl Future<Output = Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error>>;
+    ) -> impl Future<Output = Result<Option<Vec<MeshPacket<SIZE>, LEN>>, Node::Error>>;
 
     fn should_tx_heartbeat(&mut self) -> bool;
-    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>);
+    fn tx_heartbeat(&mut self, hbt: MeshPacket<SIZE>);
 
     fn set_gw_hops(&mut self, gw_hops: u8);
 }

@@ -1,4 +1,4 @@
-/// Provides the MHPacket, describing how a packet looks like on this network.
+/// Provides the MeshPacket, describing how a packet looks like on this network.
 /// The MHNode describes necessary radio function for NM and MS to work. These should be
 /// implemented by the radio used on the specific device
 use core::future::Future;
@@ -12,7 +12,7 @@ pub mod lora;
 #[cfg(feature = "ble")]
 pub mod ble;
 
-use crate::{MHPacket, RxPacket};
+use crate::{MeshPacket, RxPacket};
 
 pub enum ConnectionType {
     Id(u8),
@@ -43,12 +43,12 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
     // network then?
     // type Recipient;
 
-    /// Takes an MHPacket with a size for the user defined payload. This will be sent to the
+    /// Takes an MeshPacket with a size for the user defined payload. This will be sent to the
     /// appropriate destination_id
     fn transmit(
         &mut self,
-        packets: &[MHPacket<SIZE>],
-        hb_pkt: Option<MHPacket<SIZE>>,
+        packets: &[MeshPacket<SIZE>],
+        hb_pkt: Option<MeshPacket<SIZE>>,
     ) -> impl Future<Output = Result<(), Self::Error>>;
     // TODO: Make the hb packet be a seperate parameter, such that the impl chooses how to handle it
 
@@ -58,7 +58,7 @@ pub trait MHNode<const SIZE: usize, const LEN: usize> {
         &mut self,
         conn: Self::Connection,
         rec_buf: &Self::ReceiveBuffer,
-    ) -> impl Future<Output = Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), Self::Error>>;
+    ) -> impl Future<Output = Result<(Vec<MeshPacket<SIZE>, LEN>, RxPacket), Self::Error>>;
 
     /// Make the node listen for a preample, giving a connection relative to the physical layer
     /// used. Optionally a duration to listen in can be given.

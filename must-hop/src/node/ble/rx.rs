@@ -58,6 +58,7 @@ impl<const PEERS: usize> EventHandler for RunConfig<PEERS> {
     fn on_ext_adv_reports(&self, it: bt_hci::param::LeExtAdvReportsIter) {
         for report in it.flatten() {
             if !self.peers.contains(&report.addr) {
+                debug!("Not in peers");
                 continue;
             }
             let status = report.event_kind.data_status();
@@ -74,14 +75,12 @@ impl<const PEERS: usize> EventHandler for RunConfig<PEERS> {
                             if res.buf.extend_from_slice(report.data).is_err() {
                                 error!("Report data was too big for the Reassembly buffer!");
                                 // TODO: Should probably take res here, because its useless now
-                                return;
+                                continue;
                             };
                             reassembled = res.buf;
                             &reassembled
                         }
-                        _other => {
-                            return;
-                        }
+                        _other => continue,
                     }
                 }
                 LeExtAdvDataStatus::IncompleteMoreExpected => {
@@ -91,7 +90,7 @@ impl<const PEERS: usize> EventHandler for RunConfig<PEERS> {
                             if res.buf.extend_from_slice(report.data).is_err() {
                                 error!("Report data was too big for the Reassembly buffer!");
                                 // TODO: Should probably take res here, because its useless now
-                                return;
+                                continue;
                             };
                             res
                         }
@@ -99,24 +98,24 @@ impl<const PEERS: usize> EventHandler for RunConfig<PEERS> {
                             Ok(buf) => Reassembly::new(report.addr, buf),
                             Err(_) => {
                                 error!("Could not create vec from report data!");
-                                return;
+                                continue;
                             }
                         },
                     };
                     *self.reassembly.borrow_mut() = Some(res);
-                    return;
+                    continue;
                 }
                 LeExtAdvDataStatus::Reserved => {
                     // TODO: What is this?
                     info!("Is in LeExtAdvDataStatus Reserved?");
-                    return;
+                    continue;
                 }
                 LeExtAdvDataStatus::IncompleteTruncated => {
                     // Discard the reassembly buffer for this address.
                     // Optionally log that we missed a fragment.
                     error!("Advertisements were truncated, what to do?");
                     let _ = self.reassembly.take();
-                    return;
+                    continue;
                 }
             };
             info!("report len={} from {:?}", report.data.len(), report.addr);

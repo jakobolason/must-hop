@@ -1,7 +1,7 @@
 use crate::policy::MacPolicy;
 use crate::{PacketType, node::MHNode};
 
-use super::MHPacket;
+use super::MeshPacket;
 
 #[cfg(feature = "in_std")]
 use embassy_time::{Duration, Instant};
@@ -56,7 +56,7 @@ impl NodeRole for GatewayPolicy {
 
 /// A RA MAC policy which sends when it has a packet to send, and listens otherwise
 pub struct RandomAccessMac<const SIZE: usize, NR: NodeRole> {
-    hbt_pkt: Option<MHPacket<SIZE>>,
+    hbt_pkt: Option<MeshPacket<SIZE>>,
     node_role: NR,
     gw_hops: u8,
     rebroadcast_hb: bool,
@@ -76,7 +76,7 @@ impl<const SIZE: usize, NR: NodeRole> RandomAccessMac<SIZE, NR> {
         }
     }
 
-    fn handle_hb(&mut self, pkt: &MHPacket<SIZE>) {
+    fn handle_hb(&mut self, pkt: &MeshPacket<SIZE>) {
         let id = (pkt.source_id, pkt.packet_id);
 
         // If we haven't flooded this specific heartbeat yet
@@ -120,22 +120,22 @@ where
         }
     }
 
-    fn tx_heartbeat(&mut self, hbt: MHPacket<SIZE>) {
+    fn tx_heartbeat(&mut self, hbt: MeshPacket<SIZE>) {
         self.hbt_pkt = Some(hbt);
     }
 
     async fn run_mac(
         &mut self,
         node: &mut Node,
-        tx_queue: &mut Vec<MHPacket<SIZE>, LEN>,
+        tx_queue: &mut Vec<MeshPacket<SIZE>, LEN>,
         rx_buffer: &mut Node::ReceiveBuffer,
-    ) -> Result<Option<Vec<MHPacket<SIZE>, LEN>>, Node::Error> {
+    ) -> Result<Option<Vec<MeshPacket<SIZE>, LEN>>, Node::Error> {
         if !tx_queue.is_empty() || self.hbt_pkt.is_some() {
             node.transmit(tx_queue, self.hbt_pkt.take()).await?;
             tx_queue.clear();
         }
         match node
-            .listen(rx_buffer, Some(core::time::Duration::from_secs(1)))
+            .listen(rx_buffer, Some(core::time::Duration::from_secs(5)))
             .await
         {
             Ok(conn) => match node.receive(conn, rx_buffer).await {

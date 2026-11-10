@@ -1,7 +1,7 @@
 use crate::node::RxPacket;
 
 /// This contains node implementations for Lora
-use super::{MHNode, MHPacket};
+use super::{MHNode, MeshPacket};
 use lora_modulation::BaseBandModulationParams;
 use lora_phy::mod_params::{
     Bandwidth, CodingRate, ModulationParams, PacketParams, SpreadingFactor,
@@ -198,7 +198,7 @@ where
     type RadioError = RadioError;
 
     /// Slices up packets into bytes and transmits, does not call `lora.sleep`
-    async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), RadioError> {
+    async fn transmit(&mut self, packets: &[MeshPacket<SIZE>]) -> Result<(), RadioError> {
         let mut buffer = [0u8; TRANSMISSION_BUFFER];
         let used_slice = match to_slice(&packets, &mut buffer) {
             Ok(slice) => slice,
@@ -238,7 +238,7 @@ where
         &mut self,
         conn: Result<(u8, PacketStatus), RadioError>,
         rec_buf: &[u8; TRANSMISSION_BUFFER],
-    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, RxPacket), RadioError> {
+    ) -> Result<(Vec<MeshPacket<SIZE>, LEN>, RxPacket), RadioError> {
         // First we check if we actually got something
         let rx_hardware_timestamp = match self.done_instant {
             Some(ins) => ins,
@@ -258,7 +258,7 @@ where
 
         // Try to unpack the buffer into expected packet
         let valid_data = &rec_buf[..len as usize];
-        let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(valid_data) {
+        let packets = match from_bytes::<Vec<MeshPacket<SIZE>, LEN>>(valid_data) {
             Ok(packet) => packet,
             Err(e) => {
                 error!("Deserialization failed: {:?}", e);

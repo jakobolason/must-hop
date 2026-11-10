@@ -1,7 +1,7 @@
 use embassy_time::Instant;
 use heapless::Vec;
 use must_hop::{
-    MHNode, MHPacket, RxPacket,
+    MHNode, MeshPacket, RxPacket,
     mesh_router::MeshRouter,
     network_manager::{NetworkManager, NetworkManagerError},
     policy::ra::{GatewayPolicy, NodePolicy, RandomAccessMac},
@@ -19,7 +19,7 @@ pub struct SimulationEnv<const SIZE: usize> {
     pub topology: HashMap<u16, std::vec::Vec<u16>>,
 
     /// Each node's personal receiving buffer (their "inbox")
-    pub inboxes: HashMap<u16, std::vec::Vec<MHPacket<SIZE>>>,
+    pub inboxes: HashMap<u16, std::vec::Vec<MeshPacket<SIZE>>>,
 }
 
 type Senv = Arc<Mutex<SimulationEnv<SIZE>>>;
@@ -60,7 +60,7 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
     type Connection = ();
     type ReceiveBuffer = ();
 
-    async fn transmit(&mut self, packets: &[MHPacket<SIZE>]) -> Result<(), Self::Error> {
+    async fn transmit(&mut self, packets: &[MeshPacket<SIZE>]) -> Result<(), Self::Error> {
         let mut env = self.env.lock().unwrap();
 
         // Find all nodes that are in range of THIS transmitting node
@@ -81,9 +81,9 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
         &mut self,
         _conn: Self::Connection,
         _receiving_buffer: &(),
-    ) -> Result<(heapless::Vec<MHPacket<SIZE>, LEN>, RxPacket), Self::Error> {
+    ) -> Result<(heapless::Vec<MeshPacket<SIZE>, LEN>, RxPacket), Self::Error> {
         let mut env = self.env.lock().unwrap();
-        let mut rec_vec: heapless::Vec<MHPacket<SIZE>, LEN> = heapless::Vec::new();
+        let mut rec_vec: heapless::Vec<MeshPacket<SIZE>, LEN> = heapless::Vec::new();
 
         // Only look at OUR specific inbox
         if let Some(my_inbox) = env.inboxes.get_mut(&self.node_id) {

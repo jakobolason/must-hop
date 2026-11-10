@@ -19,8 +19,10 @@ pub use crate::{
 };
 
 pub mod channels;
+pub mod ll;
 pub mod mesh_router;
 pub mod network_manager;
+pub mod nw_layer;
 pub mod policy;
 
 use embassy_time::Instant;
@@ -51,10 +53,30 @@ pub enum PacketType {
     HeartBeat,
 }
 
-/// MHPacket defines the package sent around the network
+/// # RELEGATED
+/// MeshPacket defines the package sent around the network
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
-pub struct MHPacket<const SIZE: usize> {
+pub struct MeshPacket<const SIZE: usize> {
+    /// Destination identifier
+    pub destination_id: u16,
+    pub packet_type: PacketType,
+    pub packet_id: u16,
+    pub source_id: u16,
+    /// Your specificed data wanting to send
+    // (DE)serialize is only available up to 32 bytes
+    pub payload: Vec<u8, SIZE>,
+    /// The amount of hops this package has been on
+    // TODO: Never used, should it be deleted?
+    hop_count: u8,
+    /// Amount of hops the current node has to GW
+    pub hop_to_gw: u8,
+}
+
+/// Packet defines the package sent around the network
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
+pub struct Packet<const SIZE: usize> {
     /// Destination identifier
     pub destination_id: u16,
     pub packet_type: PacketType,

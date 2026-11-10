@@ -1,4 +1,4 @@
-use super::{MHPacket, PacketType};
+use super::{MeshPacket, PacketType};
 use core::cmp::{max, min};
 
 use crate::log_compat::{debug, error, trace, warn};
@@ -12,7 +12,7 @@ use postcard::Error as PostError;
 #[cfg_attr(not(feature = "in_std"), derive(defmt::Format))]
 struct PendingPacket<const SIZE: usize> {
     /// We keep the whole packet so it can be retransmitted
-    packet: MHPacket<SIZE>,
+    packet: MeshPacket<SIZE>,
     /// To know if a timeout has occurred
     timeout: Instant,
     /// And don't retry too many times
@@ -85,7 +85,7 @@ pub enum PayloadType {
 }
 
 pub const GW_SRC_ID: usize = 1;
-pub const BROADCAST_ID: usize = 1;
+pub const BROADCAST_ID: usize = 0;
 
 /// Maintains record of packages sent, to ensure that they are received.
 /// Also handles that packets from other nodes should be sent on
@@ -118,7 +118,17 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         // NOTE: maybe the gw_hops should be set to either 0, if gw_id_given is true, 255 otherwise?
         let (source_id, gw_hops) = match node_id {
             NodeId::Gw => (GW_SRC_ID as u16, 0u8),
-            NodeId::Node(id) => (id, 255u8),
+            NodeId::Node(id) => {
+                if id == 0u16 {
+                    error!("You are assigning a node to the broadcast id!");
+                    (2, 255u8)
+                } else if id == GW_SRC_ID as u16 {
+                    error!("You are assigning a node to the GW source id!");
+                    (2, 255u8)
+                } else {
+                    (id, 255u8)
+                }
+            }
         };
 
         Self {
@@ -150,9 +160,9 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u16,
-    ) -> Result<MHPacket<SIZE>, PostError> {
+    ) -> Result<MeshPacket<SIZE>, PostError> {
         self.next_packet_id += 1;
-        Ok(MHPacket {
+        Ok(MeshPacket {
             destination_id: destination,
             packet_type: PacketType::Data,
             packet_id: self.next_packet_id,
@@ -168,14 +178,14 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         self.pending_acks.len()
     }
 
-    pub fn get_pending_transmissions(&mut self) -> Vec<MHPacket<SIZE>, LEN> {
+    pub fn get_pending_transmissions(&mut self) -> Vec<MeshPacket<SIZE>, LEN> {
         self.get_pending_transmissions_at(Instant::now())
     }
 
-    /// This removes retried packets, and checks the pending acks list. Given the data payload in bytes, it is made into a MHPacket
+    /// This removes retried packets, and checks the pending acks list. Given the data payload in bytes, it is made into a MeshPacket
     /// and added to internal acks list. It returns a list of packets to send, which includes the packet with the payload provided.
     /// But it also returns all packets which haven't been ACK'ed before it's timeout.
-    pub fn get_pending_transmissions_at(&mut self, curr_time: Instant) -> Vec<MHPacket<SIZE>, LEN> {
+    pub fn get_pending_transmissions_at(&mut self, curr_time: Instant) -> Vec<MeshPacket<SIZE>, LEN> {
         // Clean up packets with too many retries
         // TODO: Shuold switch SF if this happens
         let prev_len = self.pending_acks.len();
@@ -186,7 +196,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         debug!("pkts lost: {}", self.pkts_lost);
 
         // Look into packages with expired timeouts,
-        let to_send: Vec<MHPacket<SIZE>, LEN> = self
+        let to_send: Vec<MeshPacket<SIZE>, LEN> = self
             .pending_acks
             .iter_mut()
             .filter(|p| p.timeout < curr_time)
@@ -204,7 +214,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     /// Adds the packet to the internal list
     fn add_packet<Radio>(
         &mut self,
-        packet: MHPacket<SIZE>,
+        packet: MeshPacket<SIZE>,
     ) -> Result<(), NetworkManagerError<Radio>> {
         let curr_time = Instant::now();
         let pkt_timout = curr_time + Duration::from_millis(self.timeout_ms as u64);
@@ -226,7 +236,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         &mut self,
         payload: Vec<u8, SIZE>,
         destination: u16,
-    ) -> Result<MHPacket<SIZE>, NetworkManagerError<Radio>> {
+    ) -> Result<MeshPacket<SIZE>, NetworkManagerError<Radio>> {
         let new_pkt = self.new_packet(payload, destination)?;
         self.add_packet(new_pkt.clone())?;
         Ok(new_pkt)
@@ -236,7 +246,8 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         self.gw_hops
     }
 
-    fn check_pend_ack(&mut self, pkt: &MHPacket<SIZE>) -> bool {
+    fn check_pend_ack(&mut self, pkt: &MeshPacket<SIZE>) -> bool {
+        debug!("pkt is type {:?}", pkt.packet_type);
         if let Some(our_packet_index) = self.pending_acks.iter().position(|p| {
             // shortcircuit here
             p.packet.packet_id == pkt.packet_id
@@ -245,6 +256,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
             // TODO: Shouldn't this be flipped? I don't think so
                         && pkt.destination_id == p.packet.source_id))
         }) {
+            debug!("Got an ACK(?)");
             // Then remove it from our vec, and return
             self.pkts_acked += 1;
             self.pending_acks.remove(our_packet_index);
@@ -258,10 +270,12 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     /// if none are required, otherwise returns none
     fn receive_packet<Radio>(
         &mut self,
-        pkt: MHPacket<SIZE>,
-    ) -> Result<Option<(MHPacket<SIZE>, PayloadType)>, NetworkManagerError<Radio>> {
+        pkt: MeshPacket<SIZE>,
+    ) -> Result<Option<(MeshPacket<SIZE>, PayloadType)>, NetworkManagerError<Radio>> {
+        debug!("Looking into pkt: {:?}\nself: {}", pkt, self.source_id);
         if pkt.source_id == self.source_id {
             // We return None no matter if its our own or not
+            debug!("Pkt from ourselves!");
             let _ = self.check_pend_ack(&pkt);
             return Ok(None);
         }
@@ -296,14 +310,17 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         // FIXME: This shouldn't be necessary
         // Never send an ACK on
         if pkt.packet_type == PacketType::Ack {
+            debug!("Got an ACK");
             return Ok(None);
         }
         // So we aren't waiting for pkt, perhaps we've seen it before?
         if self.recent_seen.contains((pkt.source_id, pkt.packet_id)) {
-            // We do not ACK an ACK
-            if pkt.packet_type == PacketType::Ack {
-                return Ok(None);
-            }
+            debug!("Pkt was seen before");
+            // // We do not ACK an ACK
+            // if pkt.packet_type == PacketType::Ack {
+            //     debug!("Got an ACK");
+            //     return Ok(None);
+            // }
             // A duplicate which we should ACK, but not care about
             return Ok(Some((pkt, PayloadType::ACK)));
         }
@@ -342,6 +359,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         } else {
             // If this is actually for us, then it is probably a command that the underlying app
             // wants, so this gives it back
+            debug!("--Packet is to us!");
             Ok(Some((pkt, PayloadType::Command)))
         }
     }
@@ -350,11 +368,11 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
     /// other list is a list of packets to the user
     pub fn handle_packets<Radio>(
         &mut self,
-        pkts: Vec<MHPacket<SIZE>, LEN>,
-    ) -> Result<(Vec<MHPacket<SIZE>, LEN>, Vec<MHPacket<SIZE>, LEN>), NetworkManagerError<Radio>>
+        pkts: Vec<MeshPacket<SIZE>, LEN>,
+    ) -> Result<(Vec<MeshPacket<SIZE>, LEN>, Vec<MeshPacket<SIZE>, LEN>), NetworkManagerError<Radio>>
     {
-        let mut to_send: Vec<MHPacket<SIZE>, LEN> = Vec::new();
-        let mut commands: Vec<MHPacket<SIZE>, LEN> = Vec::new();
+        let mut to_send: Vec<MeshPacket<SIZE>, LEN> = Vec::new();
+        let mut commands: Vec<MeshPacket<SIZE>, LEN> = Vec::new();
         for pkt in pkts {
             let (packet, ptype) = match self.receive_packet::<Radio>(pkt) {
                 Ok(Some(p)) => p,
@@ -373,14 +391,16 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 PayloadType::Command => {
                     // Then we give it back to the app, but also send an ACK back to the sender
                     commands.push(packet.clone()).map_err(err_closure)?;
+                    // TODO: Is this necessary?
                     if packet.packet_type == PacketType::Data {
+                        debug!("Adding ACK to to_send");
                         to_send
-                            .push(MHPacket {
+                            .push(MeshPacket {
                                 destination_id: packet.source_id,
                                 packet_type: PacketType::Ack,
                                 packet_id: packet.packet_id,
                                 source_id: self.source_id,
-                                payload: Vec::from_slice(&[0u8])
+                                payload: Vec::from_slice(&[])
                                     .map_err(|_| NetworkManagerError::BufferFull)?,
                                 hop_count: 0,
                                 hop_to_gw: self.gw_hops,
@@ -390,7 +410,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                 }
                 // Mainly here to stop repeating packets TODO: Check if this ever happens
                 PayloadType::ACK => to_send
-                    .push(MHPacket {
+                    .push(MeshPacket {
                         destination_id: packet.source_id,
                         packet_type: PacketType::Ack,
                         packet_id: packet.packet_id,
@@ -402,7 +422,7 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
                     })
                     .map_err(err_closure)?,
                 PayloadType::HeartBeat => to_send
-                    .push(MHPacket {
+                    .push(MeshPacket {
                         destination_id: packet.destination_id,
                         packet_type: PacketType::HeartBeat,
                         packet_id: packet.packet_id,
@@ -417,14 +437,14 @@ impl<const SIZE: usize, const LEN: usize> NetworkManager<SIZE, LEN> {
         Ok((to_send, commands))
     }
 
-    pub fn add_heartbeat<Radio>(&mut self) -> Result<MHPacket<SIZE>, NetworkManagerError<Radio>> {
+    pub fn add_heartbeat<Radio>(&mut self) -> Result<MeshPacket<SIZE>, NetworkManagerError<Radio>> {
         self.next_packet_id += 1;
         self.recent_seen.push((self.source_id, self.next_packet_id));
         // trace!(
         //     "----------- Sending Heartbeat with packet id: {} -------------",
         //     self.next_packet_id
         // );
-        Ok(MHPacket {
+        Ok(MeshPacket {
             destination_id: 0, // broadcast id
             packet_type: PacketType::HeartBeat,
             packet_id: self.next_packet_id,
@@ -443,7 +463,7 @@ mod tests {
 
     // A helper to make a dummy manager for testing
     fn setup_manager() -> NetworkManager<40, 5> {
-        NetworkManager::new(2, 10, 3, None)
+        NetworkManager::new(NodeId::Node(2), 10, 3)
     }
 
     #[test]
@@ -476,7 +496,7 @@ mod tests {
         assert_eq!(manager.pkts_sent, 1);
         assert_eq!(manager.pkts_acked, 0);
         // Simulate receiving an ACK from node 2
-        let ack_pkt = MHPacket {
+        let ack_pkt = MeshPacket {
             destination_id: 2, // Back to us
             packet_type: PacketType::Ack,
             packet_id: 1, // Matches the ID of the packet we just sent
@@ -510,7 +530,7 @@ mod tests {
         assert_eq!(manager.pkts_sent, 0);
 
         // Simulate a packet coming from node 3, bound for the GW
-        let incoming_pkt = MHPacket {
+        let incoming_pkt = MeshPacket {
             destination_id: 1, // GW Bound
             packet_type: PacketType::Data,
             packet_id: 42,
@@ -544,7 +564,7 @@ mod tests {
     #[test]
     fn packet_loss_ratio() {
         // use timeout of 5 to test retx out
-        let mut manager = NetworkManager::<40, 5>::new(4, 0, 5, None);
+        let mut manager = NetworkManager::<40, 5>::new(NodeId::Node(4), 0, 5);
         let payload = Vec::from_slice(&[1, 2, 3]).unwrap();
         manager.gw_hops = 2;
 
@@ -559,7 +579,7 @@ mod tests {
         assert_eq!(manager.pkts_sent, 1);
         assert_eq!(manager.pkts_acked, 0);
         // Simulate receiving an ACK from node 2
-        let ack_pkt = MHPacket {
+        let ack_pkt = MeshPacket {
             destination_id: 1, // Back to us
             packet_type: PacketType::Data,
             packet_id: 1, // Matches the ID of the packet we just sent
@@ -580,7 +600,7 @@ mod tests {
         assert_eq!(manager.pkts_acked, 1);
 
         // now simulate another packet coming downstream
-        let incoming_pkt = MHPacket {
+        let incoming_pkt = MeshPacket {
             destination_id: 1, // GW Bound
             packet_type: PacketType::Data,
             packet_id: 42,
@@ -610,7 +630,7 @@ mod tests {
         assert_eq!(manager.pkts_acked, 1);
 
         // And now, upstream neighbour hears us
-        let ack_pkt = MHPacket {
+        let ack_pkt = MeshPacket {
             destination_id: 1, // Back to us
             packet_type: PacketType::Data,
             packet_id: 42, // Matches the ID of the packet we just sent

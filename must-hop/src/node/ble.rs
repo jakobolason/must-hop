@@ -1,5 +1,5 @@
 use crate::{
-    MHPacket, RxPacket,
+    MeshPacket, RxPacket,
     log_compat::{debug, error, info},
 };
 use bt_hci::param::BdAddr;
@@ -118,8 +118,8 @@ where
     // place?
     async fn transmit(
         &mut self,
-        packets: &[MHPacket<SIZE>],
-        hb_pkt: Option<MHPacket<SIZE>>,
+        packets: &[MeshPacket<SIZE>],
+        hb_pkt: Option<MeshPacket<SIZE>>,
     ) -> Result<(), Self::Error> {
         const { assert!(LEN * (SIZE + OVERHEAD) <= MAX_ADV) }
         let mut peri = self.stack.peripheral();
@@ -162,6 +162,9 @@ where
                 let mut handles = AdvertisementSet::handles(sets);
                 peri.advertise_ext(sets, &mut handles).await
             }
+            // FIXME: This impl of heartbeat carries with it, a large uncertainty as to when the
+            // periodic beacon actually will be sent. Its crucial to the protocol that this is sent
+            // as quickly as possibly, so this is a big problem.
             Some(hb_pkt) => {
                 // Make heartbeat data embedded into periodic adv
                 let mut scratch = [0u8; MAX_ADV];
@@ -186,7 +189,7 @@ where
                     min_interval: self.per_params.min_interval,
                     max_interval: self.per_params.max_interval,
                     include_tx_power: self.per_params.include_tx_power,
-                    data: &adv_data[..data_len],
+                    data: &per_data[..data_len],
                 };
 
                 peri.per_adv_ext(&adv_set, per_params).await
@@ -200,8 +203,10 @@ where
                 return Err(e);
             }
         };
-        // TODO: For how long should we advertise?
-        Timer::after(Duration::from_secs(1)).await;
+        let events = self.adv_params.max_events.unwrap_or(1) as u32;
+        let wait =
+            self.adv_params.interval_max * events + Duration::from_millis(10 * events as u64 + 30);
+        Timer::after(wait).await;
 
         // NOTE: When we return, the peripheral is dropped and it should stop advertising
         Ok(())
@@ -211,10 +216,10 @@ where
         &mut self,
         conn: Self::Connection,
         _rec_buf: &Self::ReceiveBuffer,
-    ) -> Result<(heapless::Vec<crate::MHPacket<SIZE>, LEN>, crate::RxPacket), Self::Error> {
+    ) -> Result<(heapless::Vec<crate::MeshPacket<SIZE>, LEN>, crate::RxPacket), Self::Error> {
         // Basically just take the connection with the data, and return that
         let payload = conn.data;
-        let packets = match from_bytes::<Vec<MHPacket<SIZE>, LEN>>(&payload) {
+        let packets = match from_bytes::<Vec<MeshPacket<SIZE>, LEN>>(&payload) {
             Ok(packet) => packet,
             Err(e) => {
                 error!("Deserialization failed: {:?}", e);
@@ -268,6 +273,7 @@ where
             Either::Second(data) => {
                 // The scan was successfull, so we return the received data
                 // NOTE: This is a signal, so only the first advertisement caught is taken
+                info!("Got a packet!");
                 session.stop().await;
                 return Ok(data);
             }
