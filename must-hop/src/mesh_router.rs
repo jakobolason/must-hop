@@ -5,7 +5,7 @@ use defmt::{error, trace};
 use log::{error, trace};
 
 use crate::{
-    ll::LinkLayer,
+    ll::{LinkLayer, LinkVerdict},
     nw_layer::{NetworkError, NetworkLayer, TransmitBuffer},
     policy::MacPolicy,
 };
@@ -38,7 +38,7 @@ impl<E: fmt::Debug> fmt::Display for MeshRouterError<E> {
 // We bound E to also implement Error so the inner error is valid too.
 impl<E: core::error::Error> core::error::Error for MeshRouterError<E> {}
 
-/// Mesh Router(MR) handles the user defined radio which implements MHNode, and a Network Layer,
+/// Mesh Router(MR) handles the user defined radio which implements MHNode, a Link Layer controller and a Network Layer,
 /// managing the logic necessary to send and receive packets, but the user does not have to think
 /// about how packets are received and sent on, if they are not for them.
 /// Handles the flow of packets
@@ -46,7 +46,7 @@ pub struct MeshRouter<Node, Mac, LL, NW, const SIZE: usize, const LEN: usize>
 where
     Node: MHNode<SIZE, LEN>,
     Mac: MacPolicy<Node, SIZE, LEN>,
-    LL: LinkLayer,
+    LL: LinkLayer<SIZE>,
     NW: NetworkLayer<SIZE>,
 {
     node: Node,
@@ -61,7 +61,7 @@ impl<Node, Mac, LL, NW, const SIZE: usize, const LEN: usize>
 where
     Node: MHNode<SIZE, LEN>,
     Mac: MacPolicy<Node, SIZE, LEN>,
-    LL: LinkLayer,
+    LL: LinkLayer<SIZE>,
     NW: NetworkLayer<SIZE>,
 {
     /// Takes ownership of a node and network layer, because this handles those
@@ -81,8 +81,14 @@ where
         destination: u16,
     ) -> Result<(), MeshRouterError<Node::Error>> {
         trace!("Queing payload ...");
+        let before = self.tx_queue.len();
         self.nw
             .queue_payload(destination, payload, &mut self.tx_queue)?;
+        // Any packets NW just queued need to be tracked by the link layer for
+        // ACK/retransmission.
+        for pkt in &self.tx_queue[before..] {
+            self.link_layer.on_tx(pkt);
+        }
         Ok(())
     }
 
@@ -94,10 +100,6 @@ where
         self.nw.gw_hops()
     }
 
-    pub async fn run(&mut self) -> Result<Vec<MeshPacket<SIZE>, LEN>, MeshRouterError<Node::Error>> {
-        todo!()
-    }
-
     pub async fn tick(
         &mut self,
         rx_buf: &mut Node::ReceiveBuffer,
@@ -106,12 +108,12 @@ where
             && let Some(hb) = self.nw.build_heartbeat()
         {
             trace!("SENDING OUT HEARTBEAT!!");
+            self.link_layer.on_tx(&hb);
             self.mac_policy.tx_heartbeat(hb);
         }
 
-        // TODO: retransmissions used to be driven from here via NetworkManager::get_pending_transmissions.
-        // That state now belongs to the LinkLayer; wire LL.tick-equivalent here when the LL
-        // retransmission API lands.
+        // Link layer refills the tx queue with anything whose ACK timeout fired
+        self.link_layer.poll_retransmissions(&mut self.tx_queue);
 
         let received_pkts = self
             .mac_policy
@@ -127,11 +129,17 @@ where
 
         let mut to_me: Vec<MeshPacket<SIZE>, LEN> = Vec::new();
         for pkt in received_pkts {
+            // Give the link layer first look so it can consume ACKs for packets
+            // we're still tracking.
+            if self.link_layer.on_rx(&pkt) == LinkVerdict::Absorbed {
+                continue;
+            }
             let outcome = self.nw.receive(pkt);
-            if let Some(fwd) = outcome.forward
-                && self.tx_queue.push(fwd).is_err()
-            {
-                error!("Tx queue is full, dropping forwarded packet ...");
+            if let Some(fwd) = outcome.forward {
+                self.link_layer.on_tx(&fwd);
+                if self.tx_queue.push(fwd).is_err() {
+                    error!("Tx queue is full, dropping forwarded packet ...");
+                }
             }
             if let Some(d) = outcome.deliver
                 && to_me.push(d).is_err()
@@ -139,7 +147,11 @@ where
                 error!("to_me buffer full, dropping delivered packet");
             }
             if let Some((pkt_id, dst)) = outcome.ack {
-                self.link_layer.send_ack(pkt_id, dst);
+                let ack = self.nw.build_ack(pkt_id, dst);
+                self.link_layer.on_tx(&ack);
+                if self.tx_queue.push(ack).is_err() {
+                    error!("Tx queue is full, dropping ACK ...");
+                }
             }
         }
 

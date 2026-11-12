@@ -3,9 +3,12 @@
 use embassy_time::Instant;
 use must_hop::{
     MHNode, MeshPacket, RxPacket,
-    ll::LinkLayer,
+    ll::{LinkLayer, LinkVerdict},
     mesh_router::MeshRouter,
-    nw_layer::prototype::{BROADCAST_ID, GW_SRC_ID, GradientRouter},
+    nw_layer::{
+        TransmitBuffer,
+        prototype::{BROADCAST_ID, GW_SRC_ID, GradientRouter},
+    },
     policy::ra::{GatewayPolicy, NodePolicy, RandomAccessMac},
 };
 use std::sync::{Arc, Mutex};
@@ -131,10 +134,12 @@ impl<const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for MockRadio<SIZE> 
 /// for now it swallows ACK requests so tests can run without retransmission.
 struct NoopLL;
 
-impl LinkLayer for NoopLL {
-    fn send_ack(&mut self, _packet_id: u16, _destination: u16) {}
-    fn send_packets(&mut self, _packets: &[u8]) {}
-    fn receive_packets(&mut self, _packets: &[u8]) {}
+impl<const S: usize> LinkLayer<S> for NoopLL {
+    fn on_tx(&mut self, _pkt: &MeshPacket<S>) {}
+    fn on_rx(&mut self, _pkt: &MeshPacket<S>) -> LinkVerdict {
+        LinkVerdict::PassToNw
+    }
+    fn poll_retransmissions<const CAP: usize>(&mut self, _buffer: &mut TransmitBuffer<S, CAP>) {}
 }
 
 type TestRouter = MeshRouter<

@@ -150,7 +150,16 @@ impl MHNode<SIZE, LEN> for GWNode {
     // TODO: Remove this, can't find the difference between this and just Error
     type RadioError = loragw::Error;
 
-    async fn transmit(&mut self, packets: &[MeshPacket<SIZE>]) -> Result<(), Self::Error> {
+    async fn transmit(
+        &mut self,
+        packets: &[MeshPacket<SIZE>],
+        hb_pkt: Option<MeshPacket<SIZE>>,
+    ) -> Result<(), Self::Error> {
+        let packets = if let Some(hb_pkt) = hb_pkt {
+            &[*packets, hb_pkt]
+        } else {
+            packets
+        };
         let (tx_pkt, payload_size) = self.to_tx_packet(packets)?;
         while self.radio.transmit_status()? != TxStatus::Free {
             embassy_time::Timer::after(Duration::from_millis(5)).await;

@@ -242,6 +242,18 @@ impl<const SIZE: usize> NetworkLayer<SIZE> for GradientRouter<SIZE> {
     fn gw_hops(&self) -> u8 {
         self.gw_hops
     }
+
+    fn build_ack(&self, packet_id: u16, destination: u16) -> MeshPacket<SIZE> {
+        MeshPacket {
+            destination_id: destination,
+            packet_type: PacketType::Ack,
+            packet_id,
+            source_id: self.source_id,
+            payload: Vec::new(),
+            hop_count: 0,
+            hop_to_gw: self.gw_hops,
+        }
+    }
 }
 
 #[cfg(test)]

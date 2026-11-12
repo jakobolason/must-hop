@@ -99,7 +99,7 @@ impl<'a, C, P: PacketPool> BleNode<'a, C, P> {
 }
 
 const OVERHEAD: usize = 0;
-const NAME: &[u8] = b"ESP32";
+// const NAME: &[u8] = b"ESP32";
 
 impl<'a, C, P, const SIZE: usize, const LEN: usize> MHNode<SIZE, LEN> for BleNode<'a, C, P>
 where

@@ -57,7 +57,7 @@ pub struct MeshService<Node, Mac, LL, NW, const S: usize, const LEN: usize, cons
 where
     Node: MHNode<S, LEN>,
     Mac: MacPolicy<Node, S, LEN>,
-    LL: LinkLayer,
+    LL: LinkLayer<S>,
     NW: NetworkLayer<S>,
 {
     router: MeshRouter<Node, Mac, LL, NW, S, LEN>,
@@ -126,7 +126,7 @@ impl<Node, Mac, LL, NW, const S: usize, const LEN: usize, const N: usize>
 where
     Node: MHNode<S, LEN>,
     Mac: MacPolicy<Node, S, LEN>,
-    LL: LinkLayer,
+    LL: LinkLayer<S>,
     NW: NetworkLayer<S>,
 {
     pub async fn run(mut self) -> ! {
@@ -173,7 +173,7 @@ pub fn init<Node, Mac, LL, NW, const S: usize, const LEN: usize, const N: usize>
 where
     Node: MHNode<S, LEN>,
     Mac: MacPolicy<Node, S, LEN>,
-    LL: LinkLayer,
+    LL: LinkLayer<S>,
     NW: NetworkLayer<S>,
 {
     let state: &'static MeshState<S, N> = state;

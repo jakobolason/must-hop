@@ -82,4 +82,9 @@ pub trait NetworkLayer<const SIZE: usize> {
     /// Current hop count to the gateway. Used by MAC policies that need the
     /// gradient (e.g. TDMA slot assignment).
     fn gw_hops(&self) -> u8;
+
+    /// Build an ACK packet acknowledging `packet_id` back to `destination`.
+    /// The link layer asks for this via [`RxOutcome::ack`] — construction
+    /// lives on NW because `source_id` and `hop_to_gw` are NW's state.
+    fn build_ack(&self, packet_id: u16, destination: u16) -> MeshPacket<SIZE>;
 }

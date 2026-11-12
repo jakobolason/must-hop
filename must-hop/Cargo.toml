@@ -60,6 +60,9 @@ in_std = [
 debug = ["embedded-hal"]
 lora = ["lora-phy", "lora-modulation"]
 ble = ["trouble-host", "bt-hci"]
+# Enable packet-loss counters on link-layer implementations. Off by default
+# for memory-constrained builds.
+ll-stats = []
 
 [dev-dependencies]
 tokio = { version = "1.52.3", features = ["macros", "rt", "time"] }
